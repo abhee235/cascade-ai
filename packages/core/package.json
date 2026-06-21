@@ -1,0 +1,17 @@
+{
+  "name": "@cascade/core",
+  "version": "0.0.0",
+  "description": "Cascade headless agent engine. No vscode, no DOM — drivable by any frontend.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  }
+}

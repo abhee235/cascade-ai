@@ -1,0 +1,66 @@
+{
+  "name": "@cascade/extension",
+  "displayName": "Cascade",
+  "description": "Cascade — an Ollama-native AI coding agent.",
+  "version": "0.0.0",
+  "private": true,
+  "publisher": "cascade-dev",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["AI", "Chat", "Other"],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "cascade",
+          "title": "Cascade",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "cascade": [
+        {
+          "id": "cascade.view",
+          "name": "Cascade",
+          "type": "webview"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Cascade",
+      "properties": {
+        "cascade.model": {
+          "type": "string",
+          "default": "qwen2.5-coder",
+          "description": "Ollama model to use."
+        },
+        "cascade.baseUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:11434",
+          "description": "Ollama OpenAI-compatible base URL."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch"
+  },
+  "dependencies": {
+    "@cascade/core": "*"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "esbuild": "^0.23.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.5.0"
+  }
+}
