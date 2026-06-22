@@ -1,56 +1,46 @@
 // core/session.ts — the frontend-agnostic entry point. — ADR-018.
 //
-// A CascadeSession is the ONLY thing a frontend touches. The extension calls createSession()
-// in-process; the web app talks to a server that calls createSession() and relays ActivityEvents
-// over WebSocket. Either way the contract is identical.
-//
-// The session wrapper around the query loop.
-//
-// The session depends on a ModelProvider (injected) — NOT on Ollama/OpenAI/etc. (ADR-020). The
-// frontend builds the provider via createProvider() and passes it in.
-//
-// Phase 1: submit() makes one non-streaming completion and emits the reply as a final `message`.
-// Activity-first (ADR-013): status while waiting, then the whole answer. No history yet (Phase 3),
-// no tools yet (Phase 4).
 
-import type { ActivityEvent, ContentBlock } from './protocol'
+// Phase 3: the session now keeps conversation HISTORY (a Message[]) and a system prompt. The model is
+// stateless — "memory" is just us resending the whole transcript every turn. submit() appends the user
+// turn, streams the reply (forwarding deltas live — ADR-013), then appends the assistant turn.
+
+import type { ActivityEvent, ContentBlock, Message } from './protocol'
 import type { ModelProvider } from './llm/provider'
+import { buildSystemPrompt } from './agent/systemPrompt'
 
 export interface SessionOptions {
   cwd: string
-  /** The model provider, built by the frontend via createProvider() and injected here. */
   provider: ModelProvider
-  /** Model id passed to the provider on each request. */
   model: string
 }
 
 export interface CascadeSession {
-  /** Drive one user turn. Yields activity; ends with a final `message` then `turnDone`. */
   submit(userText: string): AsyncIterable<ActivityEvent>
-  /** Answer a pending permission request (Phase 7+). No-op until then. */
   respondPermission(id: string, decision: 'allow' | 'allow-always' | 'deny'): void
-  /** Cancel the in-flight turn. Wired to an AbortController; full UX in Phase 8. */
   abort(): void
+  /** Clear conversation history ("New chat"). */
+  reset(): void
 }
 
 export function createSession(opts: SessionOptions): CascadeSession {
   let inFlight: AbortController | undefined
+  const messages: Message[] = [] // conversation history; grows every turn (Phase 10 will compact it)
 
   return {
     async *submit(userText: string): AsyncIterable<ActivityEvent> {
       const controller = new AbortController()
       inFlight = controller
 
+      messages.push({ role: 'user', content: userText }) // append the user turn to history
       yield { type: 'status', text: 'Thinking…' }
 
+      let text = ''
+      let thinking = ''
       try {
-        // Consume the provider's token stream and FORWARD deltas live to the UI (ADR-013, revised):
-        // prose + thinking stream token-by-token, like the mainstream editor assistants. We also accumulate so
-        // we can emit a final authoritative `message` the UI commits (and Phase 3 stores).
-        let text = ''
-        let thinking = ''
+        // Send the FULL history + a fresh system prompt. Forward deltas live (ADR-013).
         for await (const ev of opts.provider.stream(
-          { messages: [{ role: 'user', content: userText }], model: opts.model },
+          { messages, model: opts.model, system: buildSystemPrompt({ cwd: opts.cwd }) },
           controller.signal,
         )) {
           if (ev.type === 'thinking_delta') {
@@ -60,21 +50,23 @@ export function createSession(opts: SessionOptions): CascadeSession {
             text += ev.text
             yield { type: 'text_delta', text: ev.text }
           }
-          // 'done' just ends the loop; we finalize below.
         }
 
-        // Finalize: emit the whole message so the UI commits it (replaces the live buffer).
+        // Append the assistant turn to history (text only — thinking is display-only, not resent).
+        messages.push({ role: 'assistant', content: [{ type: 'text', text }] })
+
         const content: ContentBlock[] = []
         if (thinking) content.push({ type: 'thinking', thinking })
         content.push({ type: 'text', text })
         yield { type: 'message', message: { role: 'assistant', content } }
       } catch (err) {
-        // Never fail silently — surface the error in the transcript so it's visible in the UI.
-        const text =
+        // Roll back the dangling user turn so history stays consistent, then surface the error.
+        messages.pop()
+        const msg =
           err instanceof Error && err.name === 'AbortError'
             ? '⏹ Cancelled.'
             : `⚠️ ${err instanceof Error ? err.message : String(err)}`
-        yield { type: 'message', message: { role: 'assistant', content: [{ type: 'text', text }] } }
+        yield { type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: msg }] } }
       } finally {
         inFlight = undefined
       }
@@ -88,6 +80,10 @@ export function createSession(opts: SessionOptions): CascadeSession {
 
     abort() {
       inFlight?.abort()
+    },
+
+    reset() {
+      messages.length = 0
     },
   }
 }

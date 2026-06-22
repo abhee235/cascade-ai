@@ -14,7 +14,9 @@ export interface CompletionRequest {
   messages: Message[]
   /** Provider-specific model id, e.g. "qwen36-agentic:latest" or "gpt-4o". */
   model: string
-  // Phase 3+ will add: system prompt. Phase 4+: tools. Phase 2 adds a stream() method below.
+  /** System prompt (identity + environment), prepended by the provider. Phase 3. */
+  system?: string
+  // Phase 4+ will add: tools.
 }
 
 export interface CompletionResult {

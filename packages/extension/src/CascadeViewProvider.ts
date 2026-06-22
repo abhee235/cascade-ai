@@ -59,6 +59,9 @@ export class CascadeViewProvider implements vscode.WebviewViewProvider {
       case 'permission':
         this.getSession().respondPermission(msg.id, msg.decision)
         break
+      case 'reset':
+        this.session?.reset()
+        break
       case 'abort':
         this.session?.abort()
         break

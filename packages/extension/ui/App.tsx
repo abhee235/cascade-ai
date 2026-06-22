@@ -105,8 +105,21 @@ export function App() {
     vscode.postMessage({ type: 'submit', text })
   }
 
+  function newChat() {
+    setBubbles([])
+    setStreaming(null)
+    setStatus(null)
+    vscode.postMessage({ type: 'reset' }) // clear history in the core session
+  }
+
   return (
     <div style={styles.app}>
+      <div style={styles.header}>
+        <span style={styles.title}>Cascade</span>
+        <button style={styles.newChat} onClick={newChat}>
+          + New chat
+        </button>
+      </div>
       <div style={styles.transcript}>
         {bubbles.map((b, i) => (
           <div key={i} style={{ ...styles.bubble, ...(b.role === 'user' ? styles.user : styles.assistant) }}>
@@ -178,6 +191,23 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: 'var(--vscode-font-family)',
     fontSize: 'var(--vscode-font-size)',
     color: 'var(--vscode-foreground)',
+  },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '6px 12px',
+    borderBottom: '1px solid var(--vscode-panel-border)',
+  },
+  title: { fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', opacity: 0.7 },
+  newChat: {
+    background: 'transparent',
+    color: 'var(--vscode-foreground)',
+    border: '1px solid var(--vscode-panel-border)',
+    borderRadius: 4,
+    padding: '2px 8px',
+    fontSize: 11,
+    cursor: 'pointer',
   },
   transcript: { flex: 1, overflowY: 'auto', padding: '8px 12px' },
   bubble: { margin: '8px 0', padding: '8px 11px', borderRadius: 8 },

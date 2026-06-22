@@ -20,9 +20,10 @@ function blocksToText(content: Message['content']): string {
   return content.map((b) => (b.type === 'text' ? b.text : '')).join('')
 }
 
-/** Internal content-block messages → OpenAI messages. The single translation point. */
-function toOpenAIMessages(messages: Message[]): OpenAIMessage[] {
-  return messages.map((m) => ({ role: m.role, content: blocksToText(m.content) }))
+/** Internal content-block messages → OpenAI messages, with the system prompt prepended. */
+function toOpenAIMessages(messages: Message[], system?: string): OpenAIMessage[] {
+  const out: OpenAIMessage[] = messages.map((m) => ({ role: m.role, content: blocksToText(m.content) }))
+  return system ? [{ role: 'system', content: system }, ...out] : out
 }
 
 export interface OpenAICompatConfig {
@@ -47,7 +48,7 @@ export class OpenAICompatProvider implements ModelProvider {
     const res = await fetch(`${this.cfg.baseUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: this.headers(),
-      body: JSON.stringify({ model: req.model, messages: toOpenAIMessages(req.messages), stream: false }),
+      body: JSON.stringify({ model: req.model, messages: toOpenAIMessages(req.messages, req.system), stream: false }),
       signal,
     })
     if (!res.ok) {
@@ -62,7 +63,7 @@ export class OpenAICompatProvider implements ModelProvider {
     const res = await fetch(`${this.cfg.baseUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: this.headers(),
-      body: JSON.stringify({ model: req.model, messages: toOpenAIMessages(req.messages), stream: true }),
+      body: JSON.stringify({ model: req.model, messages: toOpenAIMessages(req.messages, req.system), stream: true }),
       signal,
     })
     if (!res.ok || !res.body) {

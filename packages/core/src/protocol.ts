@@ -32,3 +32,4 @@ export type InboundMessage =
   | { type: 'submit'; text: string }
   | { type: 'permission'; id: string; decision: 'allow' | 'allow-always' | 'deny' }
   | { type: 'abort' }
+  | { type: 'reset' } // "New chat" — clears conversation history
