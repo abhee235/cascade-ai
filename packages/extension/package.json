@@ -8,7 +8,11 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["AI", "Chat", "Other"],
+  "categories": [
+    "AI",
+    "Chat",
+    "Other"
+  ],
   "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
@@ -35,7 +39,14 @@
       "properties": {
         "cascade.provider": {
           "type": "string",
-          "enum": ["ollama", "openai", "groq", "openrouter", "llamacpp", "anthropic"],
+          "enum": [
+            "ollama",
+            "openai",
+            "groq",
+            "openrouter",
+            "llamacpp",
+            "anthropic"
+          ],
           "default": "ollama",
           "description": "Model provider. ollama/openai/groq/openrouter/llamacpp are OpenAI-compatible; anthropic is not yet implemented."
         },
@@ -58,20 +69,23 @@
     }
   },
   "scripts": {
-    "build": "node esbuild.mjs",
+    "build": "node esbuild.mjs && tailwindcss -i ui/styles.css -o dist/webview.css --minify",
     "watch": "node esbuild.mjs --watch"
   },
   "dependencies": {
-    "@cascade/core": "*"
+    "@cascade/core": "*",
+    "streamdown": "^2.5.0"
   },
   "devDependencies": {
-    "@types/vscode": "^1.85.0",
+    "@tailwindcss/cli": "^4.3.1",
     "@types/node": "^20.14.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
+    "@types/vscode": "^1.85.0",
     "esbuild": "^0.23.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "tailwindcss": "^4.3.1",
     "typescript": "^5.5.0"
   }
 }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Streamdown } from 'streamdown'
 import type { ActivityEvent, Message } from '@cascade/core'
 
 // VS Code injects this into the webview global scope.
@@ -76,10 +77,18 @@ export function App() {
             {b.thinking && (
               <details style={styles.thinking}>
                 <summary style={styles.thinkingSummary}>💭 Thinking</summary>
-                <div style={styles.thinkingBody}>{b.thinking}</div>
+                <div style={styles.thinkingBody} className="cascade-md">
+                  <Streamdown>{b.thinking}</Streamdown>
+                </div>
               </details>
             )}
-            <div style={styles.text}>{b.text}</div>
+            {b.role === 'assistant' ? (
+              <div className="cascade-md">
+                <Streamdown>{b.text}</Streamdown>
+              </div>
+            ) : (
+              <div style={styles.text}>{b.text}</div>
+            )}
           </div>
         ))}
         {streaming && (
@@ -88,11 +97,13 @@ export function App() {
             {streaming.thinking && (
               <details style={styles.thinking} open>
                 <summary style={styles.thinkingSummary}>💭 Thinking</summary>
-                <div style={styles.thinkingBody}>{streaming.thinking}</div>
+                <div style={styles.thinkingBody} className="cascade-md">
+                  <Streamdown>{streaming.thinking}</Streamdown>
+                </div>
               </details>
             )}
-            <div style={styles.text}>
-              {streaming.text}
+            <div className="cascade-md">
+              <Streamdown>{streaming.text}</Streamdown>
               <span style={styles.caret}>▋</span>
             </div>
           </div>
