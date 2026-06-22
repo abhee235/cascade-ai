@@ -1,0 +1,5 @@
+/* KaTeX stylesheet for math rendering (@streamdown/math).
+   Built by esbuild with the font loader set to `dataurl`, so KaTeX's font files are inlined as
+   data: URIs directly into dist/katex.css. This avoids serving font files as webview resources and
+   the relative-path/CSP headaches that come with them — we just allow `font-src data:`. */
+@import 'katex/dist/katex.min.css';

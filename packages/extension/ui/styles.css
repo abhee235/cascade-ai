@@ -8,6 +8,7 @@
 /* Generate the utility classes Streamdown emits (path is relative to this file → root node_modules). */
 @source '../../../node_modules/streamdown/dist/*.js';
 @source '../../../node_modules/@streamdown/mermaid/dist/*.js';
+@source '../../../node_modules/@streamdown/math/dist/*.js';
 
 @import 'streamdown/styles.css';
 
@@ -55,3 +56,13 @@
   font-size: 0.9em; padding: 0.1em 0.35em; border-radius: 4px;
   background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.18));
 }
+
+/* KaTeX math (otherwise it renders tiny inside the compact prose font). */
+.cascade-md .katex { font-size: 1.08em; color: var(--vscode-foreground); }
+.cascade-md .katex-display {
+  margin: 0.9em 0;
+  padding: 0.4em 0.2em;
+  overflow-x: auto; /* wide equations scroll instead of clipping */
+  overflow-y: hidden;
+}
+.cascade-md .katex-display > .katex { font-size: 1.4em; } /* larger for centered display math */

@@ -72,15 +72,18 @@ export class CascadeViewProvider implements vscode.WebviewViewProvider {
     const styleUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.css'),
     )
+    const katexUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'katex.css'),
+    )
     const nonce = makeNonce()
-    // CSP widens per Streamdown plugin: img/blob for Mermaid SVGs, font-src for KaTeX (Phase 3),
-    // 'wasm-unsafe-eval' for Shiki (Phase 4). Styles come from our compiled webview.css (cspSource).
+    // CSP widens per Streamdown plugin: img/blob for Mermaid SVGs, font-src data: for KaTeX's
+    // inlined fonts, 'wasm-unsafe-eval' for Shiki (Phase 4). Styles come from our compiled CSS.
     const csp = [
       `default-src 'none'`,
       `script-src 'nonce-${nonce}'`,
       `style-src ${webview.cspSource} 'unsafe-inline'`,
       `img-src ${webview.cspSource} data: blob:`,
-      `font-src ${webview.cspSource}`,
+      `font-src ${webview.cspSource} data:`,
     ].join('; ')
 
     return `<!DOCTYPE html>
@@ -90,6 +93,7 @@ export class CascadeViewProvider implements vscode.WebviewViewProvider {
   <meta http-equiv="Content-Security-Policy" content="${csp}" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="stylesheet" href="${styleUri}" />
+  <link rel="stylesheet" href="${katexUri}" />
   <title>Cascade</title>
 </head>
 <body>
