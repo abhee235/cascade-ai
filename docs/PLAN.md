@@ -53,8 +53,8 @@ each concept to its Cascade module. Keep it open while building.
 | **Agentic loop** | `agent/agentLoop.ts` → `runAgentLoop()` |
 | Message model | `agent/conversation.ts` (types) | [src/types/message.ts](src/types/message.ts) |
 | System prompt | `agent/systemPrompt.ts` → `buildSystemPrompt()` |
-| Model client / stream | `llm/modelClient.ts` → `streamCompletion()` |
-| Format bridge | `llm/modelClient.ts` → `toProviderMessages()` / `fromProviderStream()` | [scripts/ollama-proxy.ts](scripts/ollama-proxy.ts) |
+| Model provider (abstraction) | `llm/provider.ts` `ModelProvider` + `llm/factory.ts` `createProvider()` (ADR-020) |
+| Provider impl / format bridge | `llm/providers/openaiCompat.ts` (`complete()`; Phase 2 adds `stream()`) |
 | Tool contract | `tools/Tool.ts` → `Tool` |
 | Tool registry | `tools/toolRegistry.ts` → `buildRegistry()` / `findTool()` |
 | Execute one tool | `tools/runTool.ts` → `executeTool()` |

@@ -33,15 +33,26 @@
     "configuration": {
       "title": "Cascade",
       "properties": {
+        "cascade.provider": {
+          "type": "string",
+          "enum": ["ollama", "openai", "groq", "openrouter", "llamacpp", "anthropic"],
+          "default": "ollama",
+          "description": "Model provider. ollama/openai/groq/openrouter/llamacpp are OpenAI-compatible; anthropic is not yet implemented."
+        },
         "cascade.model": {
           "type": "string",
           "default": "qwen36-agentic:latest",
-          "description": "Ollama model to use (must be installed: run `ollama list`)."
+          "description": "Model id for the selected provider (for Ollama, must be installed: run `ollama list`)."
         },
         "cascade.baseUrl": {
           "type": "string",
-          "default": "http://127.0.0.1:11434",
-          "description": "Ollama OpenAI-compatible base URL."
+          "default": "",
+          "description": "Optional base URL override. Leave empty to use the provider's default (e.g. Ollama → http://127.0.0.1:11434)."
+        },
+        "cascade.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for hosted providers (OpenAI, Groq, OpenRouter). Not needed for local Ollama/llama.cpp."
         }
       }
     }

@@ -5,7 +5,7 @@
 // SAME session and forward the SAME ActivityEvents to a browser — the engine doesn't know or care
 // which frontend is attached. — ADR-018.
 import * as vscode from 'vscode'
-import { createSession, type CascadeSession, type InboundMessage } from '@cascade/core'
+import { createSession, createProvider, type CascadeSession, type InboundMessage } from '@cascade/core'
 
 export class CascadeViewProvider implements vscode.WebviewViewProvider {
   static readonly viewId = 'cascade.view'
@@ -29,10 +29,19 @@ export class CascadeViewProvider implements vscode.WebviewViewProvider {
   private getSession(): CascadeSession {
     if (!this.session) {
       const cfg = vscode.workspace.getConfiguration('cascade')
+      const model = cfg.get<string>('model', 'qwen36-agentic:latest')
+      // Build the provider from config (factory), then inject it into the session (DI). The core
+      // never knows which vendor we picked — see ADR-020.
+      const provider = createProvider({
+        provider: cfg.get<string>('provider', 'ollama'),
+        model,
+        baseUrl: cfg.get<string>('baseUrl') || undefined,
+        apiKey: cfg.get<string>('apiKey') || undefined,
+      })
       this.session = createSession({
         cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd(),
-        model: cfg.get<string>('model', 'qwen2.5-coder'),
-        baseUrl: cfg.get<string>('baseUrl', 'http://127.0.0.1:11434'),
+        provider,
+        model,
       })
     }
     return this.session

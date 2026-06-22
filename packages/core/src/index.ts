@@ -7,3 +7,7 @@ export type {
   Message,
   ContentBlock,
 } from './protocol'
+// Provider abstraction (ADR-020): frontends build a provider via createProvider() and inject it.
+export { createProvider } from './llm/factory'
+export type { ProviderConfig } from './llm/factory'
+export type { ModelProvider, CompletionRequest, CompletionResult } from './llm/provider'

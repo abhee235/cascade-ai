@@ -1,22 +1,27 @@
 // core/session.ts — the frontend-agnostic entry point. — ADR-018.
 //
 // A CascadeSession is the ONLY thing a frontend touches. The extension calls createSession()
-// in-process; the web app talks to a server that calls createSession() on its behalf and relays
-// ActivityEvents over WebSocket. Either way the contract is identical.
+// in-process; the web app talks to a server that calls createSession() and relays ActivityEvents
+// over WebSocket. Either way the contract is identical.
 //
 // The session wrapper around the query loop.
 //
-// Phase 1: submit() makes one non-streaming Ollama call and emits the reply as a final `message`.
-// Still activity-first (ADR-013): we show a status while waiting, then render the whole answer.
-// No conversation history yet — that's Phase 3. No tools yet — that's Phase 4.
+// The session depends on a ModelProvider (injected) — NOT on Ollama/OpenAI/etc. (ADR-020). The
+// frontend builds the provider via createProvider() and passes it in.
+//
+// Phase 1: submit() makes one non-streaming completion and emits the reply as a final `message`.
+// Activity-first (ADR-013): status while waiting, then the whole answer. No history yet (Phase 3),
+// no tools yet (Phase 4).
 
 import type { ActivityEvent } from './protocol'
-import { callOllama } from './llm/modelClient'
+import type { ModelProvider } from './llm/provider'
 
 export interface SessionOptions {
   cwd: string
+  /** The model provider, built by the frontend via createProvider() and injected here. */
+  provider: ModelProvider
+  /** Model id passed to the provider on each request. */
   model: string
-  baseUrl: string
 }
 
 export interface CascadeSession {
@@ -36,17 +41,16 @@ export function createSession(opts: SessionOptions): CascadeSession {
       const controller = new AbortController()
       inFlight = controller
 
-      yield { type: 'status', text: `Calling ${opts.model}…` }
+      yield { type: 'status', text: `Calling ${opts.provider.id} (${opts.model})…` }
 
       try {
-        const reply = await callOllama([{ role: 'user', content: userText }], {
-          baseUrl: opts.baseUrl,
-          model: opts.model,
-          signal: controller.signal,
-        })
+        const { text } = await opts.provider.complete(
+          { messages: [{ role: 'user', content: userText }], model: opts.model },
+          controller.signal,
+        )
         yield {
           type: 'message',
-          message: { role: 'assistant', content: [{ type: 'text', text: reply }] },
+          message: { role: 'assistant', content: [{ type: 'text', text }] },
         }
       } catch (err) {
         // Never fail silently — surface the error in the transcript so it's visible in the UI.
