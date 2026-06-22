@@ -21,8 +21,10 @@ export type Message =
 // The frontend renders these. Note `message` carries the FINAL answer, rendered whole
 // (activity-first UI, no prose streaming — ADR-013). More variants arrive in later phases.
 export type ActivityEvent =
-  | { type: 'status'; text: string } // "Thinking…", "Generating…"
-  | { type: 'message'; message: Message } // final answer, rendered complete
+  | { type: 'status'; text: string } // "Thinking…", and tool-step activity in later phases
+  | { type: 'thinking_delta'; thinking: string } // a chunk of reasoning, streamed live (ADR-013)
+  | { type: 'text_delta'; text: string } // a chunk of the answer, streamed live (ADR-013)
+  | { type: 'message'; message: Message } // the finalized message (authoritative; UI commits it)
   | { type: 'turnDone'; steps: number }
 
 // ── Inbound messages: frontend → core ───────────────────────────────────────────────────

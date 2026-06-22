@@ -20,12 +20,11 @@ UI, web server, remote-session bridge). — **ADR-018**.
 memory, context handling, and error recovery — and **deliberately diverges** where you have a better
 preference:
 
-- **Activity-first UI, no prose streaming.** Like the mainstream editor assistants: while the agent
-  works, show a live *activity timeline* of what it's doing; render the assistant's answer **once,
-  complete**, when the turn finishes. (We still consume Ollama's token stream internally — to detect
-  tool calls early and drive the activity view + tool progress — we just don't paint prose
-  token-by-token.) — **ADR-013**.
-- **Lazy MCP.** Servers connect only on first use, never at startup. — **ADR-014**.
+- **Streamed output + activity view (IDE-assistant style).** Stream prose AND thinking
+  token-by-token to the UI (as `ActivityEvent` deltas), emit a final `message` the UI commits, and also
+  show coarse `status` / (Phase 4+) tool-step activity for *actions*. — **ADR-013**. (This is the
+  common approach to streaming; an earlier draft wrongly said "no prose streaming" and was corrected.)
+- **Lazy MCP.** Servers connect only on first use, never at startup. — **ADR-014**. *(the real display divergence is gone; lazy MCP is the remaining one.)*
 
 A **canonical mapping table** (concept ↔ Cascade module) is maintained so we never drift off the
 target architecture, and every concept has one obvious home under a descriptive name.
@@ -75,7 +74,7 @@ each concept to its Cascade module. Keep it open while building.
 ### Deliberate design choices
 | Topic | Common approach | Cascade | ADR |
 |-------|-------------|---------|-----|
-| Output display | Streams prose token-by-token live | **Activity-first**: live "what it's doing" timeline; final answer rendered complete at end; thinking collapsed, never streamed as prose | ADR-013 |
+| Output display | Streams prose token-by-token live | **Same — streams prose + thinking live**, plus a status/tool-step activity view (IDE-assistant style). Not a divergence. | ADR-013 |
 | MCP connect timing | Connects servers at startup | **Lazy**: connect on first tool use | ADR-014 |
 | Naming | Terse internal names | Descriptive standard (`runAgentLoop`, `executeTool`, …) | — |
 
@@ -304,7 +303,7 @@ Each ADR is a short file in `cascade/docs/adr/`: Context → Decision → Conseq
 | ADR-010 | Webview↔host **ActivityEvent** protocol | 8 |
 | ADR-011 | MCP integration; `mcp__server__tool` namespacing | 9 |
 | ADR-012 | Context compaction | 10 |
-| **ADR-013** | **Activity-first UI; no prose streaming (divergence)** | 2 (used through 8) |
+| **ADR-013** | **Streamed output (prose+thinking live) + activity view** | 2 (used through 8) |
 | **ADR-014** | **Lazy MCP connect on first use (divergence)** | 9 |
 | ADR-015 | Persistent memory store (read + tool-updatable) | 10 |
 | ADR-016 | Error recovery & resilience (retry/backoff/fallback/abort/overflow) | 11 |
@@ -667,7 +666,8 @@ tests. Ollama must be running with a tool-capable model.
 
 ## Notes / Constraints
 - No third-party source is copied. Cascade is independently written, Ollama-native,
-  and diverges deliberately on display (activity-first) and MCP timing (lazy).
+  and diverges deliberately on MCP timing (lazy connect). Display streams prose+thinking live with an
+  activity view (ADR-013) — the common approach, not a divergence.
 - **One engine, many frontends.** `@cascade/core` is headless (no `vscode`, no DOM). The extension drives
   it in-process; the web app drives it over WebSocket via `@cascade/server`. The `ActivityEvent` protocol
   is the only thing crossing any boundary — that is what makes the frontends interchangeable.

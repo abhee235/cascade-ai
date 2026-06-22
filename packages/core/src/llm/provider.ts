@@ -22,9 +22,22 @@ export interface CompletionResult {
   text: string
 }
 
+/**
+ * Events a provider yields while streaming (Phase 2). INTERNAL to the llm↔session boundary — these
+ * never reach the frontend. The session consumes them, accumulates, and emits frontend ActivityEvents
+ * (status + a final whole `message`). That separation is the activity-first divergence (ADR-013).
+ * Phase 4 extends this with tool_use_start / tool_use_delta / block_stop.
+ */
+export type StreamEvent =
+  | { type: 'text_delta'; text: string } // a chunk of the answer (buffered, NOT painted live)
+  | { type: 'thinking_delta'; thinking: string } // a chunk of reasoning (e.g. Ollama delta.reasoning)
+  | { type: 'done'; stopReason: 'end_turn' | 'max_tokens' }
+
 export interface ModelProvider {
   /** Stable id for logging/telemetry, e.g. "ollama", "groq". */
   readonly id: string
-  /** One non-streaming completion (Phase 1). Phase 2 adds: stream(req, signal) → AsyncIterable<StreamEvent>. */
+  /** One non-streaming completion (Phase 1). */
   complete(req: CompletionRequest, signal?: AbortSignal): Promise<CompletionResult>
+  /** Streamed completion (Phase 2): yields deltas as they arrive. */
+  stream(req: CompletionRequest, signal?: AbortSignal): AsyncIterable<StreamEvent>
 }

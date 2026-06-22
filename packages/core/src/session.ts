@@ -13,7 +13,7 @@
 // Activity-first (ADR-013): status while waiting, then the whole answer. No history yet (Phase 3),
 // no tools yet (Phase 4).
 
-import type { ActivityEvent } from './protocol'
+import type { ActivityEvent, ContentBlock } from './protocol'
 import type { ModelProvider } from './llm/provider'
 
 export interface SessionOptions {
@@ -41,17 +41,33 @@ export function createSession(opts: SessionOptions): CascadeSession {
       const controller = new AbortController()
       inFlight = controller
 
-      yield { type: 'status', text: `Calling ${opts.provider.id} (${opts.model})…` }
+      yield { type: 'status', text: 'Thinking…' }
 
       try {
-        const { text } = await opts.provider.complete(
+        // Consume the provider's token stream and FORWARD deltas live to the UI (ADR-013, revised):
+        // prose + thinking stream token-by-token, like the mainstream editor assistants. We also accumulate so
+        // we can emit a final authoritative `message` the UI commits (and Phase 3 stores).
+        let text = ''
+        let thinking = ''
+        for await (const ev of opts.provider.stream(
           { messages: [{ role: 'user', content: userText }], model: opts.model },
           controller.signal,
-        )
-        yield {
-          type: 'message',
-          message: { role: 'assistant', content: [{ type: 'text', text }] },
+        )) {
+          if (ev.type === 'thinking_delta') {
+            thinking += ev.thinking
+            yield { type: 'thinking_delta', thinking: ev.thinking }
+          } else if (ev.type === 'text_delta') {
+            text += ev.text
+            yield { type: 'text_delta', text: ev.text }
+          }
+          // 'done' just ends the loop; we finalize below.
         }
+
+        // Finalize: emit the whole message so the UI commits it (replaces the live buffer).
+        const content: ContentBlock[] = []
+        if (thinking) content.push({ type: 'thinking', thinking })
+        content.push({ type: 'text', text })
+        yield { type: 'message', message: { role: 'assistant', content } }
       } catch (err) {
         // Never fail silently — surface the error in the transcript so it's visible in the UI.
         const text =
