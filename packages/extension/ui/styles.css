@@ -9,21 +9,33 @@
 @source '../../../node_modules/streamdown/dist/*.js';
 @source '../../../node_modules/@streamdown/mermaid/dist/*.js';
 @source '../../../node_modules/@streamdown/math/dist/*.js';
+@source '../../../node_modules/@streamdown/code/dist/*.js';
 
 @import 'streamdown/styles.css';
 
-/* shadcn/ui design tokens mapped onto VS Code theme variables (light + dark handled by VS Code). */
+/* shadcn/ui design tokens mapped onto VS Code theme variables (VS Code handles light/dark).
+   Full set so no shadcn token is undefined (an undefined token renders as transparent/black,
+   which is what made some borders/text look wrong). */
 :root {
   --background: var(--vscode-editor-background);
-  --foreground: var(--vscode-editor-foreground);
+  --foreground: var(--vscode-foreground);
   --card: var(--vscode-editorWidget-background);
-  --card-foreground: var(--vscode-editor-foreground);
-  --muted: var(--vscode-editorWidget-background);
-  --muted-foreground: var(--vscode-descriptionForeground);
-  --border: var(--vscode-panel-border);
-  --input: var(--vscode-input-background);
+  --card-foreground: var(--vscode-foreground);
+  --popover: var(--vscode-editorWidget-background);
+  --popover-foreground: var(--vscode-foreground);
   --primary: var(--vscode-button-background);
   --primary-foreground: var(--vscode-button-foreground);
+  --secondary: var(--vscode-editorWidget-background);
+  --secondary-foreground: var(--vscode-foreground);
+  --muted: var(--vscode-editorWidget-background);
+  --muted-foreground: var(--vscode-descriptionForeground);
+  --accent: var(--vscode-list-hoverBackground);
+  --accent-foreground: var(--vscode-editor-foreground);
+  --destructive: var(--vscode-errorForeground);
+  --destructive-foreground: var(--vscode-editor-foreground);
+  --border: var(--vscode-panel-border);
+  --input: var(--vscode-input-background);
+  --ring: var(--vscode-focusBorder);
   --radius: 6px;
 }
 
@@ -32,18 +44,18 @@
 .cascade-md {
   font-family: var(--vscode-font-family);
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.45;
   color: var(--vscode-foreground);
 }
 .cascade-md > :first-child { margin-top: 0; }
 .cascade-md > :last-child { margin-bottom: 0; }
-.cascade-md h1 { font-size: 1.5em; font-weight: 600; line-height: 1.3; margin: 0.8em 0 0.4em; }
-.cascade-md h2 { font-size: 1.3em; font-weight: 600; line-height: 1.3; margin: 0.8em 0 0.4em; }
-.cascade-md h3 { font-size: 1.1em; font-weight: 600; margin: 0.7em 0 0.3em; }
-.cascade-md h4, .cascade-md h5, .cascade-md h6 { font-size: 1em; font-weight: 600; margin: 0.6em 0 0.3em; }
-.cascade-md p { margin: 0.5em 0; }
-.cascade-md ul, .cascade-md ol { margin: 0.5em 0; padding-left: 1.5em; }
-.cascade-md li { margin: 0.2em 0; }
+.cascade-md h1 { font-size: 1.35em; font-weight: 600; line-height: 1.25; margin: 0.5em 0 0.25em; }
+.cascade-md h2 { font-size: 1.2em; font-weight: 600; line-height: 1.25; margin: 0.5em 0 0.25em; }
+.cascade-md h3 { font-size: 1.08em; font-weight: 600; margin: 0.45em 0 0.2em; }
+.cascade-md h4, .cascade-md h5, .cascade-md h6 { font-size: 1em; font-weight: 600; margin: 0.4em 0 0.2em; }
+.cascade-md p { margin: 0.35em 0; }
+.cascade-md ul, .cascade-md ol { margin: 0.35em 0; padding-left: 1.35em; }
+.cascade-md li { margin: 0.12em 0; }
 .cascade-md blockquote {
   margin: 0.5em 0; padding-left: 0.8em; opacity: 0.85;
   border-left: 3px solid var(--vscode-panel-border);
@@ -57,12 +69,24 @@
   background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.18));
 }
 
-/* KaTeX math (otherwise it renders tiny inside the compact prose font). */
+/* KaTeX math. KaTeX is sensitive to inherited line-height/text-align — reset them so our prose
+   typography (line-height 1.45 etc.) can't distort fraction/radical/strut alignment. */
+.cascade-md .katex,
+.cascade-md .katex-display,
+.cascade-md .katex * {
+  line-height: normal;
+}
 .cascade-md .katex { font-size: 1.08em; color: var(--vscode-foreground); }
 .cascade-md .katex-display {
   margin: 0.9em 0;
   padding: 0.4em 0.2em;
+  text-align: center;
   overflow-x: auto; /* wide equations scroll instead of clipping */
   overflow-y: hidden;
 }
 .cascade-md .katex-display > .katex { font-size: 1.4em; } /* larger for centered display math */
+
+/* Code blocks (Streamdown/Shiki): comfortable size + spacing. Token colors come from the Shiki
+   dual-theme, which now switches correctly via the `.dark` class synced in main.tsx. */
+.cascade-md pre { font-size: 12.5px; line-height: 1.55; }
+.cascade-md pre code { font-size: inherit; }

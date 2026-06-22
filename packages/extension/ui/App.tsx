@@ -2,18 +2,45 @@ import { useEffect, useRef, useState } from 'react'
 import { Streamdown } from 'streamdown'
 import { mermaid } from '@streamdown/mermaid'
 import { createMathPlugin } from '@streamdown/math'
+import { createCodePlugin } from '@streamdown/code'
 import type { ActivityEvent, Message } from '@cascade/core'
 
 // VS Code injects this into the webview global scope.
 declare function acquireVsCodeApi(): { postMessage(msg: unknown): void }
 const vscode = acquireVsCodeApi()
 
-// Streamdown plugins, in one place. Step 4 adds `code` here.
+// Shiki ships a dual [light, dark] theme and switches via a `.dark` class — that switch is unreliable
+// in the webview, so we detect VS Code's theme once and pin BOTH slots to the matching Shiki theme.
+// Guarantees correct contrast (high-contrast → strong colors regardless of switching).
+const cls = document.body.classList
+const codeTheme = cls.contains('vscode-light') ? 'github-light' : 'github-dark'
+
+// All Streamdown plugins in one place. `code` = Shiki highlighting (pure-JS engine → no WASM/CSP).
 // singleDollarTextMath: true enables inline `$…$` (off by default to avoid clashing with currency).
-const mdPlugins = { mermaid, math: createMathPlugin({ singleDollarTextMath: true }) }
+const mdPlugins = {
+  mermaid,
+  math: createMathPlugin({ singleDollarTextMath: true }),
+  code: createCodePlugin({ themes: [codeTheme, codeTheme] }),
+}
+
+// Models often emit LaTeX-style math delimiters \[ … \] (display) and \( … \) (inline), which
+// remark-math does NOT parse (it only knows $/$$). Convert them — but only OUTSIDE code spans/blocks
+// (the split keeps ``` fences and `inline code` as odd-indexed segments, which we leave untouched).
+function normalizeMath(md: string): string {
+  return md
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/g)
+    .map((seg, i) =>
+      i % 2 === 1
+        ? seg
+        : seg
+            .replace(/\\\[([\s\S]*?)\\\]/g, (_m, x) => `$$${x}$$`)
+            .replace(/\\\(([\s\S]*?)\\\)/g, (_m, x) => `$${x}$`),
+    )
+    .join('')
+}
 // Single render path for all assistant markdown (answer + thinking).
 function Md({ children }: { children: string }) {
-  return <Streamdown plugins={mdPlugins}>{children}</Streamdown>
+  return <Streamdown plugins={mdPlugins}>{normalizeMath(children)}</Streamdown>
 }
 
 type Bubble = { role: 'user' | 'assistant'; text: string; thinking?: string }
@@ -152,11 +179,21 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 'var(--vscode-font-size)',
     color: 'var(--vscode-foreground)',
   },
-  transcript: { flex: 1, overflowY: 'auto', padding: '8px' },
-  bubble: { margin: '6px 0', padding: '6px 8px', borderRadius: 6, whiteSpace: 'pre-wrap' },
-  user: { background: 'var(--vscode-input-background)' },
+  transcript: { flex: 1, overflowY: 'auto', padding: '8px 12px' },
+  bubble: { margin: '8px 0', padding: '8px 11px', borderRadius: 8 },
+  user: {
+    background: 'var(--vscode-input-background)',
+    border: '1px solid var(--vscode-input-border, transparent)',
+  },
   assistant: { background: 'var(--vscode-editorWidget-background)' },
-  role: { fontSize: 10, opacity: 0.6, textTransform: 'uppercase', marginBottom: 2 },
+  role: {
+    fontSize: 10.5,
+    opacity: 0.55,
+    textTransform: 'uppercase',
+    letterSpacing: '0.06em',
+    fontWeight: 600,
+    marginBottom: 6,
+  },
   text: { whiteSpace: 'pre-wrap' },
   thinking: { marginBottom: 6, opacity: 0.85 },
   thinkingSummary: { cursor: 'pointer', fontSize: 11, opacity: 0.7, userSelect: 'none' },
