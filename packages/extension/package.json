@@ -35,8 +35,8 @@
       "properties": {
         "cascade.model": {
           "type": "string",
-          "default": "qwen2.5-coder",
-          "description": "Ollama model to use."
+          "default": "qwen36-agentic:latest",
+          "description": "Ollama model to use (must be installed: run `ollama list`)."
         },
         "cascade.baseUrl": {
           "type": "string",

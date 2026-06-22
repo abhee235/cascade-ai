@@ -6,10 +6,12 @@
 //
 // The session wrapper around the query loop.
 //
-// Phase 0: submit() is a stub that simply echoes the user's text back as a final `message`.
-// Phases 1+ replace the body with the real model call and agent loop — the contract stays the same.
+// Phase 1: submit() makes one non-streaming Ollama call and emits the reply as a final `message`.
+// Still activity-first (ADR-013): we show a status while waiting, then render the whole answer.
+// No conversation history yet — that's Phase 3. No tools yet — that's Phase 4.
 
 import type { ActivityEvent } from './protocol'
+import { callOllama } from './llm/modelClient'
 
 export interface SessionOptions {
   cwd: string
@@ -20,26 +22,41 @@ export interface SessionOptions {
 export interface CascadeSession {
   /** Drive one user turn. Yields activity; ends with a final `message` then `turnDone`. */
   submit(userText: string): AsyncIterable<ActivityEvent>
-  /** Answer a pending permission request (Phase 7+). No-op in Phase 0. */
+  /** Answer a pending permission request (Phase 7+). No-op until then. */
   respondPermission(id: string, decision: 'allow' | 'allow-always' | 'deny'): void
-  /** Cancel the in-flight turn (Phase 8+). No-op in Phase 0. */
+  /** Cancel the in-flight turn. Wired to an AbortController; full UX in Phase 8. */
   abort(): void
 }
 
 export function createSession(opts: SessionOptions): CascadeSession {
-  void opts // unused until Phase 1 (model/baseUrl/cwd come into play then)
+  let inFlight: AbortController | undefined
 
   return {
     async *submit(userText: string): AsyncIterable<ActivityEvent> {
-      yield { type: 'status', text: 'Thinking…' }
+      const controller = new AbortController()
+      inFlight = controller
 
-      // Phase 0 stub: echo. Proves the core → frontend pipe end to end.
-      yield {
-        type: 'message',
-        message: {
-          role: 'assistant',
-          content: [{ type: 'text', text: `echo: ${userText}` }],
-        },
+      yield { type: 'status', text: `Calling ${opts.model}…` }
+
+      try {
+        const reply = await callOllama([{ role: 'user', content: userText }], {
+          baseUrl: opts.baseUrl,
+          model: opts.model,
+          signal: controller.signal,
+        })
+        yield {
+          type: 'message',
+          message: { role: 'assistant', content: [{ type: 'text', text: reply }] },
+        }
+      } catch (err) {
+        // Never fail silently — surface the error in the transcript so it's visible in the UI.
+        const text =
+          err instanceof Error && err.name === 'AbortError'
+            ? '⏹ Cancelled.'
+            : `⚠️ ${err instanceof Error ? err.message : String(err)}`
+        yield { type: 'message', message: { role: 'assistant', content: [{ type: 'text', text }] } }
+      } finally {
+        inFlight = undefined
       }
 
       yield { type: 'turnDone', steps: 0 }
@@ -50,7 +67,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
     },
 
     abort() {
-      /* no-op until Phase 8 */
+      inFlight?.abort()
     },
   }
 }
