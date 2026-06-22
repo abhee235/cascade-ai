@@ -9,6 +9,13 @@
 
 import type { Message } from '../protocol'
 
+/** Provider-neutral tool advertisement sent to the model (Phase 4). */
+export interface ToolSchema {
+  name: string
+  description: string
+  parameters: Record<string, unknown> // JSON Schema for the tool's input
+}
+
 export interface CompletionRequest {
   /** Full conversation so far, in Cascade's internal (provider-neutral) message model. */
   messages: Message[]
@@ -16,7 +23,8 @@ export interface CompletionRequest {
   model: string
   /** System prompt (identity + environment), prepended by the provider. Phase 3. */
   system?: string
-  // Phase 4+ will add: tools.
+  /** Tools the model may call this turn. Phase 4. */
+  tools?: ToolSchema[]
 }
 
 export interface CompletionResult {
@@ -31,9 +39,10 @@ export interface CompletionResult {
  * Phase 4 extends this with tool_use_start / tool_use_delta / block_stop.
  */
 export type StreamEvent =
-  | { type: 'text_delta'; text: string } // a chunk of the answer (buffered, NOT painted live)
+  | { type: 'text_delta'; text: string } // a chunk of the answer
   | { type: 'thinking_delta'; thinking: string } // a chunk of reasoning (e.g. Ollama delta.reasoning)
-  | { type: 'done'; stopReason: 'end_turn' | 'max_tokens' }
+  | { type: 'tool_use'; id: string; name: string; input: unknown } // a COMPLETE tool call (args accumulated + parsed)
+  | { type: 'done'; stopReason: 'end_turn' | 'max_tokens' | 'tool_use' }
 
 export interface ModelProvider {
   /** Stable id for logging/telemetry, e.g. "ollama", "groq". */

@@ -11,6 +11,7 @@ export class CascadeViewProvider implements vscode.WebviewViewProvider {
   static readonly viewId = 'cascade.view'
 
   private session?: CascadeSession
+  private sessionCwd?: string
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -27,22 +28,21 @@ export class CascadeViewProvider implements vscode.WebviewViewProvider {
   }
 
   private getSession(): CascadeSession {
-    if (!this.session) {
+    // Recompute cwd each time: a workspace folder may be opened AFTER the first session was created.
+    // Rebuild the session if cwd changed so tools resolve relative paths against the right root.
+    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd()
+    if (!this.session || this.sessionCwd !== cwd) {
       const cfg = vscode.workspace.getConfiguration('cascade')
       const model = cfg.get<string>('model', 'qwen36-agentic:latest')
-      // Build the provider from config (factory), then inject it into the session (DI). The core
-      // never knows which vendor we picked — see ADR-020.
+      // Build the provider from config (factory), then inject it into the session (DI). — ADR-020.
       const provider = createProvider({
         provider: cfg.get<string>('provider', 'ollama'),
         model,
         baseUrl: cfg.get<string>('baseUrl') || undefined,
         apiKey: cfg.get<string>('apiKey') || undefined,
       })
-      this.session = createSession({
-        cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd(),
-        provider,
-        model,
-      })
+      this.session = createSession({ cwd, provider, model })
+      this.sessionCwd = cwd
     }
     return this.session
   }

@@ -1,0 +1,33 @@
+// tools/Tool.ts — the tool contract.
+//
+// A tool is the unit the model can invoke. `name` + `description` are sent to the model (so it knows
+// when to use it); `inputSchema` (Zod) both validates the model's JSON args AND is converted to the
+// JSON Schema we advertise; `call()` does the work and returns text fed back as the tool_result.
+
+import type { ZodType } from 'zod'
+
+export interface ToolContext {
+  cwd: string
+  abortSignal: AbortSignal
+  // Phase 6 adds concurrency flags; Phase 7 adds permissions.
+}
+
+export interface ToolResult {
+  /** Text returned to the model as the tool_result content. */
+  content: string
+  /** True if the tool failed — the model sees the error and can self-correct (Phase 5 lesson). */
+  isError?: boolean
+}
+
+export interface Tool<I = unknown> {
+  /** Unique name the model calls, e.g. "Read". */
+  name: string
+  /** What it does + when to use it — the model reads this to decide. */
+  description: string
+  /** Zod schema for the input: validates the model's args and is converted to JSON Schema. */
+  inputSchema: ZodType<I>
+  /** Present-tense activity line for the UI card, e.g. "Reading package.json". */
+  activitySummary(input: I): string
+  /** Run the tool. Return text (and isError) — that becomes the tool_result. */
+  call(input: I, ctx: ToolContext): Promise<ToolResult>
+}

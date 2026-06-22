@@ -24,7 +24,9 @@ export type ActivityEvent =
   | { type: 'status'; text: string } // "Thinking…", and tool-step activity in later phases
   | { type: 'thinking_delta'; thinking: string } // a chunk of reasoning, streamed live (ADR-013)
   | { type: 'text_delta'; text: string } // a chunk of the answer, streamed live (ADR-013)
-  | { type: 'message'; message: Message } // the finalized message (authoritative; UI commits it)
+  | { type: 'toolStart'; id: string; name: string; summary: string } // a tool is about to run (Phase 4)
+  | { type: 'toolResult'; id: string; ok: boolean; preview: string } // a tool finished (Phase 4)
+  | { type: 'message'; message: Message } // the finalized answer (authoritative; UI commits it)
   | { type: 'turnDone'; steps: number }
 
 // ── Inbound messages: frontend → core ───────────────────────────────────────────────────

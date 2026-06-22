@@ -9,23 +9,17 @@ import type { ActivityEvent, Message } from '@cascade/core'
 declare function acquireVsCodeApi(): { postMessage(msg: unknown): void }
 const vscode = acquireVsCodeApi()
 
-// Shiki ships a dual [light, dark] theme and switches via a `.dark` class — that switch is unreliable
-// in the webview, so we detect VS Code's theme once and pin BOTH slots to the matching Shiki theme.
-// Guarantees correct contrast (high-contrast → strong colors regardless of switching).
-const cls = document.body.classList
-const codeTheme = cls.contains('vscode-light') ? 'github-light' : 'github-dark'
+// Shiki dual [light,dark] theme switches via a `.dark` class — unreliable in the webview, so detect
+// VS Code's theme once and pin BOTH slots to the matching Shiki theme (guarantees contrast).
+const codeTheme = document.body.classList.contains('vscode-light') ? 'github-light' : 'github-dark'
 
-// All Streamdown plugins in one place. `code` = Shiki highlighting (pure-JS engine → no WASM/CSP).
-// singleDollarTextMath: true enables inline `$…$` (off by default to avoid clashing with currency).
 const mdPlugins = {
   mermaid,
   math: createMathPlugin({ singleDollarTextMath: true }),
   code: createCodePlugin({ themes: [codeTheme, codeTheme] }),
 }
 
-// Models often emit LaTeX-style math delimiters \[ … \] (display) and \( … \) (inline), which
-// remark-math does NOT parse (it only knows $/$$). Convert them — but only OUTSIDE code spans/blocks
-// (the split keeps ``` fences and `inline code` as odd-indexed segments, which we leave untouched).
+// Convert LaTeX delimiters \[ \] / \( \) → $$ / $ (remark-math only knows $), outside code spans.
 function normalizeMath(md: string): string {
   return md
     .split(/(```[\s\S]*?```|`[^`\n]*`)/g)
@@ -38,14 +32,16 @@ function normalizeMath(md: string): string {
     )
     .join('')
 }
-// Single render path for all assistant markdown (answer + thinking).
 function Md({ children }: { children: string }) {
   return <Streamdown plugins={mdPlugins}>{normalizeMath(children)}</Streamdown>
 }
 
-type Bubble = { role: 'user' | 'assistant'; text: string; thinking?: string }
+// Transcript items: user/assistant messages and tool cards, interleaved in order.
+type Item =
+  | { kind: 'user'; text: string }
+  | { kind: 'assistant'; text: string; thinking?: string }
+  | { kind: 'tool'; id: string; name: string; summary: string; status: 'running' | 'ok' | 'error'; preview?: string }
 
-// Split an assistant message into its answer text and its (optional) reasoning.
 function extract(message: Message): { text: string; thinking: string } {
   if (typeof message.content === 'string') return { text: message.content, thinking: '' }
   let text = ''
@@ -57,8 +53,10 @@ function extract(message: Message): { text: string; thinking: string } {
   return { text, thinking }
 }
 
+const toolIcon = (s: 'running' | 'ok' | 'error') => (s === 'running' ? '⏳' : s === 'ok' ? '✓' : '✗')
+
 export function App() {
-  const [bubbles, setBubbles] = useState<Bubble[]>([])
+  const [items, setItems] = useState<Item[]>([])
   const [streaming, setStreaming] = useState<{ text: string; thinking: string } | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [input, setInput] = useState('')
@@ -77,10 +75,23 @@ export function App() {
         case 'text_delta':
           setStreaming((s) => ({ text: (s?.text ?? '') + event.text, thinking: s?.thinking ?? '' }))
           break
+        case 'toolStart':
+          // A tool is running — drop any transient pre-tool text and add a card.
+          setStreaming(null)
+          setItems((it) => [...it, { kind: 'tool', id: event.id, name: event.name, summary: event.summary, status: 'running' }])
+          break
+        case 'toolResult':
+          setItems((it) =>
+            it.map((x) =>
+              x.kind === 'tool' && x.id === event.id
+                ? { ...x, status: event.ok ? 'ok' : 'error', preview: event.preview }
+                : x,
+            ),
+          )
+          break
         case 'message': {
-          // Finalize: commit the authoritative message and clear the live buffer.
           const { text, thinking } = extract(event.message)
-          setBubbles((b) => [...b, { role: 'assistant', text, thinking: thinking || undefined }])
+          setItems((it) => [...it, { kind: 'assistant', text, thinking: thinking || undefined }])
           setStreaming(null)
           break
         }
@@ -95,21 +106,21 @@ export function App() {
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [bubbles, streaming, status])
+  }, [items, streaming, status])
 
   function send() {
     const text = input.trim()
     if (!text) return
-    setBubbles((b) => [...b, { role: 'user', text }])
+    setItems((it) => [...it, { kind: 'user', text }])
     setInput('')
     vscode.postMessage({ type: 'submit', text })
   }
 
   function newChat() {
-    setBubbles([])
+    setItems([])
     setStreaming(null)
     setStatus(null)
-    vscode.postMessage({ type: 'reset' }) // clear history in the core session
+    vscode.postMessage({ type: 'reset' })
   }
 
   return (
@@ -121,26 +132,37 @@ export function App() {
         </button>
       </div>
       <div style={styles.transcript}>
-        {bubbles.map((b, i) => (
-          <div key={i} style={{ ...styles.bubble, ...(b.role === 'user' ? styles.user : styles.assistant) }}>
-            <div style={styles.role}>{b.role}</div>
-            {b.thinking && (
-              <details style={styles.thinking}>
-                <summary style={styles.thinkingSummary}>💭 Thinking</summary>
-                <div style={styles.thinkingBody} className="cascade-md">
-                  <Md>{b.thinking}</Md>
-                </div>
-              </details>
-            )}
-            {b.role === 'assistant' ? (
-              <div className="cascade-md">
-                <Md>{b.text}</Md>
+        {items.map((it, i) =>
+          it.kind === 'tool' ? (
+            <div key={i} style={styles.toolCard}>
+              <div style={styles.toolHeader}>
+                <span>{toolIcon(it.status)}</span>
+                <span style={styles.toolName}>{it.name}</span>
+                <span style={styles.toolSummary}>{it.summary}</span>
               </div>
-            ) : (
-              <div style={styles.text}>{b.text}</div>
-            )}
-          </div>
-        ))}
+              {it.preview && <pre style={styles.toolPreview}>{it.preview}</pre>}
+            </div>
+          ) : (
+            <div key={i} style={{ ...styles.bubble, ...(it.kind === 'user' ? styles.user : styles.assistant) }}>
+              <div style={styles.role}>{it.kind}</div>
+              {it.kind === 'assistant' && it.thinking && (
+                <details style={styles.thinking}>
+                  <summary style={styles.thinkingSummary}>💭 Thinking</summary>
+                  <div style={styles.thinkingBody} className="cascade-md">
+                    <Md>{it.thinking}</Md>
+                  </div>
+                </details>
+              )}
+              {it.kind === 'assistant' ? (
+                <div className="cascade-md">
+                  <Md>{it.text}</Md>
+                </div>
+              ) : (
+                <div style={styles.text}>{it.text}</div>
+              )}
+            </div>
+          ),
+        )}
         {streaming && (
           <div style={{ ...styles.bubble, ...styles.assistant }}>
             <div style={styles.role}>assistant</div>
@@ -237,6 +259,28 @@ const styles: Record<string, React.CSSProperties> = {
   },
   status: { opacity: 0.7, fontStyle: 'italic', padding: '6px 8px' },
   caret: { opacity: 0.6 },
+  // Tool cards
+  toolCard: {
+    margin: '6px 0',
+    border: '1px solid var(--vscode-panel-border)',
+    borderRadius: 6,
+    background: 'var(--vscode-editorWidget-background)',
+    overflow: 'hidden',
+  },
+  toolHeader: { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', fontSize: 12 },
+  toolName: { fontWeight: 600, fontFamily: 'var(--vscode-editor-font-family, monospace)' },
+  toolSummary: { opacity: 0.7 },
+  toolPreview: {
+    margin: 0,
+    padding: '6px 10px',
+    borderTop: '1px solid var(--vscode-panel-border)',
+    fontFamily: 'var(--vscode-editor-font-family, monospace)',
+    fontSize: 11,
+    opacity: 0.75,
+    whiteSpace: 'pre-wrap',
+    maxHeight: 120,
+    overflow: 'auto',
+  },
   composer: { display: 'flex', gap: 6, padding: 8, borderTop: '1px solid var(--vscode-panel-border)' },
   input: {
     flex: 1,

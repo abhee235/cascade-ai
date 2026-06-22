@@ -5,9 +5,9 @@
 // stateless — "memory" is just us resending the whole transcript every turn. submit() appends the user
 // turn, streams the reply (forwarding deltas live — ADR-013), then appends the assistant turn.
 
-import type { ActivityEvent, ContentBlock, Message } from './protocol'
+import type { ActivityEvent, Message } from './protocol'
 import type { ModelProvider } from './llm/provider'
-import { buildSystemPrompt } from './agent/systemPrompt'
+import { runAgentLoop } from './agent/agentLoop'
 
 export interface SessionOptions {
   cwd: string
@@ -33,45 +33,26 @@ export function createSession(opts: SessionOptions): CascadeSession {
       inFlight = controller
 
       messages.push({ role: 'user', content: userText }) // append the user turn to history
-      yield { type: 'status', text: 'Thinking…' }
 
-      let text = ''
-      let thinking = ''
       try {
-        // Send the FULL history + a fresh system prompt. Forward deltas live (ADR-013).
-        for await (const ev of opts.provider.stream(
-          { messages, model: opts.model, system: buildSystemPrompt({ cwd: opts.cwd }) },
-          controller.signal,
-        )) {
-          if (ev.type === 'thinking_delta') {
-            thinking += ev.thinking
-            yield { type: 'thinking_delta', thinking: ev.thinking }
-          } else if (ev.type === 'text_delta') {
-            text += ev.text
-            yield { type: 'text_delta', text: ev.text }
-          }
-        }
-
-        // Append the assistant turn to history (text only — thinking is display-only, not resent).
-        messages.push({ role: 'assistant', content: [{ type: 'text', text }] })
-
-        const content: ContentBlock[] = []
-        if (thinking) content.push({ type: 'thinking', thinking })
-        content.push({ type: 'text', text })
-        yield { type: 'message', message: { role: 'assistant', content } }
+        // Delegate to the agentic loop. It streams, runs tools, appends results, and loops until
+        // the model stops asking for tools — yielding ActivityEvents the whole way (Phase 4).
+        yield* runAgentLoop(messages, {
+          provider: opts.provider,
+          model: opts.model,
+          cwd: opts.cwd,
+          signal: controller.signal,
+        })
       } catch (err) {
-        // Roll back the dangling user turn so history stays consistent, then surface the error.
-        messages.pop()
         const msg =
           err instanceof Error && err.name === 'AbortError'
             ? '⏹ Cancelled.'
             : `⚠️ ${err instanceof Error ? err.message : String(err)}`
         yield { type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: msg }] } }
+        yield { type: 'turnDone', steps: 0 }
       } finally {
         inFlight = undefined
       }
-
-      yield { type: 'turnDone', steps: 0 }
     },
 
     respondPermission() {
