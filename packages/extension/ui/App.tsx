@@ -1,10 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { Streamdown } from 'streamdown'
+import { mermaid } from '@streamdown/mermaid'
 import type { ActivityEvent, Message } from '@cascade/core'
 
 // VS Code injects this into the webview global scope.
 declare function acquireVsCodeApi(): { postMessage(msg: unknown): void }
 const vscode = acquireVsCodeApi()
+
+// Streamdown plugins, in one place. Steps 3–4 add `math` and `code` here.
+const mdPlugins = { mermaid }
+// Single render path for all assistant markdown (answer + thinking).
+function Md({ children }: { children: string }) {
+  return <Streamdown plugins={mdPlugins}>{children}</Streamdown>
+}
 
 type Bubble = { role: 'user' | 'assistant'; text: string; thinking?: string }
 
@@ -78,13 +86,13 @@ export function App() {
               <details style={styles.thinking}>
                 <summary style={styles.thinkingSummary}>💭 Thinking</summary>
                 <div style={styles.thinkingBody} className="cascade-md">
-                  <Streamdown>{b.thinking}</Streamdown>
+                  <Md>{b.thinking}</Md>
                 </div>
               </details>
             )}
             {b.role === 'assistant' ? (
               <div className="cascade-md">
-                <Streamdown>{b.text}</Streamdown>
+                <Md>{b.text}</Md>
               </div>
             ) : (
               <div style={styles.text}>{b.text}</div>
@@ -98,12 +106,12 @@ export function App() {
               <details style={styles.thinking} open>
                 <summary style={styles.thinkingSummary}>💭 Thinking</summary>
                 <div style={styles.thinkingBody} className="cascade-md">
-                  <Streamdown>{streaming.thinking}</Streamdown>
+                  <Md>{streaming.thinking}</Md>
                 </div>
               </details>
             )}
             <div className="cascade-md">
-              <Streamdown>{streaming.text}</Streamdown>
+              <Md>{streaming.text}</Md>
               <span style={styles.caret}>▋</span>
             </div>
           </div>

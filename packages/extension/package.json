@@ -74,6 +74,7 @@
   },
   "dependencies": {
     "@cascade/core": "*",
+    "@streamdown/mermaid": "^1.0.2",
     "streamdown": "^2.5.0"
   },
   "devDependencies": {
