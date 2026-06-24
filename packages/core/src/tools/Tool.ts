@@ -40,6 +40,8 @@ export interface Tool<I = unknown> {
   /** Safe to run in parallel with other tools this turn? Default when absent: false (conservative).
    *  Read-only tools are safe; writes are not (they can race). Used by the scheduler (Phase 6). */
   isConcurrencySafe?(input: I): boolean
-  /** Run the tool. Return text (and isError) — that becomes the tool_result. */
-  call(input: I, ctx: ToolContext): Promise<ToolResult>
+  /** Run the tool. Return text (and isError) — that becomes the tool_result.
+   *  `onProgress` (Phase 8) lets long-running tools stream partial output (e.g. Bash stdout) live into
+   *  the UI card as it arrives. Instantaneous tools ignore it. */
+  call(input: I, ctx: ToolContext, onProgress?: (chunk: string) => void): Promise<ToolResult>
 }

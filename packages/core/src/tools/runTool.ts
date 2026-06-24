@@ -14,7 +14,11 @@ export interface ToolUse {
   input: unknown
 }
 
-export async function executeTool(toolUse: ToolUse, ctx: ToolContext): Promise<ContentBlock> {
+export async function executeTool(
+  toolUse: ToolUse,
+  ctx: ToolContext,
+  onProgress?: (chunk: string) => void,
+): Promise<ContentBlock> {
   const err = (content: string): ContentBlock => ({
     type: 'tool_result',
     tool_use_id: toolUse.id,
@@ -29,7 +33,7 @@ export async function executeTool(toolUse: ToolUse, ctx: ToolContext): Promise<C
   if (!parsed.success) return err(`Invalid input for ${toolUse.name}: ${parsed.error.message}`)
 
   try {
-    const result = await tool.call(parsed.data, ctx)
+    const result = await tool.call(parsed.data, ctx, onProgress)
     return {
       type: 'tool_result',
       tool_use_id: toolUse.id,

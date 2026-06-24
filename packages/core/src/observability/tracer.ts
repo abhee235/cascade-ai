@@ -16,7 +16,7 @@ export type TraceEvent =
   | { t: 'submit'; text: string }
   | { t: 'model_request'; turn: number; system: string; tools: string[]; messages: Message[] }
   | { t: 'model_response'; turn: number; text: string; thinking: string; toolUses: { id: string; name: string; input: unknown }[] }
-  | { t: 'permission'; id: string; tool: string; decision: string }
+  | { t: 'permission'; id: string; tool: string; decision: string; asked: boolean } // asked=true ⇒ a prompt was shown
   | { t: 'tool_call'; id: string; name: string; input: unknown }
   | { t: 'tool_result'; id: string; name: string; ok: boolean; ms: number; content: string }
   | { t: 'turn_done'; turns: number }

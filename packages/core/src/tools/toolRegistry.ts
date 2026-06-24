@@ -9,8 +9,9 @@ import { GlobTool } from './builtins/Glob'
 import { GrepTool } from './builtins/Grep'
 import { WriteTool } from './builtins/Write'
 import { EditTool } from './builtins/Edit'
+import { BashTool } from './builtins/Bash'
 
-export const tools: Tool[] = [ReadTool, GlobTool, GrepTool, WriteTool, EditTool]
+export const tools: Tool[] = [ReadTool, GlobTool, GrepTool, WriteTool, EditTool, BashTool]
 
 export function findTool(name: string): Tool | undefined {
   return tools.find((t) => t.name === name)

@@ -60,6 +60,7 @@ export function App() {
   const [streaming, setStreaming] = useState<{ text: string; thinking: string } | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [prompt, setPrompt] = useState<{ id: string; tool: string; detail: string } | null>(null)
+  const [busy, setBusy] = useState(false)
   const [input, setInput] = useState('')
   const endRef = useRef<HTMLDivElement>(null)
 
@@ -86,6 +87,17 @@ export function App() {
           setStreaming(null)
           setItems((it) => [...it, { kind: 'tool', id: event.id, name: event.name, summary: event.summary, status: 'running' }])
           break
+        case 'toolProgress':
+          // Live output from a running tool (e.g. Bash stdout). Append into its card, capped so the DOM
+          // stays sane; keep the TAIL (most recent output is what you're watching).
+          setItems((it) =>
+            it.map((x) =>
+              x.kind === 'tool' && x.id === event.id
+                ? { ...x, preview: `${x.preview ?? ''}${event.chunk}`.slice(-4000) }
+                : x,
+            ),
+          )
+          break
         case 'toolResult':
           setItems((it) =>
             it.map((x) =>
@@ -103,6 +115,7 @@ export function App() {
         }
         case 'turnDone':
           setStatus(null)
+          setBusy(false)
           break
       }
     }
@@ -119,7 +132,14 @@ export function App() {
     if (!text) return
     setItems((it) => [...it, { kind: 'user', text }])
     setInput('')
+    setBusy(true)
     vscode.postMessage({ type: 'submit', text })
+  }
+
+  function stop() {
+    vscode.postMessage({ type: 'abort' })
+    setBusy(false)
+    setStatus(null)
   }
 
   function respond(decision: 'allow' | 'allow-always' | 'deny') {
@@ -133,6 +153,7 @@ export function App() {
     setStreaming(null)
     setStatus(null)
     setPrompt(null)
+    setBusy(false)
     vscode.postMessage({ type: 'reset' })
   }
 
@@ -237,9 +258,15 @@ export function App() {
             }
           }}
         />
-        <button style={styles.send} onClick={send}>
-          Send
-        </button>
+        {busy ? (
+          <button style={{ ...styles.send, ...styles.stop }} onClick={stop}>
+            ■ Stop
+          </button>
+        ) : (
+          <button style={styles.send} onClick={send}>
+            Send
+          </button>
+        )}
       </div>
     </div>
   )
@@ -361,5 +388,9 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 4,
     padding: '0 12px',
     cursor: 'pointer',
+  },
+  stop: {
+    background: 'var(--vscode-errorForeground, #c33)',
+    color: 'var(--vscode-button-foreground, #fff)',
   },
 }

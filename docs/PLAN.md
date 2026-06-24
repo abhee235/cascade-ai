@@ -59,6 +59,8 @@ each concept to its Cascade module. Keep it open while building.
 | Execute one tool | `tools/runTool.ts` → `executeTool()` |
 | Concurrency scheduling | `tools/scheduler.ts` → `scheduleTools()` |
 | Permissions | `permissions/gate.ts` → `checkPermission()` |
+| Observability | `observability/tracer.ts` → `JsonlTracer` |
+| Bash (stream + abort) | `tools/builtins/Bash.ts` → `BashTool` | BashTool |
 | **Memory** | `memory/memoryStore.ts` → `loadMemory()` / `updateMemory()` |
 | MCP (lazy) | `mcp/mcpHub.ts` → `connectMcpServerOnFirstUse()` |
 | Compaction | `context/compactor.ts` → `compactIfNeeded()` |

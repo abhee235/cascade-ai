@@ -78,13 +78,14 @@ export async function* scheduleTools(
     for (const tu of batch) {
       const tool = findTool(tu.name)
       let decision = tool && perm ? checkPermission(tool, tu.input, perm.state) : 'allow'
+      const asked = decision === 'ask' // distinguishes a real prompt from an auto-allow in the trace
       if (decision === 'ask' && perm) {
         yield { type: 'permission', id: tu.id, tool: tu.name, detail: summary(tu) }
         const answer = await perm.request(tu.id) // ← BLOCKS here until respondPermission(tu.id, …)
         if (answer === 'allow-always') perm.state.allow.add(tu.name) // remember for the rest of the session
         decision = answer === 'deny' ? 'deny' : 'allow'
       }
-      tracer.event({ t: 'permission', id: tu.id, tool: tu.name, decision }) // forensics: every gate verdict
+      tracer.event({ t: 'permission', id: tu.id, tool: tu.name, decision, asked }) // forensics: every gate verdict
       if (decision === 'deny') {
         byId.set(tu.id, deniedBlock(tu.id))
         yield { type: 'toolStart', id: tu.id, name: tu.name, summary: summary(tu) }
@@ -94,21 +95,48 @@ export async function* scheduleTools(
       }
     }
 
-    // ── 2. RUN the allowed tools. A safe batch (multiple reads) runs in parallel; a solo write alone. ──
+    // ── 2. RUN the allowed tools, STREAMING progress. A generator can't `yield` from inside the
+    //       onProgress callback, so we BRIDGE: callbacks push chunks onto a queue and wake the loop,
+    //       which drains them as toolProgress events while the tools run. (Safe batch = parallel reads;
+    //       a solo mutating tool runs alone.) The single-threaded event loop guarantees no missed wakeup:
+    //       nothing runs between our pending-check and the await that registers `wake`. ──
     for (const tu of toRun) {
       yield { type: 'toolStart', id: tu.id, name: tu.name, summary: summary(tu) }
       tracer.event({ t: 'tool_call', id: tu.id, name: tu.name, input: tu.input }) // full input, untruncated
     }
+    const queue: { id: string; chunk: string }[] = []
+    let wake: (() => void) | null = null
+    const bump = () => {
+      const w = wake
+      wake = null
+      w?.()
+    }
     const started = Date.now()
-    const blocks = await Promise.all(toRun.map((tu) => executeTool(tu, ctx)))
+    let pending = toRun.length
+    const settled = new Map<string, ContentBlock>()
+    for (const tu of toRun) {
+      executeTool(tu, ctx, (chunk) => (queue.push({ id: tu.id, chunk }), bump())).then((block) => {
+        settled.set(tu.id, block)
+        pending--
+        bump()
+      })
+    }
+    while (pending > 0 || queue.length > 0) {
+      while (queue.length) {
+        const p = queue.shift()!
+        yield { type: 'toolProgress', id: p.id, chunk: p.chunk }
+      }
+      if (pending === 0) break
+      await new Promise<void>((res) => (wake = res))
+    }
     const ms = Date.now() - started
-    for (let i = 0; i < toRun.length; i++) {
-      const block = blocks[i]
-      byId.set(toRun[i].id, block)
+    for (const tu of toRun) {
+      const block = settled.get(tu.id)!
+      byId.set(tu.id, block)
       const isError = block.type === 'tool_result' && !!block.isError
       const content = block.type === 'tool_result' ? block.content : ''
-      tracer.event({ t: 'tool_result', id: toRun[i].id, name: toRun[i].name, ok: !isError, ms, content })
-      yield { type: 'toolResult', id: toRun[i].id, ok: !isError, preview: content.slice(0, 200) }
+      tracer.event({ t: 'tool_result', id: tu.id, name: tu.name, ok: !isError, ms, content })
+      yield { type: 'toolResult', id: tu.id, ok: !isError, preview: content.slice(0, 200) }
     }
   }
 
