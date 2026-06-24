@@ -699,3 +699,11 @@ tests. Ollama must be running with a tool-capable model.
 - Build strictly in order; every phase is a runnable checkpoint. Phases 1–11 grow the core (driven by the
   extension); Phase 12 adds the server + web frontend on the same engine.
 - The canonical mapping table is the anti-drift anchor — update it whenever a module is added or renamed.
+
+## North Star (future — NOT current scope)
+Once the coding agent is built and tested, the longer-term aim is to use `@cascade/core` as the **backend
+engine for a prompt-to-app builder** — a web (and/or desktop) product where users build whole
+apps from prompts, via its own frontend wrapper + app-scaffolding pre-prompts/tools/templates on the same
+engine. **Deferred — do not build toward it now;** finish + validate the agent first. Recorded because it's
+*why* the core is headless + frontend-agnostic (ADR-018) + provider-agnostic (ADR-020): an app-builder
+product is "a new frontend + prompt/tool pack on Cascade," not a rewrite.

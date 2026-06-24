@@ -21,6 +21,8 @@ export const GrepTool: Tool<z.infer<typeof inputSchema>> = {
   description: 'Search file contents with a regular expression. Returns matches as "file:line: text".',
   inputSchema,
   activitySummary: (input) => `Searching "${input.pattern}"`,
+  isReadOnly: () => true,
+  isConcurrencySafe: () => true,
   async call(input, ctx) {
     // Invalid regex → return the error AS the result so the model can fix its pattern (self-correction).
     let re: RegExp

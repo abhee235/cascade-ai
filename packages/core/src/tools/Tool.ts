@@ -28,6 +28,12 @@ export interface Tool<I = unknown> {
   inputSchema: ZodType<I>
   /** Present-tense activity line for the UI card, e.g. "Reading package.json". */
   activitySummary(input: I): string
+  /** Does this call mutate state? Used for permissions (Phase 7). Method form because it can depend on
+   *  input (Phase 8 Bash: `ls` is read-only, `rm` is not). Default when absent: false (assume it writes). */
+  isReadOnly?(input: I): boolean
+  /** Safe to run in parallel with other tools this turn? Default when absent: false (conservative).
+   *  Read-only tools are safe; writes are not (they can race). Used by the scheduler (Phase 6). */
+  isConcurrencySafe?(input: I): boolean
   /** Run the tool. Return text (and isError) — that becomes the tool_result. */
   call(input: I, ctx: ToolContext): Promise<ToolResult>
 }

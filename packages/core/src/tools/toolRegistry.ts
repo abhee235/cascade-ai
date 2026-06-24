@@ -7,8 +7,10 @@ import type { ToolSchema } from '../llm/provider'
 import { ReadTool } from './builtins/Read'
 import { GlobTool } from './builtins/Glob'
 import { GrepTool } from './builtins/Grep'
+import { WriteTool } from './builtins/Write'
+import { EditTool } from './builtins/Edit'
 
-export const tools: Tool[] = [ReadTool, GlobTool, GrepTool]
+export const tools: Tool[] = [ReadTool, GlobTool, GrepTool, WriteTool, EditTool]
 
 export function findTool(name: string): Tool | undefined {
   return tools.find((t) => t.name === name)

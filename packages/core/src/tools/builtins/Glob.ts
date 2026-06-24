@@ -22,6 +22,8 @@ export const GlobTool: Tool<z.infer<typeof inputSchema>> = {
   description: 'Find files by glob pattern. Returns matching file paths (relative to the search dir).',
   inputSchema,
   activitySummary: (input) => `Finding ${input.pattern}`,
+  isReadOnly: () => true,
+  isConcurrencySafe: () => true,
   async call(input, ctx) {
     const cwd = input.path ? resolve(ctx.cwd, input.path) : ctx.cwd
     const files = await fg(input.pattern, { cwd, onlyFiles: true, dot: false, ignore: IGNORE })

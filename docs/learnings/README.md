@@ -17,3 +17,4 @@ Cascade adopts or defers it.
 - [why-tools-are-objects.md](why-tools-are-objects.md) — a tool is an object implementing the Tool interface; `call(input, ctx)` is the function; method-shorthand explained.
 - [tool-call-binding.md](tool-call-binding.md) — how the LLM's JSON string becomes the tool's typed `input` (Zod schema out + JSON.parse + safeParse in).
 - [model-capability-fallbacks.md](model-capability-fallbacks.md) — native tool calls vs JSON-mode vs prompt-based ReAct; fallback lives in the provider, not the loop.
+- [tool-granularity.md](tool-granularity.md) — few general tools (Read/Grep/Bash) beat many narrow ones; WordCount is just `Bash wc`.

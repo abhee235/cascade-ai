@@ -10,8 +10,9 @@ import type { ActivityEvent, ContentBlock, Message } from '../protocol'
 import type { ModelProvider } from '../llm/provider'
 import type { ToolContext } from '../tools/Tool'
 import { buildSystemPrompt } from './systemPrompt'
-import { findTool, toolSchemas } from '../tools/toolRegistry'
-import { executeTool, type ToolUse } from '../tools/runTool'
+import { toolSchemas } from '../tools/toolRegistry'
+import type { ToolUse } from '../tools/runTool'
+import { scheduleTools } from '../tools/scheduler'
 
 export interface LoopDeps {
   provider: ModelProvider
@@ -19,14 +20,6 @@ export interface LoopDeps {
   cwd: string
   signal: AbortSignal
   maxTurns?: number
-}
-
-function safeSummary(tu: ToolUse): string {
-  try {
-    return findTool(tu.name)?.activitySummary(tu.input as never) ?? tu.name
-  } catch {
-    return tu.name
-  }
 }
 
 export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncIterable<ActivityEvent> {
@@ -76,16 +69,9 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
       return
     }
 
-    // Run each tool, surface activity, collect tool_result blocks.
-    const results: ContentBlock[] = []
-    for (const tu of toolUses) {
-      yield { type: 'toolStart', id: tu.id, name: tu.name, summary: safeSummary(tu) }
-      const block = await executeTool(tu, ctx)
-      results.push(block)
-      const isError = block.type === 'tool_result' && !!block.isError
-      const preview = block.type === 'tool_result' ? block.content.slice(0, 200) : ''
-      yield { type: 'toolResult', id: tu.id, ok: !isError, preview }
-    }
+    // Run the tools via the scheduler: read-only ones in parallel, writes serial (ADR-008). It yields
+    // the toolStart/toolResult activity and returns the tool_result blocks in original order.
+    const results = yield* scheduleTools(toolUses, ctx)
     messages.push({ role: 'user', content: results }) // tool_results become the next turn's input
 
     if (++turn >= maxTurns) {

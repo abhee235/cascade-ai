@@ -20,6 +20,8 @@ export const ReadTool: Tool<z.infer<typeof inputSchema>> = {
     'Read a UTF-8 text file from the workspace and return its contents. Use it to inspect files before answering.',
   inputSchema,
   activitySummary: (input) => `Reading ${input.file_path}`,
+  isReadOnly: () => true,
+  isConcurrencySafe: () => true,
   async call(input, ctx) {
     const path = isAbsolute(input.file_path) ? input.file_path : resolve(ctx.cwd, input.file_path)
     try {

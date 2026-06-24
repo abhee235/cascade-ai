@@ -90,3 +90,19 @@
    dual-theme, which now switches correctly via the `.dark` class synced in main.tsx. */
 .cascade-md pre { font-size: 12.5px; line-height: 1.55; }
 .cascade-md pre code { font-size: inherit; }
+
+/* Progress indicators — a tool card / status line should visibly spin while work is happening. */
+@keyframes cascade-spin { to { transform: rotate(360deg); } }
+.cascade-spinner {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  box-sizing: border-box;
+  border: 2px solid var(--vscode-panel-border);
+  border-top-color: var(--vscode-progressBar-background, var(--vscode-foreground));
+  border-radius: 50%;
+  animation: cascade-spin 0.7s linear infinite;
+  vertical-align: -1px;
+}
+@keyframes cascade-blink { 50% { opacity: 0; } }
+.cascade-caret { animation: cascade-blink 1s step-end infinite; }

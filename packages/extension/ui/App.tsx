@@ -136,7 +136,11 @@ export function App() {
           it.kind === 'tool' ? (
             <div key={i} style={styles.toolCard}>
               <div style={styles.toolHeader}>
-                <span>{toolIcon(it.status)}</span>
+                {it.status === 'running' ? (
+                  <span className="cascade-spinner" />
+                ) : (
+                  <span>{toolIcon(it.status)}</span>
+                )}
                 <span style={styles.toolName}>{it.name}</span>
                 <span style={styles.toolSummary}>{it.summary}</span>
               </div>
@@ -176,11 +180,15 @@ export function App() {
             )}
             <div className="cascade-md">
               <Md>{streaming.text}</Md>
-              <span style={styles.caret}>▋</span>
+              <span style={styles.caret} className="cascade-caret">▋</span>
             </div>
           </div>
         )}
-        {status && !streaming && <div style={styles.status}>⏺ {status}</div>}
+        {status && !streaming && (
+          <div style={styles.status}>
+            <span className="cascade-spinner" /> {status}
+          </div>
+        )}
         <div ref={endRef} />
       </div>
       <div style={styles.composer}>
