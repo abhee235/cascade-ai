@@ -9,6 +9,7 @@
 import type { ActivityEvent, ContentBlock, Message } from '../protocol'
 import type { ModelProvider } from '../llm/provider'
 import type { ToolContext } from '../tools/Tool'
+import type { PermissionController } from '../permissions/gate'
 import { buildSystemPrompt } from './systemPrompt'
 import { toolSchemas } from '../tools/toolRegistry'
 import type { ToolUse } from '../tools/runTool'
@@ -20,10 +21,11 @@ export interface LoopDeps {
   cwd: string
   signal: AbortSignal
   maxTurns?: number
+  permission?: PermissionController // Phase 7: gates tool calls; how 'ask' awaits the user
 }
 
 export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncIterable<ActivityEvent> {
-  const ctx: ToolContext = { cwd: deps.cwd, abortSignal: deps.signal }
+  const ctx: ToolContext = { cwd: deps.cwd, abortSignal: deps.signal, permission: deps.permission }
   const maxTurns = deps.maxTurns ?? 10
   let turn = 0
 

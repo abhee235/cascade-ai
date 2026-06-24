@@ -11,3 +11,6 @@ export type {
 export { createProvider } from './llm/factory'
 export type { ProviderConfig } from './llm/factory'
 export type { ModelProvider, CompletionRequest, CompletionResult } from './llm/provider'
+// Permissions (ADR-009): the frontend picks a mode; checkPermission is the gate.
+export { checkPermission } from './permissions/gate'
+export type { PermissionMode, PermissionDecision, PermissionState } from './permissions/gate'

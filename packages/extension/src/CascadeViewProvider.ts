@@ -5,7 +5,13 @@
 // SAME session and forward the SAME ActivityEvents to a browser — the engine doesn't know or care
 // which frontend is attached. — ADR-018.
 import * as vscode from 'vscode'
-import { createSession, createProvider, type CascadeSession, type InboundMessage } from '@cascade/core'
+import {
+  createSession,
+  createProvider,
+  type CascadeSession,
+  type InboundMessage,
+  type PermissionMode,
+} from '@cascade/core'
 
 export class CascadeViewProvider implements vscode.WebviewViewProvider {
   static readonly viewId = 'cascade.view'
@@ -41,7 +47,16 @@ export class CascadeViewProvider implements vscode.WebviewViewProvider {
         baseUrl: cfg.get<string>('baseUrl') || undefined,
         apiKey: cfg.get<string>('apiKey') || undefined,
       })
-      this.session = createSession({ cwd, provider, model })
+      // Permission MODE comes from settings (the frontend's policy — ADR-009). 'default' asks for writes.
+      const mode = cfg.get<PermissionMode>('permissionMode', 'default')
+      this.session = createSession({
+        cwd,
+        provider,
+        model,
+        mode,
+        allow: cfg.get<string[]>('allowTools', []),
+        deny: cfg.get<string[]>('denyTools', []),
+      })
       this.sessionCwd = cwd
     }
     return this.session

@@ -59,6 +59,7 @@ export function App() {
   const [items, setItems] = useState<Item[]>([])
   const [streaming, setStreaming] = useState<{ text: string; thinking: string } | null>(null)
   const [status, setStatus] = useState<string | null>(null)
+  const [prompt, setPrompt] = useState<{ id: string; tool: string; detail: string } | null>(null)
   const [input, setInput] = useState('')
   const endRef = useRef<HTMLDivElement>(null)
 
@@ -74,6 +75,11 @@ export function App() {
           break
         case 'text_delta':
           setStreaming((s) => ({ text: (s?.text ?? '') + event.text, thinking: s?.thinking ?? '' }))
+          break
+        case 'permission':
+          // A write needs approval. The core loop is now PARKED awaiting respondPermission(id, …).
+          setStatus(null)
+          setPrompt({ id: event.id, tool: event.tool, detail: event.detail })
           break
         case 'toolStart':
           // A tool is running — drop any transient pre-tool text and add a card.
@@ -116,10 +122,17 @@ export function App() {
     vscode.postMessage({ type: 'submit', text })
   }
 
+  function respond(decision: 'allow' | 'allow-always' | 'deny') {
+    if (!prompt) return
+    vscode.postMessage({ type: 'permission', id: prompt.id, decision })
+    setPrompt(null) // optimistic; the core resumes and the tool card will follow
+  }
+
   function newChat() {
     setItems([])
     setStreaming(null)
     setStatus(null)
+    setPrompt(null)
     vscode.postMessage({ type: 'reset' })
   }
 
@@ -181,6 +194,25 @@ export function App() {
             <div className="cascade-md">
               <Md>{streaming.text}</Md>
               <span style={styles.caret} className="cascade-caret">▋</span>
+            </div>
+          </div>
+        )}
+        {prompt && (
+          <div style={styles.permCard}>
+            <div style={styles.permTitle}>Allow Cascade to run this?</div>
+            <div style={styles.permDetail}>
+              <span style={styles.toolName}>{prompt.tool}</span> — {prompt.detail}
+            </div>
+            <div style={styles.permButtons}>
+              <button style={{ ...styles.permBtn, ...styles.permAllow }} onClick={() => respond('allow')}>
+                Allow once
+              </button>
+              <button style={styles.permBtn} onClick={() => respond('allow-always')}>
+                Always allow {prompt.tool}
+              </button>
+              <button style={{ ...styles.permBtn, ...styles.permDeny }} onClick={() => respond('deny')}>
+                Deny
+              </button>
             </div>
           </div>
         )}
@@ -267,6 +299,28 @@ const styles: Record<string, React.CSSProperties> = {
   },
   status: { opacity: 0.7, fontStyle: 'italic', padding: '6px 8px' },
   caret: { opacity: 0.6 },
+  // Permission card — blocks the loop until the user answers.
+  permCard: {
+    margin: '8px 0',
+    padding: '10px 12px',
+    borderRadius: 8,
+    border: '1px solid var(--vscode-inputValidation-warningBorder, var(--vscode-panel-border))',
+    background: 'var(--vscode-inputValidation-warningBackground, var(--vscode-editorWidget-background))',
+  },
+  permTitle: { fontWeight: 600, marginBottom: 4 },
+  permDetail: { fontSize: 12, opacity: 0.85, marginBottom: 8 },
+  permButtons: { display: 'flex', gap: 6, flexWrap: 'wrap' },
+  permBtn: {
+    background: 'var(--vscode-button-secondaryBackground, transparent)',
+    color: 'var(--vscode-button-secondaryForeground, var(--vscode-foreground))',
+    border: '1px solid var(--vscode-panel-border)',
+    borderRadius: 4,
+    padding: '3px 10px',
+    fontSize: 12,
+    cursor: 'pointer',
+  },
+  permAllow: { background: 'var(--vscode-button-background)', color: 'var(--vscode-button-foreground)', border: 'none' },
+  permDeny: { color: 'var(--vscode-errorForeground)' },
   // Tool cards
   toolCard: {
     margin: '6px 0',

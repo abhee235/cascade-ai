@@ -64,6 +64,29 @@
           "type": "string",
           "default": "",
           "description": "API key for hosted providers (OpenAI, Groq, OpenRouter). Not needed for local Ollama/llama.cpp."
+        },
+        "cascade.permissionMode": {
+          "type": "string",
+          "enum": [
+            "default",
+            "acceptEdits",
+            "plan",
+            "bypass"
+          ],
+          "default": "default",
+          "description": "How tool calls are gated. default: ask before writes. acceptEdits: auto-allow writes/edits. plan: read-only, block all writes. bypass: allow everything (no prompts)."
+        },
+        "cascade.allowTools": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Tool names to always allow without prompting (e.g. [\"Write\"])."
+        },
+        "cascade.denyTools": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Tool names to always deny."
         }
       }
     }
