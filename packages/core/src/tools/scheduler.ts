@@ -26,8 +26,9 @@ function summary(tu: ToolUse): string {
   }
 }
 
-/** Group consecutive safe tools into parallel batches; each unsafe tool is its own (serial) batch. */
-function partition(toolUses: ToolUse[]): ToolUse[][] {
+/** Group consecutive safe tools into parallel batches; each unsafe tool is its own (serial) batch.
+ *  Exported for unit testing — it's pure (no execution). */
+export function partition(toolUses: ToolUse[]): ToolUse[][] {
   const batches: ToolUse[][] = []
   let safeRun: ToolUse[] = []
   for (const tu of toolUses) {

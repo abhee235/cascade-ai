@@ -10,9 +10,14 @@
     "build": "npm run build --workspaces --if-present",
     "build:core": "npm run build -w @cascade/core",
     "build:extension": "npm run build -w @cascade/extension",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.9"
   }
 }

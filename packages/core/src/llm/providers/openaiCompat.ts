@@ -25,8 +25,9 @@ const asBlocks = (c: Message['content']): ContentBlock[] =>
 const textOf = (blocks: ContentBlock[]): string =>
   blocks.filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text').map((b) => b.text).join('')
 
-/** Internal content-block messages → OpenAI messages (+ system). Expands tool_use/tool_result. */
-function toOpenAIMessages(messages: Message[], system?: string): OpenAIMessage[] {
+/** Internal content-block messages → OpenAI messages (+ system). Expands tool_use/tool_result.
+ *  Exported for unit testing (the bridge is the trickiest translation). */
+export function toOpenAIMessages(messages: Message[], system?: string): OpenAIMessage[] {
   const out: OpenAIMessage[] = []
   if (system) out.push({ role: 'system', content: system })
   for (const m of messages) {
