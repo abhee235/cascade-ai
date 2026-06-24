@@ -1,0 +1,47 @@
+// observability/tracer.ts — trace the agent end-to-end as JSONL. — ADR-023.
+//
+// This is a SECOND event stream, distinct from ActivityEvent. ActivityEvent is for DISPLAY (truncated
+// previews, no raw model I/O). TraceEvent is for FORENSICS: the FULL request we sent the model, the full
+// response, every tool input/output, permission decisions, and timing — so "why did it go wrong?" has an
+// answer. It's injected by DI like the provider (ADR-020); the default NoopTracer keeps tests/headless silent.
+//
+// Format: JSONL — one event per line, append-only.
+
+import { createWriteStream, mkdirSync, type WriteStream } from 'node:fs'
+import { dirname } from 'node:path'
+import type { Message } from '../protocol'
+
+/** One forensic event. Serializable (plain JSON) like ActivityEvent — but richer and untruncated. */
+export type TraceEvent =
+  | { t: 'submit'; text: string }
+  | { t: 'model_request'; turn: number; system: string; tools: string[]; messages: Message[] }
+  | { t: 'model_response'; turn: number; text: string; thinking: string; toolUses: { id: string; name: string; input: unknown }[] }
+  | { t: 'permission'; id: string; tool: string; decision: string }
+  | { t: 'tool_call'; id: string; name: string; input: unknown }
+  | { t: 'tool_result'; id: string; name: string; ok: boolean; ms: number; content: string }
+  | { t: 'turn_done'; turns: number }
+  | { t: 'error'; message: string }
+
+export interface Tracer {
+  event(e: TraceEvent): void
+}
+
+/** Default: trace nothing. So omitting a tracer (tests, smoke) has zero cost or output. */
+export const NoopTracer: Tracer = { event() {} }
+
+/** Appends one JSON object per line (JSONL): greppable, jq-able, append-only. Each line is stamped with a
+ *  wall-clock `ts` and a monotonic `seq` so you can order/diff events even at sub-millisecond spacing. */
+export class JsonlTracer implements Tracer {
+  private readonly stream: WriteStream
+  private seq = 0
+
+  constructor(path: string) {
+    mkdirSync(dirname(path), { recursive: true })
+    this.stream = createWriteStream(path, { flags: 'a' }) // 'a' = append, never clobber a prior run
+  }
+
+  event(e: TraceEvent): void {
+    // JSON.stringify reads `messages` at write time (synchronous), so we capture the live snapshot without cloning.
+    this.stream.write(`${JSON.stringify({ ts: new Date().toISOString(), seq: this.seq++, ...e })}\n`)
+  }
+}

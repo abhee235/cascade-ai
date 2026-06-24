@@ -14,3 +14,6 @@ export type { ModelProvider, CompletionRequest, CompletionResult } from './llm/p
 // Permissions (ADR-009): the frontend picks a mode; checkPermission is the gate.
 export { checkPermission } from './permissions/gate'
 export type { PermissionMode, PermissionDecision, PermissionState } from './permissions/gate'
+// Observability (ADR-023): inject a Tracer to capture a forensic JSONL trace of a run.
+export { NoopTracer, JsonlTracer } from './observability/tracer'
+export type { Tracer, TraceEvent } from './observability/tracer'

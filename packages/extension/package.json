@@ -87,6 +87,11 @@
           "items": { "type": "string" },
           "default": [],
           "description": "Tool names to always deny."
+        },
+        "cascade.trace": {
+          "type": "boolean",
+          "default": true,
+          "description": "Write a forensic JSONL trace of each run to <workspace>/.cascade/trace-<timestamp>.jsonl (full model requests/responses, tool I/O, permission decisions, timing)."
         }
       }
     }

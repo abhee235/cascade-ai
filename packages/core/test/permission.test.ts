@@ -45,7 +45,7 @@ describe('scheduleTools — permission gating', () => {
 
     expect(events.find((e) => e.type === 'permission')).toMatchObject({ type: 'permission', id: '1', tool: 'Write' })
     expect(result[0]).toMatchObject({ type: 'tool_result', isError: true })
-    expect((result[0] as any).content).toMatch(/denied/i)
+    expect((result[0] as any).content).toMatch(/declined|denied/i)
   })
 
   it('allow-always runs the write AND remembers the tool for the session', async () => {

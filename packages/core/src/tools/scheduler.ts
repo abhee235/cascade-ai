@@ -10,6 +10,7 @@ import type { ToolContext } from './Tool'
 import { findTool } from './toolRegistry'
 import { executeTool, type ToolUse } from './runTool'
 import { checkPermission } from '../permissions/gate'
+import { NoopTracer } from '../observability/tracer'
 
 function isSafe(tu: ToolUse): boolean {
   try {
@@ -44,9 +45,19 @@ export function partition(toolUses: ToolUse[]): ToolUse[][] {
   return batches
 }
 
-/** A tool_result that records a denial — the model SEES this and can adapt (e.g. ask, or try another way). */
+/** A tool_result that records a denial — the model SEES this and adapts. The wording is DIRECTIVE on
+ *  purpose: "Permission denied" alone reads like an OS EACCES error, so models retry or blame the
+ *  filesystem/sandbox (observed in a trace). Tell it plainly the user chose No, and to stop and ask. */
 function deniedBlock(id: string): ContentBlock {
-  return { type: 'tool_result', tool_use_id: id, content: 'Permission denied by the user.', isError: true }
+  return {
+    type: 'tool_result',
+    tool_use_id: id,
+    content:
+      'The user declined this action via the approval prompt — a deliberate choice, not a filesystem ' +
+      'or sandbox error. Do not retry it or suggest workarounds; briefly acknowledge and ask the user ' +
+      'how they would like to proceed.',
+    isError: true,
+  }
 }
 
 /** Yields toolStart/permission/toolResult activity; returns the tool_result blocks in original order.
@@ -58,6 +69,7 @@ export async function* scheduleTools(
 ): AsyncGenerator<ActivityEvent, ContentBlock[]> {
   const byId = new Map<string, ContentBlock>()
   const perm = ctx.permission
+  const tracer = ctx.tracer ?? NoopTracer
 
   for (const batch of partition(toolUses)) {
     // ── 1. GATE every tool first. Reads auto-allow instantly (no await); a write in 'default' mode
@@ -72,6 +84,7 @@ export async function* scheduleTools(
         if (answer === 'allow-always') perm.state.allow.add(tu.name) // remember for the rest of the session
         decision = answer === 'deny' ? 'deny' : 'allow'
       }
+      tracer.event({ t: 'permission', id: tu.id, tool: tu.name, decision }) // forensics: every gate verdict
       if (decision === 'deny') {
         byId.set(tu.id, deniedBlock(tu.id))
         yield { type: 'toolStart', id: tu.id, name: tu.name, summary: summary(tu) }
@@ -82,14 +95,20 @@ export async function* scheduleTools(
     }
 
     // ── 2. RUN the allowed tools. A safe batch (multiple reads) runs in parallel; a solo write alone. ──
-    for (const tu of toRun) yield { type: 'toolStart', id: tu.id, name: tu.name, summary: summary(tu) }
+    for (const tu of toRun) {
+      yield { type: 'toolStart', id: tu.id, name: tu.name, summary: summary(tu) }
+      tracer.event({ t: 'tool_call', id: tu.id, name: tu.name, input: tu.input }) // full input, untruncated
+    }
+    const started = Date.now()
     const blocks = await Promise.all(toRun.map((tu) => executeTool(tu, ctx)))
+    const ms = Date.now() - started
     for (let i = 0; i < toRun.length; i++) {
       const block = blocks[i]
       byId.set(toRun[i].id, block)
       const isError = block.type === 'tool_result' && !!block.isError
-      const preview = block.type === 'tool_result' ? block.content.slice(0, 200) : ''
-      yield { type: 'toolResult', id: toRun[i].id, ok: !isError, preview }
+      const content = block.type === 'tool_result' ? block.content : ''
+      tracer.event({ t: 'tool_result', id: toRun[i].id, name: toRun[i].name, ok: !isError, ms, content })
+      yield { type: 'toolResult', id: toRun[i].id, ok: !isError, preview: content.slice(0, 200) }
     }
   }
 

@@ -9,6 +9,7 @@ import type { ActivityEvent, Message } from './protocol'
 import type { ModelProvider } from './llm/provider'
 import { runAgentLoop } from './agent/agentLoop'
 import type { PermissionController, PermissionMode, PermissionState } from './permissions/gate'
+import { NoopTracer, type Tracer } from './observability/tracer'
 
 export interface SessionOptions {
   cwd: string
@@ -20,6 +21,8 @@ export interface SessionOptions {
   /** Tool names pre-allowed / pre-denied (e.g. from settings). */
   allow?: string[]
   deny?: string[]
+  /** Optional forensic trace sink (ADR-023). Omit ⇒ NoopTracer (no output). */
+  tracer?: Tracer
 }
 
 export interface CascadeSession {
@@ -46,6 +49,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
     state,
     request: (id) => new Promise((resolve) => pending.set(id, resolve)),
   }
+  const tracer = opts.tracer ?? NoopTracer
 
   return {
     async *submit(userText: string): AsyncIterable<ActivityEvent> {
@@ -53,6 +57,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
       inFlight = controller
 
       messages.push({ role: 'user', content: userText }) // append the user turn to history
+      tracer.event({ t: 'submit', text: userText })
 
       try {
         // Delegate to the agentic loop. It streams, runs tools, appends results, and loops until
@@ -63,12 +68,14 @@ export function createSession(opts: SessionOptions): CascadeSession {
           cwd: opts.cwd,
           signal: controller.signal,
           permission,
+          tracer,
         })
       } catch (err) {
         const msg =
           err instanceof Error && err.name === 'AbortError'
             ? '⏹ Cancelled.'
             : `⚠️ ${err instanceof Error ? err.message : String(err)}`
+        tracer.event({ t: 'error', message: msg })
         yield { type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: msg }] } }
         yield { type: 'turnDone', steps: 0 }
       } finally {

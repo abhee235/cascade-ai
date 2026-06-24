@@ -10,6 +10,8 @@ import type { ActivityEvent, ContentBlock, Message } from '../protocol'
 import type { ModelProvider } from '../llm/provider'
 import type { ToolContext } from '../tools/Tool'
 import type { PermissionController } from '../permissions/gate'
+import { NoopTracer, type Tracer } from '../observability/tracer'
+import { tools as toolRegistry } from '../tools/toolRegistry'
 import { buildSystemPrompt } from './systemPrompt'
 import { toolSchemas } from '../tools/toolRegistry'
 import type { ToolUse } from '../tools/runTool'
@@ -22,10 +24,12 @@ export interface LoopDeps {
   signal: AbortSignal
   maxTurns?: number
   permission?: PermissionController // Phase 7: gates tool calls; how 'ask' awaits the user
+  tracer?: Tracer // ADR-023: forensic JSONL trace
 }
 
 export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncIterable<ActivityEvent> {
-  const ctx: ToolContext = { cwd: deps.cwd, abortSignal: deps.signal, permission: deps.permission }
+  const tracer = deps.tracer ?? NoopTracer
+  const ctx: ToolContext = { cwd: deps.cwd, abortSignal: deps.signal, permission: deps.permission, tracer }
   const maxTurns = deps.maxTurns ?? 10
   let turn = 0
 
@@ -35,6 +39,9 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     const toolUses: ToolUse[] = []
 
     yield { type: 'status', text: 'Thinking…' }
+    // FORENSICS: record the FULL request we're about to send — the #1 thing you need when an answer
+    // is wrong ("did the model even see the tool_result / the right system prompt?"). — ADR-023.
+    tracer.event({ t: 'model_request', turn, system: buildSystemPrompt({ cwd: deps.cwd }), tools: toolRegistry.map((t) => t.name), messages })
     for await (const ev of deps.provider.stream(
       { messages, model: deps.model, system: buildSystemPrompt({ cwd: deps.cwd }), tools: toolSchemas() },
       deps.signal,
@@ -49,6 +56,8 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
         toolUses.push({ id: ev.id, name: ev.name, input: ev.input })
       }
     }
+
+    tracer.event({ t: 'model_response', turn, text, thinking, toolUses })
 
     // Record the assistant turn in history: thinking, text, then tool_use blocks.
     const assistant: ContentBlock[] = []
@@ -67,6 +76,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     // TERMINAL — no tool calls → done.
     if (toolUses.length === 0) {
       if (!display.length) yield { type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: '' }] } }
+      tracer.event({ t: 'turn_done', turns: turn })
       yield { type: 'turnDone', steps: turn }
       return
     }
@@ -77,6 +87,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     messages.push({ role: 'user', content: results }) // tool_results become the next turn's input
 
     if (++turn >= maxTurns) {
+      tracer.event({ t: 'turn_done', turns: turn })
       yield { type: 'status', text: `Stopped after ${maxTurns} turns.` }
       yield { type: 'turnDone', steps: turn }
       return

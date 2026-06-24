@@ -5,12 +5,15 @@
 // SAME session and forward the SAME ActivityEvents to a browser — the engine doesn't know or care
 // which frontend is attached. — ADR-018.
 import * as vscode from 'vscode'
+import { join } from 'node:path'
 import {
   createSession,
   createProvider,
+  JsonlTracer,
   type CascadeSession,
   type InboundMessage,
   type PermissionMode,
+  type Tracer,
 } from '@cascade/core'
 
 export class CascadeViewProvider implements vscode.WebviewViewProvider {
@@ -49,6 +52,12 @@ export class CascadeViewProvider implements vscode.WebviewViewProvider {
       })
       // Permission MODE comes from settings (the frontend's policy — ADR-009). 'default' asks for writes.
       const mode = cfg.get<PermissionMode>('permissionMode', 'default')
+      // Forensic trace (ADR-023): when cascade.trace is on, write a JSONL run log under <workspace>/.cascade/.
+      let tracer: Tracer | undefined
+      if (cfg.get<boolean>('trace', true)) {
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+        tracer = new JsonlTracer(join(cwd, '.cascade', `trace-${stamp}.jsonl`))
+      }
       this.session = createSession({
         cwd,
         provider,
@@ -56,6 +65,7 @@ export class CascadeViewProvider implements vscode.WebviewViewProvider {
         mode,
         allow: cfg.get<string[]>('allowTools', []),
         deny: cfg.get<string[]>('denyTools', []),
+        tracer,
       })
       this.sessionCwd = cwd
     }

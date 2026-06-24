@@ -6,6 +6,7 @@
 
 import type { ZodType } from 'zod'
 import type { PermissionController } from '../permissions/gate'
+import type { Tracer } from '../observability/tracer'
 
 export interface ToolContext {
   cwd: string
@@ -13,6 +14,8 @@ export interface ToolContext {
   /** Phase 7: how tool calls are gated (mode + rules) and how 'ask' awaits the user. Optional so
    *  headless smoke tests can omit it (then everything is treated as allowed). */
   permission?: PermissionController
+  /** ADR-023: forensic trace sink. Omit ⇒ untraced. */
+  tracer?: Tracer
 }
 
 export interface ToolResult {

@@ -5,3 +5,6 @@ out/
 *.tsbuildinfo
 .DS_Store
 .env
+
+# Forensic run traces (ADR-023)
+.cascade/
