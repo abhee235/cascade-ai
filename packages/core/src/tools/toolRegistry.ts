@@ -5,8 +5,10 @@ import { z } from 'zod'
 import type { Tool } from './Tool'
 import type { ToolSchema } from '../llm/provider'
 import { ReadTool } from './builtins/Read'
+import { GlobTool } from './builtins/Glob'
+import { GrepTool } from './builtins/Grep'
 
-export const tools: Tool[] = [ReadTool]
+export const tools: Tool[] = [ReadTool, GlobTool, GrepTool]
 
 export function findTool(name: string): Tool | undefined {
   return tools.find((t) => t.name === name)

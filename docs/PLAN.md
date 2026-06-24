@@ -151,7 +151,7 @@ client — in *any* frontend — sees that one provider-neutral shape.
 - [ ] **Windows gotcha:** use `127.0.0.1`, not `localhost` (IPv6 `::1` won't reach Ollama).
 
 ## Checkpoint discipline (git)
-- Cascade is its own git repo. **One commit per phase**, tagged `phase-0`…`phase-12`.
+- Cascade is its own git repo. **One commit per phase**, tagged `phase-0`…`phase-13`.
 - Commit only once both test queries pass and the self-check is answerable.
 
 ---
@@ -310,6 +310,7 @@ Each ADR is a short file in `cascade/docs/adr/`: Context → Decision → Conseq
 | ADR-017 | Subagents (nested loop with own context) | 11 |
 | **ADR-018** | **Frontend-agnostic core + transport boundary (in-process & WebSocket)** | 0 (realized in 12) |
 | **ADR-019** | **Web app over the Cascade server** | 12 |
+| ADR-021 | Tool-calling strategies: native / structured-output / prompt-based ReAct | 13 |
 
 ---
 
@@ -369,7 +370,7 @@ UI submit "what's in README?"
 
 ---
 
-## The Curriculum (13 checkpoints, Phase 0–12)
+## The Curriculum (14 checkpoints, Phase 0–13)
 
 > Phases 1–11 build `@cascade/core` (the algorithm) driven by the `extension` frontend. Phase 12 proves
 > the core is frontend-agnostic by adding the `server` + `web` (browser chat) frontend on the same engine.
@@ -649,6 +650,30 @@ same socket. The extension keeps using the core in-process — both frontends sh
 1. "Read package.json and summarize it" → the web chat shows the same activity timeline (Reading… ✓) and renders the final answer whole — identical behavior to the extension, different frontend.
 2. "Run `node -v` then delete temp.txt" → Bash progress streams over WS; the permission card for delete appears in the browser and Deny propagates back through the socket to the core.
 **✅ Self-check:** *What is the only kind of data that crosses the WebSocket, and why does that make the extension and web app interchangeable?*
+
+---
+
+### Phase 13 — Tool-calling strategies for any model (structured-output + prompt-based ReAct) — capstone extension
+**Goal:** make Cascade work with models that **lack native tool calling**, by adding two more provider
+strategies behind the same interface. The whole point: prove the architecture — only the **provider**
+changes; `runAgentLoop`, the tools, and the UI are untouched.
+**🎯 You'll understand:** the tool-calling capability spectrum, and that the fallback is quarantined in the
+provider because the loop only ever consumes `tool_use` `StreamEvent`s (ADR-020 + the StreamEvent boundary).
+**The idea (3 tiers):** native `tool_calls` (Phase 4) → **structured output** (force JSON via
+`response_format`/grammar; prompt for `{"tool","input"}`; parse) → **prompt-based ReAct** (describe tools
+in the system prompt; scrape a `<tool_call>{…}</tool_call>` marker from plain text; strip it from display).
+See `docs/learnings/model-capability-fallbacks.md`.
+**Build checklist:**
+- [ ] `cascade.toolCallStrategy` setting (`native` | `structured` | `react`) + optional capability auto-detect.
+- [ ] `StructuredToolStrategy`: send tools as a JSON-schema `response_format`; prompt the model to emit a
+      tool-call object; parse it and **yield the same `tool_use` StreamEvents**.
+- [ ] `ReActToolStrategy`: inject tool descriptions into the system prompt; parse the text stream for
+      `<tool_call>{…}</tool_call>`; yield `tool_use` StreamEvents; strip markers from the displayed text.
+- [ ] Forgiving parsing + retries; rely on `maxTurns`. Keep the loop/tools/UI unchanged (the proof).
+- [ ] `docs/adr/ADR-021-tool-call-strategies.md` + `docs/guide/phase-13.md`.
+**Test queries:** point `cascade.model` at a **non-tool** Ollama model; with `structured` and then `react`
+strategy, "Read package.json and tell me the name" still triggers a Read and answers — via the fallback.
+**✅ Self-check:** *Why did adding two new tool-calling strategies require zero changes to `runAgentLoop`?*
 
 ---
 
