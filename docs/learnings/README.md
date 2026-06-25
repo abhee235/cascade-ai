@@ -23,3 +23,4 @@ Cascade adopts or defers it.
 - [tool-schema-contract.md](tool-schema-contract.md) — Zod→JSON Schema→OpenAI envelope→Ollama; no direct contract, two stacked specs; advertise loosely (hint) vs enforce strictly (safeParse).
 - [callback-to-generator-bridge.md](callback-to-generator-bridge.md) — the scheduler's progress pump: "pause and leave a resume button" (wake/bump), receptionist+bell analogy, why no chunk is lost.
 - [mcp-init-strategy.md](mcp-init-strategy.md) — lazy vs startup MCP: discovery needs a connection, so pure-lazy can't advertise tools; land on background discovery + lazy retry (with how common MCP clients initialize).
+- [context-and-memory-design.md](context-and-memory-design.md) — Phase 10 system design: compaction (summarize-keep-recent) + persistent memory (file-backed core memory); compared to common approaches, tuned for small local windows.
