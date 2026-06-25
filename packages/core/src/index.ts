@@ -22,3 +22,16 @@ export { McpHub } from './mcp/mcpHub'
 export type { McpServerConfig, McpConnect, McpClient, McpStatus, McpServerStatus } from './mcp/mcpHub'
 export { sdkConnect } from './mcp/sdkConnect'
 export { loadMcpServers, MCP_CONFIG_FILE } from './mcp/loadMcpConfig'
+// Memory (ADR-015): durable cross-session core memory, injected into the system prompt.
+export {
+  loadMemory,
+  memoryFiles,
+  appendMemory,
+  replaceMemory,
+  forgetMemory,
+  memoryPaths,
+  MEMORY_FILE,
+  MEMORY_LOCAL_FILE,
+} from './memory/memoryStore'
+export { createArchival } from './memory/archival'
+export type { ArchivalMemory, ArchivalHit, ArchivalEntry } from './memory/archival'

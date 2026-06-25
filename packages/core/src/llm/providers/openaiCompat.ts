@@ -105,6 +105,21 @@ export class OpenAICompatProvider implements ModelProvider {
     return { text: json.choices?.[0]?.message?.content ?? '' }
   }
 
+  async embed(texts: string[], model: string, signal?: AbortSignal): Promise<number[][]> {
+    const res = await fetch(`${this.cfg.baseUrl}/v1/embeddings`, {
+      method: 'POST',
+      headers: this.headers(),
+      body: JSON.stringify({ model, input: texts }),
+      signal,
+    })
+    if (!res.ok) {
+      const b = await res.text().catch(() => '')
+      throw new Error(`${this.id} embeddings HTTP ${res.status}: ${b.slice(0, 200) || res.statusText}`)
+    }
+    const json = (await res.json()) as { data?: { embedding: number[] }[] }
+    return (json.data ?? []).map((d) => d.embedding)
+  }
+
   async *stream(req: CompletionRequest, signal?: AbortSignal): AsyncIterable<StreamEvent> {
     const res = await fetch(`${this.cfg.baseUrl}/v1/chat/completions`, {
       method: 'POST',

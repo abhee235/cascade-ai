@@ -12,6 +12,8 @@ import type { PermissionController, PermissionMode, PermissionState } from './pe
 import { NoopTracer, type Tracer } from './observability/tracer'
 import { createRegistry } from './tools/toolRegistry'
 import { McpHub, type McpServerConfig, type McpConnect, type McpServerStatus } from './mcp/mcpHub'
+import { createArchival, type ArchivalHit } from './memory/archival'
+import { loadMemory } from './memory/memoryStore'
 
 export interface SessionOptions {
   cwd: string
@@ -29,6 +31,10 @@ export interface SessionOptions {
   mcpServers?: Record<string, McpServerConfig>
   /** How to connect an MCP server. Injected so the real SDK adapter (or a fake) is pluggable. */
   mcpConnect?: McpConnect
+  /** Embedding model for archival memory (Phase 10). Default 'nomic-embed-text'. */
+  embedModel?: string
+  /** Self-curate durable facts into archival memory at the end of each turn (Phase 10). Default true. */
+  autoMemory?: boolean
 }
 
 export interface CascadeSession {
@@ -43,6 +49,10 @@ export interface CascadeSession {
   mcpStatuses(): McpServerStatus[]
   mcpConnect(name: string): void
   mcpDisconnect(name: string): Promise<void>
+  /** Memory panel (/memory): the injected core block, the archival list, search, and forget. */
+  memoryView(): { core: string; archival: { id: string; text: string; ts: string }[] }
+  memorySearch(query: string): Promise<ArchivalHit[]>
+  memoryForget(id: string): void
 }
 
 export function createSession(opts: SessionOptions): CascadeSession {
@@ -70,6 +80,12 @@ export function createSession(opts: SessionOptions): CascadeSession {
   hub?.start()
   const registry = createRegistry(() => hub?.readyTools() ?? [])
 
+  // Archival (semantic) memory — Tier 2. The embedder is bound to the provider + embed model; if the
+  // provider can't embed (or no model), archival quietly degrades to keyword search.
+  const embedModel = opts.embedModel ?? 'nomic-embed-text'
+  const embed = opts.provider.embed ? (texts: string[]) => opts.provider.embed!(texts, embedModel) : undefined
+  const archival = createArchival({ cwd: opts.cwd, embed })
+
   return {
     async *submit(userText: string): AsyncIterable<ActivityEvent> {
       const controller = new AbortController()
@@ -78,6 +94,18 @@ export function createSession(opts: SessionOptions): CascadeSession {
       messages.push({ role: 'user', content: userText }) // append the user turn to history
       tracer.event({ t: 'submit', text: userText })
       hub?.retryFailed() // lazy retry: give a previously-failed server another chance at the start of a turn
+
+      // Proactive retrieval (ADR-015): auto-search archival for this message and inject the relevant hits,
+      // so the model ALWAYS sees pertinent past memories without having to call MemorySearch itself.
+      let recalled = ''
+      try {
+        if (archival.count() > 0) {
+          const relevant = (await archival.search(userText, 3)).filter((h) => h.score >= 0.45)
+          if (relevant.length) recalled = relevant.map((h) => `- ${h.text}`).join('\n')
+        }
+      } catch {
+        /* retrieval is best-effort */
+      }
 
       try {
         // Delegate to the agentic loop. It streams, runs tools, appends results, and loops until
@@ -90,6 +118,9 @@ export function createSession(opts: SessionOptions): CascadeSession {
           permission,
           tracer,
           registry,
+          archival,
+          autoMemory: opts.autoMemory,
+          recalled,
         })
       } catch (err) {
         const msg =
@@ -136,5 +167,12 @@ export function createSession(opts: SessionOptions): CascadeSession {
     async mcpDisconnect(name) {
       await hub?.disconnect(name)
     },
+
+    memoryView: () => ({
+      core: loadMemory(opts.cwd),
+      archival: archival.list().map((e) => ({ id: e.id, text: e.text, ts: e.ts })),
+    }),
+    memorySearch: (query) => archival.search(query, 10),
+    memoryForget: (id) => archival.remove(id),
   }
 }

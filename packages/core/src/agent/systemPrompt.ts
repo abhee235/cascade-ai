@@ -6,14 +6,18 @@
 //
 
 import { platform } from 'node:os'
+import { loadMemory } from '../memory/memoryStore'
 
 export interface SystemPromptInput {
   cwd: string
+  /** Archival memories auto-retrieved for THIS user message (proactive retrieval, ADR-015) — injected so
+   *  the model sees relevant past facts without having to call MemorySearch. */
+  recalled?: string
 }
 
-export function buildSystemPrompt({ cwd }: SystemPromptInput): string {
+export function buildSystemPrompt({ cwd, recalled }: SystemPromptInput): string {
   const today = new Date().toISOString().slice(0, 10)
-  return [
+  const base = [
     'You are Cascade, a concise, helpful coding assistant running inside VS Code.',
     'Answer clearly and use Markdown. Prefer short, direct responses; show code in fenced blocks.',
     '',
@@ -22,4 +26,14 @@ export function buildSystemPrompt({ cwd }: SystemPromptInput): string {
     `- OS: ${platform()}`,
     `- Date: ${today}`,
   ].join('\n')
+  // Durable memory is read FRESH each call (cheap, local files), so Memory-tool writes show up immediately.
+  // It's appended to the system prompt — outside the conversation history, so compaction never drops it.
+  const memory = loadMemory(cwd)
+  let prompt = memory ? `${base}\n\n${memory}` : base
+  // Proactive retrieval: relevant archival memories for this turn, surfaced automatically (lower trust than
+  // core — the model should verify, since they're retrieved by similarity).
+  if (recalled) {
+    prompt += `\n\nPossibly relevant memories from past sessions (retrieved by similarity — verify before relying):\n${recalled}`
+  }
+  return prompt
 }

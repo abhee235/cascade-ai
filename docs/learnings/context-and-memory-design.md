@@ -163,15 +163,35 @@ Memory is a **stack of files**, loaded **lowest→highest priority** (later file
 - **Auto-memory index** (`MEMORY.md`, always injected) is capped at 200 lines /
   25k bytes, trimmed at a newline boundary with a "too long" notice.
 
-### Cascade's design (2-tier, simpler updater)
-- `memory/memoryStore.ts → loadMemory(cwd)` reads a **committable project** file (`CASCADE.md` at root) + an
-  optional **user-global** file (`~/.cascade/CASCADE.md`); injected into `buildSystemPrompt()` with the same
-  **OVERRIDE header**, project loaded last (higher priority).
-- Support **`@import`** with a depth cap + text-extension whitelist (cheap, high-leverage).
-- `tools/builtins/Memory.ts` — the agent **self-edits** its memory (append/replace): a single tool is far
-  simpler than fork-extraction and still gives MemGPT-style **core-memory self-curation**. Plus an
-  auto-capture path on "remember …". Cap the always-injected index by **lines + bytes**.
-- **Defer**: managed/local tiers, fork-based auto-extraction, archival/vector tier, sleeptime curation.
+### Cascade's design — BEST-IN-CLASS (3 tiers + self-curation, all local)
+A file-only design is **file-injected only**: always in-context (capped, costs tokens every turn), **no semantic
+retrieval**, and "remembering" is a flat fork-extraction into files. We build the **tiered self-editing
+architecture, Ollama-native** — which file-only designs lack — fit for a production-grade product (deep,
+retrievable, self-maintaining per-project memory). See ADR-015.
+
+**Tier 1 — Core memory** (always in-context, file-backed): `memory/memoryStore.ts`.
+- **Multi-scope**: project `CASCADE.md` + project-local `CASCADE.local.md` (gitignored) + user
+  `~/.cascade/CASCADE.md`; **directory walk** CWD→root (monorepos); project/closer = higher priority.
+- **`@import`** (`@path`/`@./rel`/`@~/home`): depth cap, text-extension whitelist, circular-ref protection,
+  external-import note. Injected under the **OVERRIDE header**, capped by lines+bytes.
+- **Structured self-edit tools**: `append` / `replace` / `forget` (not append-only) — MemGPT-style curation.
+
+**Tier 2 — Archival memory** ⭐ *(beyond file-only memory)*: `memory/archival.ts`.
+- Unbounded store of facts the agent **writes and semantically searches on demand** (`memory_search`,
+  `memory_write` tools) — only the relevant facts enter context, so it scales past the always-injected file.
+- **Local embeddings via Ollama** (`/api/embeddings`, e.g. `nomic-embed-text`) + cosine similarity; store
+  `{id, text, embedding, ts}` in `.cascade/archival.json`. `ModelProvider.embed()` abstracts the backend.
+
+**Tier 3 — Recall**: search past sessions/turns on demand (corpus = the JSONL transcripts we already write).
+
+**Self-curation** ⭐: at the **end of a completed turn**, a focused extraction pass pulls durable facts and
+**routes** them — stable preference → core, detailed/contextual → archival. Smarter than flat extraction
+(it classifies the tier). (The background sleep-time curation idea, made synchronous + cheap for local.)
+
+**`/memory` overlay**: view / search / edit / forget memory (like the `/mcp` overlay) + write markers.
+
+**Why this is genuinely better than file-only memory:** semantic archival retrieval + tier-routing
+self-curation, fully local — capabilities a file-only design does not have.
 
 ---
 

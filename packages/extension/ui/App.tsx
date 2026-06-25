@@ -41,6 +41,7 @@ type Item =
   | { kind: 'user'; text: string }
   | { kind: 'assistant'; text: string; thinking?: string }
   | { kind: 'tool'; id: string; name: string; summary: string; status: 'running' | 'ok' | 'error'; preview?: string }
+  | { kind: 'memory'; text: string }
 
 function extract(message: Message): { text: string; thinking: string } {
   if (typeof message.content === 'string') return { text: message.content, thinking: '' }
@@ -54,7 +55,10 @@ function extract(message: Message): { text: string; thinking: string } {
 }
 
 const toolIcon = (s: 'running' | 'ok' | 'error') => (s === 'running' ? '⏳' : s === 'ok' ? '✓' : '✗')
-const COMMANDS = [{ cmd: '/mcp', desc: 'Manage MCP servers' }]
+const COMMANDS = [
+  { cmd: '/mcp', desc: 'Manage MCP servers' },
+  { cmd: '/memory', desc: 'View & manage memory (core + archival)' },
+]
 const mcpIcon = (s: string) => (s === 'ready' ? '●' : s === 'connecting' ? '◌' : s === 'failed' ? '✗' : '○')
 const mcpColor = (s: string) =>
   s === 'ready'
@@ -72,6 +76,8 @@ export function App() {
   const [prompt, setPrompt] = useState<{ id: string; tool: string; detail: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [mcp, setMcp] = useState<{ name: string; status: string; error?: string; toolNames: string[] }[] | null>(null)
+  const [mem, setMem] = useState<{ core: string; archival: { id: string; text: string; ts: string }[]; hits?: { text: string; score: number }[] } | null>(null)
+  const [memQuery, setMemQuery] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [input, setInput] = useState('')
   const endRef = useRef<HTMLDivElement>(null)
@@ -84,13 +90,18 @@ export function App() {
     return () => clearInterval(id)
   }, [polling])
 
-  // Esc closes the overlay.
+  // Esc closes whichever overlay is open.
   useEffect(() => {
-    if (!mcp) return
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setMcp(null)
+    if (!mcp && !mem) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMcp(null)
+        setMem(null)
+      }
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [mcp])
+  }, [mcp, mem])
 
   useEffect(() => {
     function onMessage(e: MessageEvent<ActivityEvent>) {
@@ -145,8 +156,15 @@ export function App() {
           setStatus(null)
           setBusy(false)
           break
+        case 'memory':
+          // Self-curation saved a durable fact — show a subtle marker so it's transparent.
+          setItems((it) => [...it, { kind: 'memory', text: event.text }])
+          break
         case 'mcpStatus':
           setMcp(event.servers)
+          break
+        case 'memoryData':
+          setMem({ core: event.core, archival: event.archival, hits: event.hits })
           break
       }
     }
@@ -164,6 +182,11 @@ export function App() {
   function runCommand(cmd: string) {
     setInput('')
     if (cmd === '/mcp') vscode.postMessage({ type: 'mcp', action: 'list' }) // opens the overlay (mcpStatus reply)
+    if (cmd === '/memory') vscode.postMessage({ type: 'memoryView', action: 'list' }) // opens the memory overlay
+  }
+
+  function memAction(action: 'list' | 'search' | 'forget', extra?: { query?: string; id?: string }) {
+    vscode.postMessage({ type: 'memoryView', action, query: extra?.query, id: extra?.id })
   }
 
   function send() {
@@ -286,6 +309,73 @@ export function App() {
           </div>
         </div>
       )}
+      {mem && (
+        <div style={styles.backdrop} onClick={() => setMem(null)}>
+          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalHead}>
+              <span style={styles.modalTitle}>Memory</span>
+              <span style={styles.modalSub}>{mem.archival.length} archival</span>
+              <button style={styles.iconBtn} onClick={() => setMem(null)} title="Close (Esc)">
+                ✕
+              </button>
+            </div>
+            <div style={styles.modalBody}>
+              <div style={styles.memSection}>Core memory (always in context)</div>
+              <pre style={styles.codeBlock}>{mem.core ? mem.core : '(empty — nothing saved to CASCADE.md yet)'}</pre>
+
+              <div style={styles.memSearchRow}>
+                <input
+                  style={styles.memSearchInput}
+                  value={memQuery}
+                  placeholder="Semantic search archival memory…"
+                  onChange={(e) => setMemQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && memAction('search', { query: memQuery })}
+                />
+                <button style={styles.cardBtn} onClick={() => memAction('search', { query: memQuery })}>
+                  Search
+                </button>
+              </div>
+
+              {mem.hits && (
+                <div style={styles.memSection}>
+                  Top matches{' '}
+                  <button style={styles.linkBtn} onClick={() => memAction('list')}>
+                    clear
+                  </button>
+                </div>
+              )}
+              {mem.hits?.map((h, i) => (
+                <div key={`h${i}`} style={styles.memRow}>
+                  <span style={styles.memScore}>{h.score.toFixed(2)}</span>
+                  <span style={styles.memText}>{h.text}</span>
+                </div>
+              ))}
+
+              {!mem.hits && <div style={styles.memSection}>Archival memory (searched on demand)</div>}
+              {!mem.hits &&
+                (mem.archival.length === 0 ? (
+                  <div style={styles.mcpEmpty}>Nothing archived yet. The agent saves detailed facts here automatically.</div>
+                ) : (
+                  mem.archival.map((e) => (
+                    <div key={e.id} style={styles.memRow}>
+                      <span style={styles.memText}>{e.text}</span>
+                      <span style={styles.spacer} />
+                      <button style={styles.linkBtn} onClick={() => memAction('forget', { id: e.id })}>
+                        forget
+                      </button>
+                    </div>
+                  ))
+                ))}
+            </div>
+            <div style={styles.modalFoot}>
+              <span style={styles.mcpMeta}>Core = CASCADE.md · Archival = .cascade/archival.json</span>
+              <button style={styles.cardBtn} onClick={() => memAction('list')}>
+                Refresh
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div style={styles.header}>
         <span style={styles.title}>Cascade</span>
         <button style={styles.newChat} onClick={newChat}>
@@ -294,7 +384,11 @@ export function App() {
       </div>
       <div style={styles.transcript}>
         {items.map((it, i) =>
-          it.kind === 'tool' ? (
+          it.kind === 'memory' ? (
+            <div key={i} style={styles.memoryMarker}>
+              💾 Remembered: {it.text}
+            </div>
+          ) : it.kind === 'tool' ? (
             <div key={i} style={styles.toolCard}>
               <div style={styles.toolHeader}>
                 {it.status === 'running' ? (
@@ -462,6 +556,14 @@ const styles: Record<string, React.CSSProperties> = {
     borderLeft: '2px solid var(--vscode-panel-border)',
   },
   status: { opacity: 0.7, fontStyle: 'italic', padding: '6px 8px' },
+  memoryMarker: {
+    margin: '4px 0',
+    padding: '3px 10px',
+    fontSize: 11,
+    opacity: 0.7,
+    fontStyle: 'italic',
+    borderLeft: '2px solid var(--vscode-charts-purple, #a86)',
+  },
   caret: { opacity: 0.6 },
   // Permission card — blocks the loop until the user answers.
   permCard: {
@@ -651,4 +753,20 @@ const styles: Record<string, React.CSSProperties> = {
     color: 'var(--vscode-badge-foreground, inherit)',
   },
   mcpMeta: { opacity: 0.6, fontSize: 12 },
+  // /memory overlay
+  memSection: { fontSize: 11, fontWeight: 600, opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.04em', margin: '10px 0 4px' },
+  memSearchRow: { display: 'flex', gap: 6, margin: '8px 0' },
+  memSearchInput: {
+    flex: 1,
+    background: 'var(--vscode-input-background)',
+    color: 'var(--vscode-input-foreground)',
+    border: '1px solid var(--vscode-input-border)',
+    borderRadius: 4,
+    padding: '4px 8px',
+    fontFamily: 'inherit',
+    fontSize: 12,
+  },
+  memRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', fontSize: 12, borderBottom: '1px solid var(--vscode-panel-border)' },
+  memText: { whiteSpace: 'pre-wrap' },
+  memScore: { fontFamily: 'var(--vscode-editor-font-family, monospace)', opacity: 0.6, minWidth: 32 },
 }

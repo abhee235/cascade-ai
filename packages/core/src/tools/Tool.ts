@@ -8,6 +8,7 @@ import type { ZodType } from 'zod'
 import type { PermissionController } from '../permissions/gate'
 import type { Tracer } from '../observability/tracer'
 import type { ToolRegistry } from './toolRegistry'
+import type { ArchivalMemory } from '../memory/archival'
 
 export interface ToolContext {
   cwd: string
@@ -20,6 +21,8 @@ export interface ToolContext {
   /** Phase 9: the active tool set (builtins + ready MCP tools), so lookups/execution see MCP tools.
    *  Omit ⇒ builtins-only (defaultRegistry). */
   registry?: ToolRegistry
+  /** Phase 10 (ADR-015): archival (semantic) memory the agent can write to and search on demand. */
+  archival?: ArchivalMemory
 }
 
 export interface ToolResult {

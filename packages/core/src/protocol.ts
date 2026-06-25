@@ -30,7 +30,9 @@ export type ActivityEvent =
   | { type: 'toolResult'; id: string; ok: boolean; preview: string } // a tool finished (Phase 4)
   | { type: 'message'; message: Message } // the finalized answer (authoritative; UI commits it)
   | { type: 'turnDone'; steps: number }
+  | { type: 'memory'; scope: string; text: string } // Phase 10: a fact auto-saved by self-curation (UI marker)
   | { type: 'mcpStatus'; servers: { name: string; status: string; error?: string; toolNames: string[] }[] } // Phase 9: /mcp panel
+  | { type: 'memoryData'; core: string; archival: { id: string; text: string; ts: string }[]; hits?: { text: string; score: number }[] } // Phase 10: /memory panel
 
 // ── Inbound messages: frontend → core ───────────────────────────────────────────────────
 export type InboundMessage =
@@ -39,3 +41,4 @@ export type InboundMessage =
   | { type: 'abort' }
   | { type: 'reset' } // "New chat" — clears conversation history
   | { type: 'mcp'; action: 'list' | 'connect' | 'disconnect'; server?: string } // Phase 9: /mcp panel controls
+  | { type: 'memoryView'; action: 'list' | 'search' | 'forget'; query?: string; id?: string } // Phase 10: /memory panel controls

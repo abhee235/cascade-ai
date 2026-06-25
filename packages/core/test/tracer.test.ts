@@ -31,7 +31,7 @@ describe('tracer — forensic event stream', () => {
         [toolUse('w1', 'Write', { file_path: 'note.txt', content: 'hi' }), done('tool_use')],
         [textDelta('done'), done('end_turn')],
       ])
-      const session = createSession({ cwd: dir, provider, model: 'fake', tracer })
+      const session = createSession({ cwd: dir, provider, model: 'fake', tracer, autoMemory: false })
 
       await drive(session, 'write note.txt', 'allow')
 

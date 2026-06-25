@@ -93,6 +93,16 @@
           "default": true,
           "description": "Write a forensic JSONL trace of each run to <workspace>/.cascade/trace-<timestamp>.jsonl (full model requests/responses, tool I/O, permission decisions, timing)."
         },
+        "cascade.embedModel": {
+          "type": "string",
+          "default": "nomic-embed-text",
+          "description": "Embedding model for archival (semantic) memory. Pull it first (e.g. `ollama pull nomic-embed-text`). If unavailable, archival memory falls back to keyword search."
+        },
+        "cascade.autoMemory": {
+          "type": "boolean",
+          "default": false,
+          "description": "Experimental self-curation: after each turn, extract durable facts to archival memory automatically. OFF by default — per-turn extraction is naive (duplicates, transient facts, poisoning/drift). Phase 11 replaces it with event-driven (compaction + session-end) consolidation."
+        },
         "cascade.mcpServers": {
           "type": "object",
           "default": {},

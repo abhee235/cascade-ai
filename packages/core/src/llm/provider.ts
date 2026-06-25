@@ -51,4 +51,7 @@ export interface ModelProvider {
   complete(req: CompletionRequest, signal?: AbortSignal): Promise<CompletionResult>
   /** Streamed completion (Phase 2): yields deltas as they arrive. */
   stream(req: CompletionRequest, signal?: AbortSignal): AsyncIterable<StreamEvent>
+  /** Embed texts for semantic (archival) memory (Phase 10, ADR-015). `model` is the embedding model id
+   *  (e.g. "nomic-embed-text"). Optional — archival memory degrades to keyword search when absent. */
+  embed?(texts: string[], model: string, signal?: AbortSignal): Promise<number[][]>
 }

@@ -78,6 +78,8 @@ export class CascadeViewProvider implements vscode.WebviewViewProvider {
         tracer,
         mcpServers,
         mcpConnect: sdkConnect,
+        embedModel: cfg.get<string>('embedModel') || undefined,
+        autoMemory: cfg.get<boolean>('autoMemory', false),
       })
       this.sessionCwd = cwd
     }
@@ -108,6 +110,15 @@ export class CascadeViewProvider implements vscode.WebviewViewProvider {
         if (msg.action === 'connect' && msg.server) session.mcpConnect(msg.server)
         else if (msg.action === 'disconnect' && msg.server) await session.mcpDisconnect(msg.server)
         webview.postMessage({ type: 'mcpStatus', servers: session.mcpStatuses() })
+        break
+      }
+      case 'memoryView': {
+        // /memory panel: optional action (search/forget), then post the current core + archival memory back.
+        const session = this.getSession()
+        if (msg.action === 'forget' && msg.id) session.memoryForget(msg.id)
+        const hits = msg.action === 'search' && msg.query ? await session.memorySearch(msg.query) : undefined
+        const view = session.memoryView()
+        webview.postMessage({ type: 'memoryData', core: view.core, archival: view.archival, hits })
         break
       }
     }
