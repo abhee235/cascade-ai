@@ -24,7 +24,9 @@ preference:
   token-by-token to the UI (as `ActivityEvent` deltas), emit a final `message` the UI commits, and also
   show coarse `status` / (Phase 4+) tool-step activity for *actions*. — **ADR-013**. (This is the
   common approach to streaming; an earlier draft wrongly said "no prose streaming" and was corrected.)
-- **Lazy MCP.** Servers connect only on first use, never at startup. — **ADR-014**. *(the real display divergence is gone; lazy MCP is the remaining one.)*
+- **MCP: background discovery + lazy retry.** Connect enabled servers in the **background** at startup
+  (discovery requires a connection — you can't advertise a tool without `tools/list`), advertise once ready;
+  retry a **failed** server lazily on next use — never block startup. — **ADR-014**.
 
 A **canonical mapping table** (concept ↔ Cascade module) is maintained so we never drift off the
 target architecture, and every concept has one obvious home under a descriptive name.
@@ -62,7 +64,7 @@ each concept to its Cascade module. Keep it open while building.
 | Observability | `observability/tracer.ts` → `JsonlTracer` |
 | Bash (stream + abort) | `tools/builtins/Bash.ts` → `BashTool` | BashTool |
 | **Memory** | `memory/memoryStore.ts` → `loadMemory()` / `updateMemory()` |
-| MCP (lazy) | `mcp/mcpHub.ts` → `connectMcpServerOnFirstUse()` |
+| MCP (bg discovery + retry) | `mcp/mcpHub.ts` → `connectMcpServers()` (background) / `retryServer()` |
 | Compaction | `context/compactor.ts` → `compactIfNeeded()` |
 | **Error recovery** | `llm/resilience.ts` → `withRecovery()` |
 | Subagent tool | `tools/builtins/Subagent.ts` |
@@ -77,7 +79,7 @@ each concept to its Cascade module. Keep it open while building.
 | Topic | Common approach | Cascade | ADR |
 |-------|-------------|---------|-----|
 | Output display | Streams prose token-by-token live | **Same — streams prose + thinking live**, plus a status/tool-step activity view (IDE-assistant style). Not a divergence. | ADR-013 |
-| MCP connect timing | Connects servers at startup | **Lazy**: connect on first tool use | ADR-014 |
+| MCP connect timing | Connects servers at startup (can block) | **Background** discovery at startup + lazy retry on failure (non-blocking) | ADR-014 |
 | Naming | Terse internal names | Descriptive standard (`runAgentLoop`, `executeTool`, …) | — |
 
 ---
@@ -306,7 +308,7 @@ Each ADR is a short file in `cascade/docs/adr/`: Context → Decision → Conseq
 | ADR-011 | MCP integration; `mcp__server__tool` namespacing | 9 |
 | ADR-012 | Context compaction | 10 |
 | **ADR-013** | **Streamed output (prose+thinking live) + activity view** | 2 (used through 8) |
-| **ADR-014** | **Lazy MCP connect on first use (divergence)** | 9 |
+| **ADR-014** | **MCP init: background discovery + lazy retry (divergence)** | 9 |
 | ADR-015 | Persistent memory store (read + tool-updatable) | 10 |
 | ADR-016 | Error recovery & resilience (retry/backoff/fallback/abort/overflow) | 11 |
 | ADR-017 | Subagents (nested loop with own context) | 11 |
@@ -569,23 +571,32 @@ activity protocol that shows "what it's doing" without painting prose.
 
 ---
 
-### Phase 9 — MCP (lazy on first use)
-**Goal:** Register MCP servers from config but **connect only when a tool from them is first called** (ADR-014); merge as `mcp__<server>__<tool>`.
+### Phase 9 — MCP (background discovery + lazy retry)
+**Goal:** Register MCP servers from config, connect them **in the background at startup** to discover/advertise
+their tools, and **retry a failed server lazily** on next use; merge as `mcp__<server>__<tool>`.
 **🎯 You'll understand:** MCP = a protocol for discovering/calling external tools, normalized into the same
-contract — and *why Cascade defers connecting* (no startup cost).
-**The idea:** From config, register placeholder tools per server. On first call to any of a server's tools,
-connect (spawn + `tools/list`), then route `client.callTool()`. Cache the connection.
-*Divergence:* the common approach connects at startup; Cascade is lazy.
+`Tool` contract — and *why discovery requires a connection* (so pure-lazy can't advertise tools), hence
+**background** discovery (non-blocking) + lazy retry. — ADR-014.
+**The idea:** On startup, kick off connecting each enabled server in the background → `initialize` +
+`tools/list` → wrap each returned tool as a `Tool` (its JSON Schema is the inputSchema) → advertise once
+`ready`. A server that errors is marked `failed` and reconnected on the next turn / next attempted use. The
+registry becomes dynamic: builtins **+** ready MCP tools.
+*Divergence:* the common approach connects at startup (can block); Cascade connects in the
+**background** + retries lazily.
 **Build checklist:**
-- [ ] `@modelcontextprotocol/sdk`; `mcp/mcpHub.ts`.
-- [ ] Register tools from `cascade.mcpServers` **without** connecting.
-- [ ] `connectMcpServerOnFirstUse()`: connect+`tools/list` on first call; wrap each as a Tool.
-- [ ] Name `mcp__server__tool`; use server JSON Schema directly.
-- [ ] Merge into registry (sort + dedupe, builtins win); show connection status.
-- [ ] `docs/adr/ADR-011-mcp.md`, `ADR-014-lazy-mcp.md`.
-**⚠️ Pitfalls:** connecting at activation by accident; name collisions; huge descriptions; leaked subprocess on dispose.
-**Test queries:** 1) Configure a filesystem server (stays disconnected) → first "list /tmp via MCP" triggers connect → `mcp__filesystem__list_directory` runs. 2) Second server → its tool connects independently on first use.
-**✅ Self-check:** *At what exact moment does an MCP server connect, and why at that moment?*
+- [ ] `@modelcontextprotocol/sdk`; `mcp/mcpHub.ts` (per-server state: registered→connecting→ready/failed).
+- [ ] Read `cascade.mcpServers`; **background** connect each enabled server (non-blocking startup).
+- [ ] On connect: `initialize` + `tools/list`; wrap each as a `Tool` (`mcp__server__tool`, server JSON Schema).
+- [ ] Route calls via `client.callTool()`; cache the connection; **retry** a `failed` server on next use.
+- [ ] Merge into a **dynamic** registry (sort + dedupe, builtins win); surface connection status.
+- [ ] `docs/adr/ADR-011-mcp.md`, `ADR-014-mcp-init.md`.
+**⚠️ Pitfalls:** BLOCKING startup on a slow/hung server (must be background); advertising a tool before its
+server is `ready`; name collisions; huge descriptions; leaked subprocess on dispose.
+**Test queries:** 1) Configure a filesystem server → after startup its `mcp__filesystem__*` tools appear
+(connected in the background) and "list this folder via MCP" runs. 2) Point a server at a bad command → it
+shows `failed`, the rest keep working, and it reconnects when next used.
+**✅ Self-check:** *Why can't we advertise an MCP tool without connecting first, and how does "background
+discovery + lazy retry" differ from both pure-lazy and a blocking startup connect?*
 
 ---
 
@@ -693,7 +704,7 @@ tests. Ollama must be running with a tool-capable model.
 
 ## Notes / Constraints
 - No third-party source is copied. Cascade is independently written, Ollama-native,
-  and diverges deliberately on MCP timing (lazy connect). Display streams prose+thinking live with an
+  and diverges deliberately on MCP timing (background discovery + lazy retry). Display streams prose+thinking live with an
   activity view (ADR-013) — the common approach, not a divergence.
 - **One engine, many frontends.** `@cascade/core` is headless (no `vscode`, no DOM). The extension drives
   it in-process; the web app drives it over WebSocket via `@cascade/server`. The `ActivityEvent` protocol

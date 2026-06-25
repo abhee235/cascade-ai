@@ -25,7 +25,7 @@ So the target is **both**: live prose **and** a visible activity/tool view.
 - You see tokens appear word-by-word, like the reference tools.
 - The final `message` makes the committed transcript authoritative (no drift from accumulated deltas).
 - This is **no longer a divergence from the mainstream agents** on display — they all stream prose. Cascade's
-  remaining deliberate divergence is **lazy MCP** (ADR-014); naming is a convention, not a divergence.
+  remaining deliberate divergence is **MCP init — background discovery + lazy retry** (ADR-014); naming is a convention, not a divergence.
 
 ## Prior art
 Terminal agents stream content blocks to their TUI as deltas arrive. Cascade does the same, exposed
