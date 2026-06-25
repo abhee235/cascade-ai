@@ -54,6 +54,16 @@ function extract(message: Message): { text: string; thinking: string } {
 }
 
 const toolIcon = (s: 'running' | 'ok' | 'error') => (s === 'running' ? '⏳' : s === 'ok' ? '✓' : '✗')
+const COMMANDS = [{ cmd: '/mcp', desc: 'Manage MCP servers' }]
+const mcpIcon = (s: string) => (s === 'ready' ? '●' : s === 'connecting' ? '◌' : s === 'failed' ? '✗' : '○')
+const mcpColor = (s: string) =>
+  s === 'ready'
+    ? 'var(--vscode-testing-iconPassed, #3a3)'
+    : s === 'connecting'
+      ? 'var(--vscode-charts-yellow, #cc3)'
+      : s === 'failed'
+        ? 'var(--vscode-errorForeground, #c33)'
+        : 'var(--vscode-disabledForeground, #888)'
 
 export function App() {
   const [items, setItems] = useState<Item[]>([])
@@ -61,8 +71,26 @@ export function App() {
   const [status, setStatus] = useState<string | null>(null)
   const [prompt, setPrompt] = useState<{ id: string; tool: string; detail: string } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [mcp, setMcp] = useState<{ name: string; status: string; error?: string; toolNames: string[] }[] | null>(null)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [input, setInput] = useState('')
   const endRef = useRef<HTMLDivElement>(null)
+
+  // Poll for live status while any server is still connecting (so the overlay updates without a manual Refresh).
+  const polling = !!mcp && mcp.some((s) => s.status === 'connecting')
+  useEffect(() => {
+    if (!polling) return
+    const id = setInterval(() => vscode.postMessage({ type: 'mcp', action: 'list' }), 1000)
+    return () => clearInterval(id)
+  }, [polling])
+
+  // Esc closes the overlay.
+  useEffect(() => {
+    if (!mcp) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setMcp(null)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [mcp])
 
   useEffect(() => {
     function onMessage(e: MessageEvent<ActivityEvent>) {
@@ -117,6 +145,9 @@ export function App() {
           setStatus(null)
           setBusy(false)
           break
+        case 'mcpStatus':
+          setMcp(event.servers)
+          break
       }
     }
     window.addEventListener('message', onMessage)
@@ -127,13 +158,40 @@ export function App() {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [items, streaming, status])
 
+  // Slash commands (the `/` menu). Add more here as the app grows.
+  const slashMatches = input.startsWith('/') ? COMMANDS.filter((c) => c.cmd.startsWith(input.trim())) : []
+
+  function runCommand(cmd: string) {
+    setInput('')
+    if (cmd === '/mcp') vscode.postMessage({ type: 'mcp', action: 'list' }) // opens the overlay (mcpStatus reply)
+  }
+
   function send() {
     const text = input.trim()
     if (!text) return
+    if (text.startsWith('/')) {
+      // Run the exact command, or the single remaining suggestion if the user typed a prefix.
+      const exact = COMMANDS.find((c) => c.cmd === text)
+      if (exact) return runCommand(exact.cmd)
+      if (slashMatches.length === 1) return runCommand(slashMatches[0].cmd)
+      return // unknown/ambiguous slash input — do nothing (the menu is showing options)
+    }
     setItems((it) => [...it, { kind: 'user', text }])
     setInput('')
     setBusy(true)
     vscode.postMessage({ type: 'submit', text })
+  }
+
+  function mcpAction(action: 'list' | 'connect' | 'disconnect', server?: string) {
+    vscode.postMessage({ type: 'mcp', action, server })
+  }
+
+  function toggleTools(name: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      next.has(name) ? next.delete(name) : next.add(name)
+      return next
+    })
   }
 
   function stop() {
@@ -159,6 +217,75 @@ export function App() {
 
   return (
     <div style={styles.app}>
+      {mcp && (
+        <div style={styles.backdrop} onClick={() => setMcp(null)}>
+          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalHead}>
+              <span style={styles.modalTitle}>MCP servers</span>
+              <span style={styles.modalSub}>{polling ? 'refreshing…' : `${mcp.length} configured`}</span>
+              <button style={styles.iconBtn} onClick={() => setMcp(null)} title="Close (Esc)">
+                ✕
+              </button>
+            </div>
+            <div style={styles.modalBody}>
+              {mcp.length === 0 && (
+                <div style={styles.mcpEmpty}>
+                  No MCP servers configured. Add them to <code>.mcp.json</code> at the project root:
+                  <pre style={styles.codeBlock}>{'{\n  "mcpServers": {\n    "playwright": { "command": "npx", "args": ["-y", "@playwright/mcp@latest"] }\n  }\n}'}</pre>
+                </div>
+              )}
+              {mcp.map((s) => (
+                <div key={s.name} style={styles.serverCard}>
+                  <div style={styles.serverTop}>
+                    {s.status === 'connecting' ? (
+                      <span className="cascade-spinner" />
+                    ) : (
+                      <span style={{ ...styles.statusDot, color: mcpColor(s.status) }}>{mcpIcon(s.status)}</span>
+                    )}
+                    <span style={styles.serverName}>{s.name}</span>
+                    <span style={{ ...styles.statusLabel, color: mcpColor(s.status) }}>{s.status}</span>
+                    <span style={styles.spacer} />
+                    {s.status === 'ready' && (
+                      <button style={styles.linkBtn} onClick={() => toggleTools(s.name)}>
+                        {s.toolNames.length} tools {expanded.has(s.name) ? '▾' : '▸'}
+                      </button>
+                    )}
+                    {s.status === 'ready' || s.status === 'connecting' ? (
+                      <button style={styles.cardBtn} onClick={() => mcpAction('disconnect', s.name)}>
+                        Disconnect
+                      </button>
+                    ) : (
+                      <button style={{ ...styles.cardBtn, ...styles.cardBtnPrimary }} onClick={() => mcpAction('connect', s.name)}>
+                        {s.status === 'failed' ? 'Retry' : 'Connect'}
+                      </button>
+                    )}
+                  </div>
+                  {s.error && <div style={styles.serverError}>⚠ {s.error}</div>}
+                  {s.status === 'ready' && expanded.has(s.name) && (
+                    <div style={styles.toolList}>
+                      {s.toolNames.length === 0 ? (
+                        <span style={styles.mcpMeta}>(server exposes no tools)</span>
+                      ) : (
+                        s.toolNames.map((t) => (
+                          <code key={t} style={styles.toolChip}>
+                            {t}
+                          </code>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div style={styles.modalFoot}>
+              <span style={styles.mcpMeta}>Configured in .mcp.json</span>
+              <button style={styles.cardBtn} onClick={() => mcpAction('list')}>
+                Refresh
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div style={styles.header}>
         <span style={styles.title}>Cascade</span>
         <button style={styles.newChat} onClick={newChat}>
@@ -245,10 +372,20 @@ export function App() {
         <div ref={endRef} />
       </div>
       <div style={styles.composer}>
+        {slashMatches.length > 0 && (
+          <div style={styles.slashMenu}>
+            {slashMatches.map((c) => (
+              <button key={c.cmd} style={styles.slashItem} onClick={() => runCommand(c.cmd)}>
+                <span style={styles.slashCmd}>{c.cmd}</span>
+                <span style={styles.slashDesc}>{c.desc}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <textarea
           style={styles.input}
           value={input}
-          placeholder="Ask Cascade…"
+          placeholder="Ask Cascade…  (type / for commands)"
           rows={2}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
@@ -370,7 +507,7 @@ const styles: Record<string, React.CSSProperties> = {
     maxHeight: 120,
     overflow: 'auto',
   },
-  composer: { display: 'flex', gap: 6, padding: 8, borderTop: '1px solid var(--vscode-panel-border)' },
+  composer: { position: 'relative', display: 'flex', gap: 6, padding: 8, borderTop: '1px solid var(--vscode-panel-border)' },
   input: {
     flex: 1,
     resize: 'none',
@@ -393,4 +530,125 @@ const styles: Record<string, React.CSSProperties> = {
     background: 'var(--vscode-errorForeground, #c33)',
     color: 'var(--vscode-button-foreground, #fff)',
   },
+  // Slash-command menu (pops above the composer)
+  slashMenu: {
+    position: 'absolute',
+    bottom: 'calc(100% - 4px)',
+    left: 8,
+    right: 8,
+    background: 'var(--vscode-editorWidget-background)',
+    border: '1px solid var(--vscode-panel-border)',
+    borderRadius: 6,
+    boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+    overflow: 'hidden',
+  },
+  slashItem: {
+    display: 'flex',
+    width: '100%',
+    gap: 8,
+    alignItems: 'baseline',
+    padding: '6px 10px',
+    background: 'transparent',
+    border: 'none',
+    borderBottom: '1px solid var(--vscode-panel-border)',
+    color: 'var(--vscode-foreground)',
+    cursor: 'pointer',
+    textAlign: 'left',
+  },
+  slashCmd: { fontFamily: 'var(--vscode-editor-font-family, monospace)', fontWeight: 600 },
+  slashDesc: { opacity: 0.6, fontSize: 12 },
+  // /mcp overlay (modal)
+  backdrop: {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(0,0,0,0.45)',
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    paddingTop: '8vh',
+    zIndex: 10,
+  },
+  modal: {
+    width: 'min(560px, 92vw)',
+    maxHeight: '80vh',
+    display: 'flex',
+    flexDirection: 'column',
+    background: 'var(--vscode-editorWidget-background, var(--vscode-editor-background))',
+    border: '1px solid var(--vscode-widget-border, var(--vscode-panel-border))',
+    borderRadius: 10,
+    boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+    overflow: 'hidden',
+  },
+  modalHead: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '10px 14px',
+    borderBottom: '1px solid var(--vscode-panel-border)',
+  },
+  modalTitle: { fontWeight: 600 },
+  modalSub: { opacity: 0.6, fontSize: 12, flex: 1 },
+  iconBtn: { background: 'transparent', border: 'none', color: 'var(--vscode-foreground)', cursor: 'pointer', fontSize: 14 },
+  modalBody: { overflowY: 'auto', padding: '8px 14px' },
+  modalFoot: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '8px 14px',
+    borderTop: '1px solid var(--vscode-panel-border)',
+  },
+  mcpEmpty: { fontSize: 12, opacity: 0.8, padding: '6px 0' },
+  codeBlock: {
+    marginTop: 6,
+    padding: 8,
+    background: 'var(--vscode-textCodeBlock-background, rgba(0,0,0,0.2))',
+    borderRadius: 6,
+    fontSize: 11,
+    fontFamily: 'var(--vscode-editor-font-family, monospace)',
+    whiteSpace: 'pre',
+    overflowX: 'auto',
+  },
+  serverCard: {
+    border: '1px solid var(--vscode-panel-border)',
+    borderRadius: 8,
+    padding: '8px 10px',
+    margin: '8px 0',
+    background: 'var(--vscode-editor-background)',
+  },
+  serverTop: { display: 'flex', alignItems: 'center', gap: 8 },
+  statusDot: { fontSize: 12, width: 12, textAlign: 'center' },
+  serverName: { fontWeight: 600, fontFamily: 'var(--vscode-editor-font-family, monospace)' },
+  statusLabel: { fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' },
+  spacer: { flex: 1 },
+  linkBtn: { background: 'transparent', border: 'none', color: 'var(--vscode-textLink-foreground)', cursor: 'pointer', fontSize: 12 },
+  cardBtn: {
+    background: 'var(--vscode-button-secondaryBackground, transparent)',
+    color: 'var(--vscode-button-secondaryForeground, var(--vscode-foreground))',
+    border: '1px solid var(--vscode-panel-border)',
+    borderRadius: 4,
+    padding: '3px 10px',
+    fontSize: 12,
+    cursor: 'pointer',
+  },
+  cardBtnPrimary: { background: 'var(--vscode-button-background)', color: 'var(--vscode-button-foreground)', border: 'none' },
+  serverError: {
+    marginTop: 6,
+    padding: '6px 8px',
+    fontSize: 12,
+    color: 'var(--vscode-errorForeground)',
+    background: 'var(--vscode-inputValidation-errorBackground, rgba(255,0,0,0.08))',
+    border: '1px solid var(--vscode-inputValidation-errorBorder, transparent)',
+    borderRadius: 4,
+    whiteSpace: 'pre-wrap',
+  },
+  toolList: { display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 },
+  toolChip: {
+    fontFamily: 'var(--vscode-editor-font-family, monospace)',
+    fontSize: 11,
+    padding: '1px 6px',
+    borderRadius: 4,
+    background: 'var(--vscode-badge-background, rgba(255,255,255,0.08))',
+    color: 'var(--vscode-badge-foreground, inherit)',
+  },
+  mcpMeta: { opacity: 0.6, fontSize: 12 },
 }

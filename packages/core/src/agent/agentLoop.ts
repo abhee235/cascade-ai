@@ -11,9 +11,8 @@ import type { ModelProvider } from '../llm/provider'
 import type { ToolContext } from '../tools/Tool'
 import type { PermissionController } from '../permissions/gate'
 import { NoopTracer, type Tracer } from '../observability/tracer'
-import { tools as toolRegistry } from '../tools/toolRegistry'
+import { createRegistry, type ToolRegistry } from '../tools/toolRegistry'
 import { buildSystemPrompt } from './systemPrompt'
-import { toolSchemas } from '../tools/toolRegistry'
 import type { ToolUse } from '../tools/runTool'
 import { scheduleTools } from '../tools/scheduler'
 
@@ -25,11 +24,15 @@ export interface LoopDeps {
   maxTurns?: number
   permission?: PermissionController // Phase 7: gates tool calls; how 'ask' awaits the user
   tracer?: Tracer // ADR-023: forensic JSONL trace
+  registry?: ToolRegistry // Phase 9: builtins + ready MCP tools; defaults to builtins-only
 }
 
 export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncIterable<ActivityEvent> {
   const tracer = deps.tracer ?? NoopTracer
-  const ctx: ToolContext = { cwd: deps.cwd, abortSignal: deps.signal, permission: deps.permission, tracer }
+  const registry = deps.registry ?? createRegistry()
+  // Share ONE registry instance for the turn: the loop advertises with it, and the scheduler/runTool look
+  // up with it — so what the model is offered and what we execute always agree.
+  const ctx: ToolContext = { cwd: deps.cwd, abortSignal: deps.signal, permission: deps.permission, tracer, registry }
   const maxTurns = deps.maxTurns ?? 10
   let turn = 0
 
@@ -41,12 +44,12 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     yield { type: 'status', text: 'Thinking…' }
     // FORENSICS: record the FULL request we're about to send — the #1 thing you need when an answer
     // is wrong ("did the model even see the tool_result / the right system prompt?"). — ADR-023.
-    tracer.event({ t: 'model_request', turn, system: buildSystemPrompt({ cwd: deps.cwd }), tools: toolRegistry.map((t) => t.name), messages })
+    tracer.event({ t: 'model_request', turn, system: buildSystemPrompt({ cwd: deps.cwd }), tools: registry.list().map((t) => t.name), messages })
     for await (const ev of deps.provider.stream(
-      { messages, model: deps.model, system: buildSystemPrompt({ cwd: deps.cwd }), tools: toolSchemas() },
+      { messages, model: deps.model, system: buildSystemPrompt({ cwd: deps.cwd }), tools: registry.schemas() },
       deps.signal,
     )) {
-      if (ev.type === 'thinking_delta') {
+      if (ev.type === 'thinking_delta') {  
         thinking += ev.thinking
         yield { type: 'thinking_delta', thinking: ev.thinking }
       } else if (ev.type === 'text_delta') {

@@ -10,6 +10,8 @@ import type { ModelProvider } from './llm/provider'
 import { runAgentLoop } from './agent/agentLoop'
 import type { PermissionController, PermissionMode, PermissionState } from './permissions/gate'
 import { NoopTracer, type Tracer } from './observability/tracer'
+import { createRegistry } from './tools/toolRegistry'
+import { McpHub, type McpServerConfig, type McpConnect, type McpServerStatus } from './mcp/mcpHub'
 
 export interface SessionOptions {
   cwd: string
@@ -23,6 +25,10 @@ export interface SessionOptions {
   deny?: string[]
   /** Optional forensic trace sink (ADR-023). Omit ⇒ NoopTracer (no output). */
   tracer?: Tracer
+  /** MCP servers to register (Phase 9). Connected in the BACKGROUND at startup (ADR-014). */
+  mcpServers?: Record<string, McpServerConfig>
+  /** How to connect an MCP server. Injected so the real SDK adapter (or a fake) is pluggable. */
+  mcpConnect?: McpConnect
 }
 
 export interface CascadeSession {
@@ -31,6 +37,12 @@ export interface CascadeSession {
   abort(): void
   /** Clear conversation history ("New chat"). */
   reset(): void
+  /** Tear down MCP subprocesses etc. Call when discarding the session. */
+  dispose(): Promise<void>
+  /** MCP panel (/mcp): current server statuses, and manual connect/disconnect. */
+  mcpStatuses(): McpServerStatus[]
+  mcpConnect(name: string): void
+  mcpDisconnect(name: string): Promise<void>
 }
 
 export function createSession(opts: SessionOptions): CascadeSession {
@@ -51,6 +63,13 @@ export function createSession(opts: SessionOptions): CascadeSession {
   }
   const tracer = opts.tracer ?? NoopTracer
 
+  // MCP (Phase 9): build the hub from config and start connecting in the BACKGROUND (non-blocking) so
+  // tools are discovered without freezing startup. The registry is builtins + whatever is `ready` now —
+  // it's a function, so newly-connected MCP tools appear automatically.
+  const hub = opts.mcpServers && opts.mcpConnect ? new McpHub(opts.mcpServers, opts.mcpConnect) : undefined
+  hub?.start()
+  const registry = createRegistry(() => hub?.readyTools() ?? [])
+
   return {
     async *submit(userText: string): AsyncIterable<ActivityEvent> {
       const controller = new AbortController()
@@ -58,6 +77,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
 
       messages.push({ role: 'user', content: userText }) // append the user turn to history
       tracer.event({ t: 'submit', text: userText })
+      hub?.retryFailed() // lazy retry: give a previously-failed server another chance at the start of a turn
 
       try {
         // Delegate to the agentic loop. It streams, runs tools, appends results, and loops until
@@ -69,6 +89,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
           signal: controller.signal,
           permission,
           tracer,
+          registry,
         })
       } catch (err) {
         const msg =
@@ -104,6 +125,16 @@ export function createSession(opts: SessionOptions): CascadeSession {
       // "always allow X" grants are forgotten. (Mutate in place: the controller holds `state` by ref.)
       state.allow = new Set(opts.allow ?? [])
       state.deny = new Set(opts.deny ?? [])
+    },
+
+    async dispose() {
+      await hub?.dispose() // close MCP subprocesses — no zombies (Phase 9 pitfall)
+    },
+
+    mcpStatuses: () => hub?.statuses() ?? [],
+    mcpConnect: (name) => hub?.connect(name),
+    async mcpDisconnect(name) {
+      await hub?.disconnect(name)
     },
   }
 }

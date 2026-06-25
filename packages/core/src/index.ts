@@ -17,3 +17,8 @@ export type { PermissionMode, PermissionDecision, PermissionState } from './perm
 // Observability (ADR-023): inject a Tracer to capture a forensic JSONL trace of a run.
 export { NoopTracer, JsonlTracer } from './observability/tracer'
 export type { Tracer, TraceEvent } from './observability/tracer'
+// MCP (ADR-014): register servers; the real stdio adapter is sdkConnect (frontends inject it).
+export { McpHub } from './mcp/mcpHub'
+export type { McpServerConfig, McpConnect, McpClient, McpStatus, McpServerStatus } from './mcp/mcpHub'
+export { sdkConnect } from './mcp/sdkConnect'
+export { loadMcpServers, MCP_CONFIG_FILE } from './mcp/loadMcpConfig'

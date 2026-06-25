@@ -64,7 +64,8 @@ each concept to its Cascade module. Keep it open while building.
 | Observability | `observability/tracer.ts` → `JsonlTracer` |
 | Bash (stream + abort) | `tools/builtins/Bash.ts` → `BashTool` | BashTool |
 | **Memory** | `memory/memoryStore.ts` → `loadMemory()` / `updateMemory()` |
-| MCP (bg discovery + retry) | `mcp/mcpHub.ts` → `connectMcpServers()` (background) / `retryServer()` |
+| MCP (bg discovery + retry) | `mcp/mcpHub.ts` → `McpHub.start()` (background) / `retryFailed()`; `mcp/sdkConnect.ts` |
+| Tool registry (dynamic) | `tools/toolRegistry.ts` → `createRegistry()` / `ToolRegistry` |
 | Compaction | `context/compactor.ts` → `compactIfNeeded()` |
 | **Error recovery** | `llm/resilience.ts` → `withRecovery()` |
 | Subagent tool | `tools/builtins/Subagent.ts` |

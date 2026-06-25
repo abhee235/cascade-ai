@@ -7,6 +7,7 @@
 import type { ZodType } from 'zod'
 import type { PermissionController } from '../permissions/gate'
 import type { Tracer } from '../observability/tracer'
+import type { ToolRegistry } from './toolRegistry'
 
 export interface ToolContext {
   cwd: string
@@ -16,6 +17,9 @@ export interface ToolContext {
   permission?: PermissionController
   /** ADR-023: forensic trace sink. Omit ⇒ untraced. */
   tracer?: Tracer
+  /** Phase 9: the active tool set (builtins + ready MCP tools), so lookups/execution see MCP tools.
+   *  Omit ⇒ builtins-only (defaultRegistry). */
+  registry?: ToolRegistry
 }
 
 export interface ToolResult {
@@ -30,8 +34,12 @@ export interface Tool<I = unknown> {
   name: string
   /** What it does + when to use it — the model reads this to decide. */
   description: string
-  /** Zod schema for the input: validates the model's args and is converted to JSON Schema. */
-  inputSchema: ZodType<I>
+  /** Zod schema for the input: validates the model's args AND is converted to JSON Schema (builtins).
+   *  Optional because MCP tools (Phase 9) arrive with raw JSON Schema instead — see `parameters`. */
+  inputSchema?: ZodType<I>
+  /** Raw JSON Schema for the input, used as-is to advertise the tool (Phase 9: MCP tools have this, not a
+   *  Zod schema). When present we skip Zod validation — the MCP server validates the args itself. */
+  parameters?: Record<string, unknown>
   /** Present-tense activity line for the UI card, e.g. "Reading package.json". */
   activitySummary(input: I): string
   /** Does this call mutate state? Used for permissions (Phase 7). Method form because it can depend on

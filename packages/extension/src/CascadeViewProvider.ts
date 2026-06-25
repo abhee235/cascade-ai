@@ -10,8 +10,11 @@ import {
   createSession,
   createProvider,
   JsonlTracer,
+  sdkConnect,
+  loadMcpServers,
   type CascadeSession,
   type InboundMessage,
+  type McpServerConfig,
   type PermissionMode,
   type Tracer,
 } from '@cascade/core'
@@ -41,6 +44,7 @@ export class CascadeViewProvider implements vscode.WebviewViewProvider {
     // Rebuild the session if cwd changed so tools resolve relative paths against the right root.
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd()
     if (!this.session || this.sessionCwd !== cwd) {
+      void this.session?.dispose() // tear down the old session's MCP subprocesses before replacing it
       const cfg = vscode.workspace.getConfiguration('cascade')
       const model = cfg.get<string>('model', 'qwen36-agentic:latest')
       // Build the provider from config (factory), then inject it into the session (DI). — ADR-020.
@@ -58,6 +62,12 @@ export class CascadeViewProvider implements vscode.WebviewViewProvider {
         const stamp = new Date().toISOString().replace(/[:.]/g, '-')
         tracer = new JsonlTracer(join(cwd, '.cascade', `trace-${stamp}.jsonl`))
       }
+      // MCP servers from the portable project file <workspace>/.mcp.json (primary), with the optional
+      // cascade.mcpServers VS Code setting merged underneath. Connected in the background (ADR-014).
+      const mcpServers: Record<string, McpServerConfig> = {
+        ...cfg.get<Record<string, McpServerConfig>>('mcpServers', {}),
+        ...loadMcpServers(cwd),
+      }
       this.session = createSession({
         cwd,
         provider,
@@ -66,6 +76,8 @@ export class CascadeViewProvider implements vscode.WebviewViewProvider {
         allow: cfg.get<string[]>('allowTools', []),
         deny: cfg.get<string[]>('denyTools', []),
         tracer,
+        mcpServers,
+        mcpConnect: sdkConnect,
       })
       this.sessionCwd = cwd
     }
@@ -90,6 +102,14 @@ export class CascadeViewProvider implements vscode.WebviewViewProvider {
       case 'abort':
         this.session?.abort()
         break
+      case 'mcp': {
+        // /mcp panel: run the requested action, then post the fresh status list back to the webview.
+        const session = this.getSession() // ensures the hub exists + has started connecting
+        if (msg.action === 'connect' && msg.server) session.mcpConnect(msg.server)
+        else if (msg.action === 'disconnect' && msg.server) await session.mcpDisconnect(msg.server)
+        webview.postMessage({ type: 'mcpStatus', servers: session.mcpStatuses() })
+        break
+      }
     }
   }
 

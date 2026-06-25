@@ -92,6 +92,21 @@
           "type": "boolean",
           "default": true,
           "description": "Write a forensic JSONL trace of each run to <workspace>/.cascade/trace-<timestamp>.jsonl (full model requests/responses, tool I/O, permission decisions, timing)."
+        },
+        "cascade.mcpServers": {
+          "type": "object",
+          "default": {},
+          "description": "MCP servers to register, keyed by name. Each value: { command, args?, env?, disabled? }. Connected in the background at startup; tools appear as mcp__<server>__<tool>. Example: { \"filesystem\": { \"command\": \"npx\", \"args\": [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"${workspaceFolder}\"] } }",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "command": { "type": "string" },
+              "args": { "type": "array", "items": { "type": "string" } },
+              "env": { "type": "object", "additionalProperties": { "type": "string" } },
+              "disabled": { "type": "boolean" }
+            },
+            "required": ["command"]
+          }
         }
       }
     }

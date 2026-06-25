@@ -6,7 +6,7 @@
 
 import type { ContentBlock } from '../protocol'
 import type { ToolContext } from './Tool'
-import { findTool } from './toolRegistry'
+import { defaultRegistry } from './toolRegistry'
 
 export interface ToolUse {
   id: string
@@ -26,14 +26,20 @@ export async function executeTool(
     isError: true,
   })
 
-  const tool = findTool(toolUse.name)
+  const tool = (ctx.registry ?? defaultRegistry).find(toolUse.name)
   if (!tool) return err(`No such tool: ${toolUse.name}`)
 
-  const parsed = tool.inputSchema.safeParse(toolUse.input)
-  if (!parsed.success) return err(`Invalid input for ${toolUse.name}: ${parsed.error.message}`)
+  // Builtins validate with Zod (and feed errors back so the model self-corrects). MCP tools have no Zod
+  // schema — the server validates — so we forward the args as-is.
+  let input = toolUse.input
+  if (tool.inputSchema) {
+    const parsed = tool.inputSchema.safeParse(toolUse.input)
+    if (!parsed.success) return err(`Invalid input for ${toolUse.name}: ${parsed.error.message}`)
+    input = parsed.data
+  }
 
   try {
-    const result = await tool.call(parsed.data, ctx, onProgress)
+    const result = await tool.call(input, ctx, onProgress)
     return {
       type: 'tool_result',
       tool_use_id: toolUse.id,

@@ -7,34 +7,34 @@
 
 import type { ActivityEvent, ContentBlock } from '../protocol'
 import type { ToolContext } from './Tool'
-import { findTool } from './toolRegistry'
+import { defaultRegistry, type ToolRegistry } from './toolRegistry'
 import { executeTool, type ToolUse } from './runTool'
 import { checkPermission } from '../permissions/gate'
 import { NoopTracer } from '../observability/tracer'
 
-function isSafe(tu: ToolUse): boolean {
+function isSafe(tu: ToolUse, registry: ToolRegistry): boolean {
   try {
-    return findTool(tu.name)?.isConcurrencySafe?.(tu.input as never) ?? false // default: not safe
+    return registry.find(tu.name)?.isConcurrencySafe?.(tu.input as never) ?? false // default: not safe
   } catch {
     return false
   }
 }
 
-function summary(tu: ToolUse): string {
+function summary(tu: ToolUse, registry: ToolRegistry): string {
   try {
-    return findTool(tu.name)?.activitySummary(tu.input as never) ?? tu.name
+    return registry.find(tu.name)?.activitySummary(tu.input as never) ?? tu.name
   } catch {
     return tu.name
   }
 }
 
 /** Group consecutive safe tools into parallel batches; each unsafe tool is its own (serial) batch.
- *  Exported for unit testing — it's pure (no execution). */
-export function partition(toolUses: ToolUse[]): ToolUse[][] {
+ *  Exported for unit testing — it's pure (no execution). Registry defaults to builtins-only. */
+export function partition(toolUses: ToolUse[], registry: ToolRegistry = defaultRegistry): ToolUse[][] {
   const batches: ToolUse[][] = []
   let safeRun: ToolUse[] = []
   for (const tu of toolUses) {
-    if (isSafe(tu)) {
+    if (isSafe(tu, registry)) {
       safeRun.push(tu)
     } else {
       if (safeRun.length) batches.push(safeRun), (safeRun = [])
@@ -70,17 +70,18 @@ export async function* scheduleTools(
   const byId = new Map<string, ContentBlock>()
   const perm = ctx.permission
   const tracer = ctx.tracer ?? NoopTracer
+  const registry = ctx.registry ?? defaultRegistry // builtins + ready MCP tools (Phase 9)
 
-  for (const batch of partition(toolUses)) {
+  for (const batch of partition(toolUses, registry)) {
     // ── 1. GATE every tool first. Reads auto-allow instantly (no await); a write in 'default' mode
     //       returns 'ask', so we yield a card and PARK on perm.request() until the user clicks. ──
     const toRun: ToolUse[] = []
     for (const tu of batch) {
-      const tool = findTool(tu.name)
+      const tool = registry.find(tu.name)
       let decision = tool && perm ? checkPermission(tool, tu.input, perm.state) : 'allow'
       const asked = decision === 'ask' // distinguishes a real prompt from an auto-allow in the trace
       if (decision === 'ask' && perm) {
-        yield { type: 'permission', id: tu.id, tool: tu.name, detail: summary(tu) }
+        yield { type: 'permission', id: tu.id, tool: tu.name, detail: summary(tu, registry) }
         const answer = await perm.request(tu.id) // ← BLOCKS here until respondPermission(tu.id, …)
         if (answer === 'allow-always') perm.state.allow.add(tu.name) // remember for the rest of the session
         decision = answer === 'deny' ? 'deny' : 'allow'
@@ -88,7 +89,7 @@ export async function* scheduleTools(
       tracer.event({ t: 'permission', id: tu.id, tool: tu.name, decision, asked }) // forensics: every gate verdict
       if (decision === 'deny') {
         byId.set(tu.id, deniedBlock(tu.id))
-        yield { type: 'toolStart', id: tu.id, name: tu.name, summary: summary(tu) }
+        yield { type: 'toolStart', id: tu.id, name: tu.name, summary: summary(tu, registry) }
         yield { type: 'toolResult', id: tu.id, ok: false, preview: 'Denied' }
       } else {
         toRun.push(tu)
@@ -101,7 +102,7 @@ export async function* scheduleTools(
     //       a solo mutating tool runs alone.) The single-threaded event loop guarantees no missed wakeup:
     //       nothing runs between our pending-check and the await that registers `wake`. ──
     for (const tu of toRun) {
-      yield { type: 'toolStart', id: tu.id, name: tu.name, summary: summary(tu) }
+      yield { type: 'toolStart', id: tu.id, name: tu.name, summary: summary(tu, registry) }
       tracer.event({ t: 'tool_call', id: tu.id, name: tu.name, input: tu.input }) // full input, untruncated
     }
     // Think of this as a receptionist (this loop) sorting mail (`queue`) that workers (the tools) drop in.

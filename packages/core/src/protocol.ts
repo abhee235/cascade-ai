@@ -30,6 +30,7 @@ export type ActivityEvent =
   | { type: 'toolResult'; id: string; ok: boolean; preview: string } // a tool finished (Phase 4)
   | { type: 'message'; message: Message } // the finalized answer (authoritative; UI commits it)
   | { type: 'turnDone'; steps: number }
+  | { type: 'mcpStatus'; servers: { name: string; status: string; error?: string; toolNames: string[] }[] } // Phase 9: /mcp panel
 
 // ── Inbound messages: frontend → core ───────────────────────────────────────────────────
 export type InboundMessage =
@@ -37,3 +38,4 @@ export type InboundMessage =
   | { type: 'permission'; id: string; decision: 'allow' | 'allow-always' | 'deny' }
   | { type: 'abort' }
   | { type: 'reset' } // "New chat" — clears conversation history
+  | { type: 'mcp'; action: 'list' | 'connect' | 'disconnect'; server?: string } // Phase 9: /mcp panel controls

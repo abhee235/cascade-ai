@@ -19,6 +19,7 @@
     "typescript": "^5.5.0"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "fast-glob": "^3.3.3",
     "zod": "^4.4.3"
   }
