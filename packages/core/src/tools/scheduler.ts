@@ -104,16 +104,21 @@ export async function* scheduleTools(
       yield { type: 'toolStart', id: tu.id, name: tu.name, summary: summary(tu) }
       tracer.event({ t: 'tool_call', id: tu.id, name: tu.name, input: tu.input }) // full input, untruncated
     }
-    const queue: { id: string; chunk: string }[] = []
-    let wake: (() => void) | null = null
+    // Think of this as a receptionist (this loop) sorting mail (`queue`) that workers (the tools) drop in.
+    const queue: { id: string; chunk: string }[] = [] // mailbox: progress chunks waiting to be yielded
+    let wake: (() => void) | null = null // the "resume button": set only while the loop is asleep
     const bump = () => {
+      // Press the resume button (if the loop is asleep), waking it to drain the mailbox.
       const w = wake
       wake = null
       w?.()
     }
     const started = Date.now()
-    let pending = toRun.length
+    let pending = toRun.length // how many tools are still running
     const settled = new Map<string, ContentBlock>()
+    // Start every tool at once (parallel for a safe batch; just one for a solo tool). We do NOT await here —
+    // each tool reports via callbacks: onProgress drops a chunk in the mailbox + rings the bell; .then
+    // records the result, decrements pending, and rings the bell. The loop below does all the yielding.
     for (const tu of toRun) {
       executeTool(tu, ctx, (chunk) => (queue.push({ id: tu.id, chunk }), bump())).then((block) => {
         settled.set(tu.id, block)
@@ -121,12 +126,16 @@ export async function* scheduleTools(
         bump()
       })
     }
+    // Keep going while a tool is still running OR the mailbox has unsent chunks.
     while (pending > 0 || queue.length > 0) {
       while (queue.length) {
+        // Drain the mailbox: this is the ONLY place a callback's chunk becomes a yielded event.
         const p = queue.shift()!
         yield { type: 'toolProgress', id: p.id, chunk: p.chunk }
       }
-      if (pending === 0) break
+      if (pending === 0) break // all tools done and mailbox empty → finished
+      // Sleep: save the resume button in `wake` and pause. A callback's bump() presses it to wake us.
+      // (Single-threaded: nothing runs between the check above and this line, so no chunk is ever missed.)
       await new Promise<void>((res) => (wake = res))
     }
     const ms = Date.now() - started

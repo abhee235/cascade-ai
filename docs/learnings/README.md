@@ -20,3 +20,5 @@ Cascade adopts or defers it.
 - [tool-granularity.md](tool-granularity.md) — few general tools (Read/Grep/Bash) beat many narrow ones; WordCount is just `Bash wc`.
 - [permissions-vs-sandbox.md](permissions-vs-sandbox.md) — gating substitutes for sandboxing; hosted builders run in a sandbox (no prompts); the permission *mode* is the per-frontend knob.
 - [observability-and-tracing.md](observability-and-tracing.md) — trace the agent end-to-end with a self-coded JSONL tracer (DI, like the provider); defer SaaS/OTel; tap the raw model I/O, not just display events.
+- [tool-schema-contract.md](tool-schema-contract.md) — Zod→JSON Schema→OpenAI envelope→Ollama; no direct contract, two stacked specs; advertise loosely (hint) vs enforce strictly (safeParse).
+- [callback-to-generator-bridge.md](callback-to-generator-bridge.md) — the scheduler's progress pump: "pause and leave a resume button" (wake/bump), receptionist+bell analogy, why no chunk is lost.
