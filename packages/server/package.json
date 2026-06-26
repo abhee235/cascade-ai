@@ -1,0 +1,21 @@
+{
+  "name": "@cascade/server",
+  "version": "0.0.0",
+  "description": "Cascade server — hosts @cascade/core and relays the ActivityEvent protocol over WebSocket. The remote frontend (web app) drives the SAME engine the extension drives in-process. (ADR-018)",
+  "type": "module",
+  "main": "./src/wsServer.ts",
+  "scripts": {
+    "dev": "tsx watch src/wsServer.ts",
+    "start": "tsx src/wsServer.ts"
+  },
+  "dependencies": {
+    "@cascade/core": "*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/ws": "^8.5.10",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}
