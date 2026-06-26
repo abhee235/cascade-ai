@@ -74,6 +74,7 @@ export function App() {
   const [items, setItems] = useState<Item[]>([])
   const [streaming, setStreaming] = useState<{ text: string; thinking: string } | null>(null)
   const [status, setStatus] = useState<string | null>(null)
+  const [recovering, setRecovering] = useState<{ attempt: number; reason: string } | null>(null)
   const [prompt, setPrompt] = useState<{ id: string; tool: string; detail: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [mcp, setMcp] = useState<{ name: string; status: string; error?: string; toolNames: string[] }[] | null>(null)
@@ -110,11 +111,20 @@ export function App() {
       switch (event.type) {
         case 'status':
           setStatus(event.text)
+          setRecovering(null) // a new "Thinking…" means we're past the retry
+          break
+        case 'recovering':
+          // The model call failed and we're retrying — show a persistent card (clears on the next progress).
+          setStreaming(null)
+          setStatus(null)
+          setRecovering({ attempt: event.attempt, reason: event.reason })
           break
         case 'thinking_delta':
+          setRecovering(null)
           setStreaming((s) => ({ text: s?.text ?? '', thinking: (s?.thinking ?? '') + event.thinking }))
           break
         case 'text_delta':
+          setRecovering(null)
           setStreaming((s) => ({ text: (s?.text ?? '') + event.text, thinking: s?.thinking ?? '' }))
           break
         case 'permission':
@@ -125,6 +135,7 @@ export function App() {
         case 'toolStart':
           // A tool is running — drop any transient pre-tool text and add a card.
           setStreaming(null)
+          setRecovering(null)
           setItems((it) => [...it, { kind: 'tool', id: event.id, name: event.name, summary: event.summary, status: 'running' }])
           break
         case 'toolProgress':
@@ -155,6 +166,7 @@ export function App() {
         }
         case 'turnDone':
           setStatus(null)
+          setRecovering(null)
           setBusy(false)
           break
         case 'memory':
@@ -469,7 +481,18 @@ export function App() {
             </div>
           </div>
         )}
-        {status && !streaming && (
+        {recovering && (
+          <div style={styles.recoverCard}>
+            <span className="cascade-spinner" />
+            <span>
+              {recovering.reason === 'overflow'
+                ? 'Context too large — compacting and retrying…'
+                : "Can't reach the model (Ollama) — reconnecting…"}{' '}
+              <span style={styles.recoverAttempt}>attempt {recovering.attempt}</span>
+            </span>
+          </div>
+        )}
+        {status && !streaming && !recovering && (
           <div style={styles.status}>
             <span className="cascade-spinner" /> {status}
           </div>
@@ -567,6 +590,19 @@ const styles: Record<string, React.CSSProperties> = {
     borderLeft: '2px solid var(--vscode-panel-border)',
   },
   status: { opacity: 0.7, fontStyle: 'italic', padding: '6px 8px' },
+  recoverCard: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    margin: '8px 0',
+    padding: '8px 11px',
+    borderRadius: 8,
+    fontSize: 12,
+    color: 'var(--vscode-inputValidation-warningForeground, var(--vscode-foreground))',
+    background: 'var(--vscode-inputValidation-warningBackground, rgba(255,200,0,0.08))',
+    border: '1px solid var(--vscode-inputValidation-warningBorder, var(--vscode-panel-border))',
+  },
+  recoverAttempt: { opacity: 0.6 },
   memoryMarker: {
     margin: '4px 0',
     padding: '3px 10px',

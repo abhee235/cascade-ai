@@ -21,6 +21,10 @@ describe('classifyError (the retry taxonomy)', () => {
     expect(classifyError(err({ status: 400 }))).toBe('fatal') // deterministic
     expect(classifyError(err({ status: 401 }))).toBe('fatal')
     expect(classifyError(err({ message: 'fetch failed', cause: { code: 'ECONNREFUSED' } }))).toBe('transient')
+    // The "terminated" case from the bug report: undici drops a streaming connection mid-response.
+    expect(classifyError(err({ name: 'TypeError', message: 'terminated', cause: { code: 'UND_ERR_SOCKET', message: 'other side closed' } }))).toBe('transient')
+    expect(classifyError(new Error('terminated'))).toBe('transient')
+    expect(classifyError(err({ code: 'UND_ERR_SOCKET' }))).toBe('transient')
   })
 })
 

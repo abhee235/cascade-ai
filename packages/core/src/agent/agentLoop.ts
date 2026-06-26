@@ -14,7 +14,7 @@ import { NoopTracer, type Tracer } from '../observability/tracer'
 import { createRegistry, registryOf, type ToolRegistry } from '../tools/toolRegistry'
 import { buildSystemPrompt } from './systemPrompt'
 import { compactIfNeeded, type CompactDeps } from '../context/compactor'
-import { streamWithRecovery } from '../llm/resilience'
+import { streamWithRecovery, type RecoveryOptions } from '../llm/resilience'
 import type { ToolUse } from '../tools/runTool'
 import { scheduleTools } from '../tools/scheduler'
 
@@ -31,6 +31,7 @@ export interface LoopDeps {
   recalled?: string // Phase 10: archival memories auto-retrieved for this turn (proactive retrieval)
   compact?: CompactDeps // Phase 11: compact the history when it nears the window
   depth?: number // Phase 12: subagent nesting depth (0 = main agent)
+  recovery?: Pick<RecoveryOptions, 'maxRetries' | 'baseDelayMs' | 'maxDelayMs' | 'sleep'> // Phase 12: tune/inject for tests
 }
 
 const MAX_SUBAGENT_DEPTH = 2
@@ -106,6 +107,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     const makeStream = () =>
       deps.provider.stream({ messages, model: deps.model, system: buildSystemPrompt({ cwd: deps.cwd, recalled: deps.recalled }), tools: registry.schemas() }, deps.signal)
     for await (const ev of streamWithRecovery(makeStream, {
+      ...deps.recovery,
       signal: deps.signal,
       onOverflow: deps.compact
         ? async () => {
@@ -115,7 +117,14 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
         : undefined,
       onRetry: (info) => tracer.event({ t: 'error', message: `recover(${info.reason}) attempt ${info.attempt}, wait ${Math.round(info.delayMs)}ms` }),
     })) {
-      if (ev.type === 'thinking_delta') {
+      if (ev.type === 'retry') {
+        // A failed attempt is being retried: DISCARD any partial output from it (so we don't double-count
+        // text), and surface a persistent recovery CARD so the user sees we're reconnecting, not dead.
+        text = ''
+        thinking = ''
+        toolUses.length = 0
+        yield { type: 'recovering', attempt: ev.attempt, reason: ev.reason, delayMs: ev.delayMs }
+      } else if (ev.type === 'thinking_delta') {
         thinking += ev.thinking
         yield { type: 'thinking_delta', thinking: ev.thinking }
       } else if (ev.type === 'text_delta') {

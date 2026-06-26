@@ -32,6 +32,7 @@ export type ActivityEvent =
   | { type: 'turnDone'; steps: number }
   | { type: 'memory'; scope: string; text: string } // Phase 10: a fact auto-saved by self-curation (UI marker)
   | { type: 'compacted'; kind: string } // Phase 11: context was compacted ('masked' | 'summarized')
+  | { type: 'recovering'; attempt: number; reason: string; delayMs: number } // Phase 12: retrying a failed model call (UI card)
   | { type: 'mcpStatus'; servers: { name: string; status: string; error?: string; toolNames: string[] }[] } // Phase 9: /mcp panel
   | { type: 'memoryData'; core: string; archival: { id: string; text: string; ts: string }[]; hits?: { text: string; score: number }[] } // Phase 10: /memory panel
 

@@ -42,6 +42,7 @@ export type StreamEvent =
   | { type: 'text_delta'; text: string } // a chunk of the answer
   | { type: 'thinking_delta'; thinking: string } // a chunk of reasoning (e.g. Ollama delta.reasoning)
   | { type: 'tool_use'; id: string; name: string; input: unknown } // a COMPLETE tool call (args accumulated + parsed)
+  | { type: 'retry'; attempt: number; delayMs: number; reason: string } // synthetic: streamWithRecovery is retrying (resets partial output)
   | { type: 'done'; stopReason: 'end_turn' | 'max_tokens' | 'tool_use' }
 
 export interface ModelProvider {

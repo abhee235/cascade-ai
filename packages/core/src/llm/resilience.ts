@@ -11,21 +11,24 @@ export type ErrorKind = 'abort' | 'overflow' | 'transient' | 'fatal'
 
 /** Classify an error into the retry taxonomy (the crux — see resilience-and-subagents-design.md). */
 export function classifyError(err: unknown): ErrorKind {
-  const e = err as { name?: string; code?: string; status?: number; statusCode?: number; message?: string; cause?: { code?: string } }
+  const e = err as { name?: string; code?: string; status?: number; statusCode?: number; message?: string; cause?: { code?: string; message?: string } }
   if (e?.name === 'AbortError' || e?.name === 'APIUserAbortError') return 'abort'
 
-  const msg = String(e?.message ?? err ?? '').toLowerCase()
+  // Look at the whole error: message + the cause chain (undici wraps the real reason in `cause`).
+  const msg = `${String(e?.message ?? err ?? '')} ${String(e?.cause?.message ?? '')}`.toLowerCase()
   if (/context (length|window)|num_ctx|exceed|too long|too many tokens|maximum context/.test(msg)) return 'overflow'
 
-  const code = e?.code ?? e?.cause?.code
-  if (code === 'ECONNREFUSED' || code === 'ECONNRESET' || code === 'EPIPE' || code === 'ETIMEDOUT') return 'transient'
+  const code = String(e?.code ?? e?.cause?.code ?? '')
+  if (/^(ECONNREFUSED|ECONNRESET|EPIPE|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|UND_ERR)/i.test(code)) return 'transient'
 
   const status = e?.status ?? e?.statusCode
   if (typeof status === 'number') {
     if (status === 408 || status === 409 || status === 429 || status === 529 || status >= 500) return 'transient'
     return 'fatal' // 400/401/403/404 — deterministic, don't retry
   }
-  if (/fetch failed|network|timeout|socket hang up|econnrefused/.test(msg)) return 'transient'
+  // Streaming connection dropped mid-response: Node/undici throws `TypeError: terminated` (cause:
+  // "other side closed" / UND_ERR_SOCKET). Common with Ollama (model loading, brief stall) — and retryable.
+  if (/fetch failed|terminated|other side closed|socket|network|timeout|connection (closed|reset|error)|econn|und_err|premature close/.test(msg)) return 'transient'
   return 'fatal'
 }
 
@@ -57,10 +60,10 @@ function backoff(attempt: number, base: number, max: number): number {
 /** Drive a provider stream with recovery. `make` is called once per attempt (re-reads the latest messages,
  *  so onOverflow's compaction takes effect on the retry). */
 export async function* streamWithRecovery(make: () => AsyncIterable<StreamEvent>, opts: RecoveryOptions = {}): AsyncGenerator<StreamEvent> {
-  const maxRetries = opts.maxRetries ?? 4
+  const maxRetries = opts.maxRetries ?? 5 // ~0.5+1+2+4+8 ≈ 15s window to bring a killed Ollama back
   const maxOverflow = opts.maxOverflowRetries ?? 2
   const base = opts.baseDelayMs ?? 500
-  const max = opts.maxDelayMs ?? 30_000
+  const max = opts.maxDelayMs ?? 8_000
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
   let transientAttempts = 0
   let overflowAttempts = 0
@@ -79,6 +82,7 @@ export async function* streamWithRecovery(make: () => AsyncIterable<StreamEvent>
         if (opts.onOverflow && overflowAttempts < maxOverflow) {
           overflowAttempts++
           opts.onRetry?.({ attempt: overflowAttempts, delayMs: 0, reason: 'overflow' })
+          yield { type: 'retry', attempt: overflowAttempts, delayMs: 0, reason: 'overflow' } // tells the loop to reset partial output
           await opts.onOverflow() // e.g. compact, then retry with the smaller history — no backoff
           continue
         }
@@ -89,6 +93,7 @@ export async function* streamWithRecovery(make: () => AsyncIterable<StreamEvent>
         transientAttempts++
         const delayMs = backoff(transientAttempts, base, max)
         opts.onRetry?.({ attempt: transientAttempts, delayMs, reason: 'transient' })
+        yield { type: 'retry', attempt: transientAttempts, delayMs, reason: 'transient' } // surfaced to the UI; resets partial output
         await sleep(delayMs)
         continue
       }

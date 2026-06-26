@@ -42,6 +42,8 @@ export interface SessionOptions {
   /** Compaction tuning (Phase 11): compact at window*compactRatio; keep window*keepRecentRatio verbatim. */
   compactRatio?: number
   keepRecentRatio?: number
+  /** Resilience tuning (Phase 12): retry/backoff for transient model-call failures. */
+  recovery?: { maxRetries?: number; baseDelayMs?: number; maxDelayMs?: number; sleep?: (ms: number) => Promise<void> }
 }
 
 export interface CascadeSession {
@@ -151,12 +153,17 @@ export function createSession(opts: SessionOptions): CascadeSession {
             // Coupled curation: harvest durable facts from the OLDER messages right before they're summarized away.
             onDiscard: autoMemory ? async (older) => void (await curate(older)) : undefined,
           },
+          recovery: opts.recovery,
         })
       } catch (err) {
+        const e = err as { name?: string; message?: string; cause?: { message?: string } }
+        const detail = e?.cause?.message ? `${e.message} (${e.cause.message})` : (e?.message ?? String(err))
         const msg =
-          err instanceof Error && err.name === 'AbortError'
+          e?.name === 'AbortError'
             ? '⏹ Cancelled.'
-            : `⚠️ ${err instanceof Error ? err.message : String(err)}`
+            : e?.name === 'RecoveryError'
+              ? `⚠️ The model call kept failing (${detail}). Is Ollama running and the model "${opts.model}" loaded? You can just try again.`
+              : `⚠️ ${detail}`
         tracer.event({ t: 'error', message: msg })
         yield { type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: msg }] } }
         yield { type: 'turnDone', steps: 0 }
