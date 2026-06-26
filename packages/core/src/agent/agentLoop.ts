@@ -14,6 +14,7 @@ import { NoopTracer, type Tracer } from '../observability/tracer'
 import { createRegistry, type ToolRegistry } from '../tools/toolRegistry'
 import { buildSystemPrompt } from './systemPrompt'
 import { compactIfNeeded, type CompactDeps } from '../context/compactor'
+import { streamWithRecovery } from '../llm/resilience'
 import type { ToolUse } from '../tools/runTool'
 import { scheduleTools } from '../tools/scheduler'
 
@@ -61,11 +62,22 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     // is wrong ("did the model even see the tool_result / the right system prompt?"). — ADR-023.
     const system = buildSystemPrompt({ cwd: deps.cwd, recalled: deps.recalled })
     tracer.event({ t: 'model_request', turn, system, tools: registry.list().map((t) => t.name), messages })
-    for await (const ev of deps.provider.stream(
-      { messages, model: deps.model, system, tools: registry.schemas() },
-      deps.signal,
-    )) {
-      if (ev.type === 'thinking_delta') {  
+    // Wrap the stream in recovery (ADR-016): transient failures retry with backoff; context overflow triggers
+    // a (reactive) compaction then retries; abort/fatal surface. `make` re-reads `messages` each attempt, so
+    // an overflow-compaction is reflected on the retry. System is rebuilt too (memory may have changed).
+    const makeStream = () =>
+      deps.provider.stream({ messages, model: deps.model, system: buildSystemPrompt({ cwd: deps.cwd, recalled: deps.recalled }), tools: registry.schemas() }, deps.signal)
+    for await (const ev of streamWithRecovery(makeStream, {
+      signal: deps.signal,
+      onOverflow: deps.compact
+        ? async () => {
+            const { messages: c, kind } = await compactIfNeeded(messages, { ...deps.compact!, config: { ...deps.compact!.config, compactRatio: 0.6 } })
+            if (kind !== 'none') messages.splice(0, messages.length, ...c)
+          }
+        : undefined,
+      onRetry: (info) => tracer.event({ t: 'error', message: `recover(${info.reason}) attempt ${info.attempt}, wait ${Math.round(info.delayMs)}ms` }),
+    })) {
+      if (ev.type === 'thinking_delta') {
         thinking += ev.thinking
         yield { type: 'thinking_delta', thinking: ev.thinking }
       } else if (ev.type === 'text_delta') {

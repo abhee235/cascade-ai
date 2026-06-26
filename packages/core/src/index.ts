@@ -35,3 +35,6 @@ export {
 } from './memory/memoryStore'
 export { createArchival } from './memory/archival'
 export type { ArchivalMemory, ArchivalHit, ArchivalEntry } from './memory/archival'
+// Resilience (ADR-016): retry/backoff + overflow→compact around the model call.
+export { streamWithRecovery, classifyError, RecoveryError } from './llm/resilience'
+export type { ErrorKind, RecoveryOptions } from './llm/resilience'
