@@ -23,6 +23,11 @@ export interface ToolContext {
   registry?: ToolRegistry
   /** Phase 10 (ADR-015): archival (semantic) memory the agent can write to and search on demand. */
   archival?: ArchivalMemory
+  /** Phase 12 (ADR-017): nesting depth (0 = main agent). Used to cap subagent recursion. */
+  depth?: number
+  /** Phase 12: delegate a subtask to a nested agent loop (own context + tool subset) → returns its final
+   *  text. Injected by the loop (avoids an import cycle); absent at/over the depth cap. */
+  spawnSubagent?(opts: { prompt: string; readOnly?: boolean }): Promise<string>
 }
 
 export interface ToolResult {

@@ -11,7 +11,7 @@ import type { ModelProvider } from '../llm/provider'
 import type { ToolContext } from '../tools/Tool'
 import type { PermissionController } from '../permissions/gate'
 import { NoopTracer, type Tracer } from '../observability/tracer'
-import { createRegistry, type ToolRegistry } from '../tools/toolRegistry'
+import { createRegistry, registryOf, type ToolRegistry } from '../tools/toolRegistry'
 import { buildSystemPrompt } from './systemPrompt'
 import { compactIfNeeded, type CompactDeps } from '../context/compactor'
 import { streamWithRecovery } from '../llm/resilience'
@@ -30,6 +30,15 @@ export interface LoopDeps {
   archival?: import('../memory/archival').ArchivalMemory // Phase 10: semantic memory the tools can use
   recalled?: string // Phase 10: archival memories auto-retrieved for this turn (proactive retrieval)
   compact?: CompactDeps // Phase 11: compact the history when it nears the window
+  depth?: number // Phase 12: subagent nesting depth (0 = main agent)
+}
+
+const MAX_SUBAGENT_DEPTH = 2
+const READONLY_SUBAGENT_TOOLS = new Set(['Read', 'Glob', 'Grep', 'MemorySearch'])
+
+function messageText(m: Message): string {
+  if (typeof m.content === 'string') return m.content
+  return m.content.filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text').map((b) => b.text).join('')
 }
 
 export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncIterable<ActivityEvent> {
@@ -37,7 +46,36 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   const registry = deps.registry ?? createRegistry()
   // Share ONE registry instance for the turn: the loop advertises with it, and the scheduler/runTool look
   // up with it — so what the model is offered and what we execute always agree.
-  const ctx: ToolContext = { cwd: deps.cwd, abortSignal: deps.signal, permission: deps.permission, tracer, registry, archival: deps.archival }
+  const depth = deps.depth ?? 0
+  const ctx: ToolContext = { cwd: deps.cwd, abortSignal: deps.signal, permission: deps.permission, tracer, registry, archival: deps.archival, depth }
+  // Subagent delegation (ADR-017): inject a spawn closure (avoids an import cycle). Absent at the depth cap.
+  // The child runs a NESTED runAgentLoop with its OWN messages + a filtered tool set (never Subagent → no
+  // recursion; read-only subset for `explore`). Only its final text returns — its steps stay in its context.
+  if (depth < MAX_SUBAGENT_DEPTH) {
+    ctx.spawnSubagent = async ({ prompt, readOnly }) => {
+      const childRegistry = registryOf(() =>
+        registry.list().filter((t) => t.name !== 'Subagent' && (!readOnly || READONLY_SUBAGENT_TOOLS.has(t.name))),
+      )
+      let finalText = ''
+      for await (const ev of runAgentLoop([{ role: 'user', content: prompt }], {
+        provider: deps.provider,
+        model: deps.model,
+        cwd: deps.cwd,
+        signal: deps.signal,
+        registry: childRegistry,
+        tracer,
+        permission: deps.permission,
+        maxTurns: 8,
+        depth: depth + 1,
+      })) {
+        if (ev.type === 'message') {
+          const t = messageText(ev.message)
+          if (t) finalText = t // last assistant message wins (the subagent's conclusion)
+        }
+      }
+      return finalText || '(subagent produced no output)'
+    }
+  }
   const maxTurns = deps.maxTurns ?? 10
   let turn = 0
 

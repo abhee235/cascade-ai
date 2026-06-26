@@ -17,9 +17,10 @@ import { EditTool } from './builtins/Edit'
 import { BashTool } from './builtins/Bash'
 import { MemoryTool } from './builtins/Memory'
 import { MemorySearchTool } from './builtins/MemorySearch'
+import { SubagentTool } from './builtins/Subagent'
 
 /** The always-present tools. MCP tools are added dynamically via createRegistry's `extraTools`. */
-export const builtinTools: Tool[] = [ReadTool, GlobTool, GrepTool, WriteTool, EditTool, BashTool, MemoryTool, MemorySearchTool]
+export const builtinTools: Tool[] = [ReadTool, GlobTool, GrepTool, WriteTool, EditTool, BashTool, MemoryTool, MemorySearchTool, SubagentTool]
 
 /** The JSON Schema to advertise for a tool: a builtin's Zod schema converted, an MCP tool's raw
  *  `parameters` used as-is, or an empty object if neither (no args). */
@@ -39,13 +40,17 @@ export interface ToolRegistry {
 
 /** Build a registry of builtins + `extraTools()` (e.g. `() => mcpHub.readyTools()`). `extraTools` is a
  *  function, not an array, so the set is recomputed each call — newly-ready MCP tools show up immediately. */
-export function createRegistry(extraTools: () => Tool[] = () => []): ToolRegistry {
-  const all = () => [...builtinTools, ...extraTools()]
+/** A registry over an arbitrary (dynamic) tool list — e.g. a subagent's filtered subset (Phase 12). */
+export function registryOf(tools: () => Tool[]): ToolRegistry {
   return {
-    list: all,
-    find: (name) => all().find((t) => t.name === name),
-    schemas: () => all().map((t) => ({ name: t.name, description: t.description, parameters: schemaOf(t) })),
+    list: tools,
+    find: (name) => tools().find((t) => t.name === name),
+    schemas: () => tools().map((t) => ({ name: t.name, description: t.description, parameters: schemaOf(t) })),
   }
+}
+
+export function createRegistry(extraTools: () => Tool[] = () => []): ToolRegistry {
+  return registryOf(() => [...builtinTools, ...extraTools()])
 }
 
 /** Builtins-only registry — the fallback when none is injected (headless smokes, direct-call tests). */
