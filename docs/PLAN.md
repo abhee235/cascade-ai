@@ -307,15 +307,19 @@ Each ADR is a short file in `cascade/docs/adr/`: Context → Decision → Conseq
 | ADR-009 | Permission model: allow/ask/deny + modes + rules | 7 |
 | ADR-010 | Webview↔host **ActivityEvent** protocol | 8 |
 | ADR-011 | MCP integration; `mcp__server__tool` namespacing | 9 |
-| ADR-012 | Context compaction | 10 |
+| ADR-012 | Context compaction (layered, ratio-sized; + coupled curation) | 11 |
 | **ADR-013** | **Streamed output (prose+thinking live) + activity view** | 2 (used through 8) |
 | **ADR-014** | **MCP init: background discovery + lazy retry (divergence)** | 9 |
-| ADR-015 | Persistent memory store (read + tool-updatable) | 10 |
-| ADR-016 | Error recovery & resilience (retry/backoff/fallback/abort/overflow) | 11 |
-| ADR-017 | Subagents (nested loop with own context) | 11 |
-| **ADR-018** | **Frontend-agnostic core + transport boundary (in-process & WebSocket)** | 0 (realized in 12) |
-| **ADR-019** | **Web app over the Cascade server** | 12 |
-| ADR-021 | Tool-calling strategies: native / structured-output / prompt-based ReAct | 13 |
+| ADR-015 | Memory: tiered, self-curating subsystem (core+archival+proactive) | 10 |
+| ADR-016 | Error recovery & resilience (retry/backoff/fallback/abort/overflow) | 12 |
+| ADR-017 | Subagents (nested loop with own context) | 12 |
+| **ADR-018** | **Frontend-agnostic core + transport boundary (in-process & WebSocket)** | 0 (realized in 13) |
+| **ADR-019** | **Web app (browser chat) over the Cascade server** | 13 |
+| ADR-021 | Tool-calling strategies: native / structured-output / prompt-based ReAct | 14 |
+| ADR-023 | Observability: forensic JSONL tracer | 7.5 (inserted) |
+
+> **Phase renumber (memory earned its own phase):** 10 = Memory subsystem · 11 = Compaction (+ coupled
+> curation) · 12 = Resilience & Subagents · 13 = Server + Web · 14 = Tool-calling strategies.
 
 ---
 

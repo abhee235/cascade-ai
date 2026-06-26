@@ -13,7 +13,7 @@ import type { PermissionController } from '../permissions/gate'
 import { NoopTracer, type Tracer } from '../observability/tracer'
 import { createRegistry, type ToolRegistry } from '../tools/toolRegistry'
 import { buildSystemPrompt } from './systemPrompt'
-import { curateMemory } from '../memory/curator'
+import { compactIfNeeded, type CompactDeps } from '../context/compactor'
 import type { ToolUse } from '../tools/runTool'
 import { scheduleTools } from '../tools/scheduler'
 
@@ -27,8 +27,8 @@ export interface LoopDeps {
   tracer?: Tracer // ADR-023: forensic JSONL trace
   registry?: ToolRegistry // Phase 9: builtins + ready MCP tools; defaults to builtins-only
   archival?: import('../memory/archival').ArchivalMemory // Phase 10: semantic memory the tools can use
-  autoMemory?: boolean // Phase 10: self-curate durable facts at end of turn (default on)
   recalled?: string // Phase 10: archival memories auto-retrieved for this turn (proactive retrieval)
+  compact?: CompactDeps // Phase 11: compact the history when it nears the window
 }
 
 export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncIterable<ActivityEvent> {
@@ -44,6 +44,17 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     let text = ''
     let thinking = ''
     const toolUses: ToolUse[] = []
+
+    // Compaction (ADR-012): BEFORE each model call, if history nears the window, mask old tool output and/or
+    // summarize the older half. We splice in place so the session's history reference stays valid; the raw
+    // transcript + JSONL trace are untouched (you'll see the next model_request shrink).
+    if (deps.compact) {
+      const { messages: compacted, kind } = await compactIfNeeded(messages, deps.compact)
+      if (kind !== 'none') {
+        messages.splice(0, messages.length, ...compacted)
+        yield { type: 'compacted', kind }
+      }
+    }
 
     yield { type: 'status', text: 'Thinking…' }
     // FORENSICS: record the FULL request we're about to send — the #1 thing you need when an answer
@@ -84,17 +95,6 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     // TERMINAL — no tool calls → done.
     if (toolUses.length === 0) {
       if (!display.length) yield { type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: '' }] } }
-      // SELF-CURATION: extract durable facts at end of turn. OPT-IN only (default off) — per-turn append is
-      // the naive design (duplicates, transient facts, poisoning/drift risks — see memory-write-policy.md).
-      // Phase 11 replaces this with event-driven (compaction + session-end) Mem0-style consolidation.
-      if (deps.autoMemory === true && deps.archival) {
-        yield { type: 'status', text: 'Updating memory…' }
-        const saved = await curateMemory({ messages, provider: deps.provider, model: deps.model, archival: deps.archival })
-        for (const fact of saved) {
-          tracer.event({ t: 'tool_result', id: 'memory', name: 'Memory(auto)', ok: true, ms: 0, content: fact })
-          yield { type: 'memory', scope: 'archival', text: fact }
-        }
-      }
       tracer.event({ t: 'turn_done', turns: turn })
       yield { type: 'turnDone', steps: turn }
       return

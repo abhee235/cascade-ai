@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runAgentLoop } from '../src/agent/agentLoop'
+import { createSession } from '../src/session'
 import { createArchival, type Embed } from '../src/memory/archival'
 import { OpenAICompatProvider } from '../src/llm/providers/openaiCompat'
 import { createFakeProvider, textDelta, toolUse, done } from './fakeProvider'
@@ -26,26 +27,17 @@ async function collect(gen: AsyncIterable<ActivityEvent>): Promise<ActivityEvent
 }
 
 describe('memory — end-to-end through the agent loop', () => {
-  it('Memory tool writes CORE memory, and self-curation writes ARCHIVAL (with a marker)', async () => {
+  it('Memory tool writes CORE memory through the real executeTool pipeline', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'cascade-int-'))
     try {
-      const archival = createArchival({ cwd: dir, embed: fakeEmbed })
       const provider = createFakeProvider([
         [toolUse('m1', 'Memory', { action: 'append', fact: 'prefers tabs over spaces', scope: 'core' }), done('tool_use')],
-        [textDelta('Noted.'), done('end_turn')], // terminal → triggers self-curation
-        [textDelta('["uses pnpm not npm"]')], // the curation complete() call
+        [textDelta('Noted.'), done('end_turn')],
       ])
-      const msgs: Message[] = [{ role: 'user', content: 'I prefer tabs, and we use pnpm not npm' }]
-
-      const events = await collect(
-        runAgentLoop(msgs, { provider, model: 'fake', cwd: dir, signal: new AbortController().signal, permission: bypass, archival, autoMemory: true }),
+      await collect(
+        runAgentLoop([{ role: 'user', content: 'I prefer tabs' }], { provider, model: 'fake', cwd: dir, signal: new AbortController().signal, permission: bypass }),
       )
-
-      // Tier 1: core memory file written via the real executeTool pipeline.
       expect(readFileSync(join(dir, 'CASCADE.md'), 'utf8')).toContain('prefers tabs over spaces')
-      // Tier 3: self-curation extracted + archived a durable fact, and surfaced a marker.
-      expect(archival.count()).toBe(1)
-      expect(events.some((e) => e.type === 'memory' && e.text.includes('pnpm'))).toBe(true)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -60,7 +52,6 @@ describe('memory — end-to-end through the agent loop', () => {
       const provider = createFakeProvider([
         [toolUse('s1', 'MemorySearch', { query: 'how do I deploy the app' }), done('tool_use')],
         [textDelta('You deploy with `make ship`.'), done('end_turn')],
-        [textDelta('[]')], // curation finds nothing durable
       ])
 
       const events = await collect(
@@ -71,12 +62,30 @@ describe('memory — end-to-end through the agent loop', () => {
           signal: new AbortController().signal,
           permission: bypass,
           archival,
-          autoMemory: true,
         }),
       )
 
       const results = events.filter((e) => e.type === 'toolResult') as Extract<ActivityEvent, { type: 'toolResult' }>[]
       expect(results.some((e) => e.preview.includes('make ship'))).toBe(true) // top hit, not the teal one
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('session-end curation (dispose) harvests durable facts into archival (opt-in autoMemory)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'cascade-int-'))
+    try {
+      const provider = createFakeProvider([
+        [textDelta('Got it.'), done('end_turn')], // the submit's model call
+        [textDelta('["uses pnpm not npm"]')], // dispose-time curation extraction
+      ])
+      const session = createSession({ cwd: dir, provider, model: 'fake', autoMemory: true })
+      for await (const _ of session.submit('for this project we use pnpm not npm')) {
+        /* consume the turn */
+      }
+      await session.dispose() // session-end → curate → consolidate into archival
+
+      expect(session.memoryView().archival.some((e) => e.text.includes('pnpm'))).toBe(true)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

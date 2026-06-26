@@ -42,6 +42,7 @@ type Item =
   | { kind: 'assistant'; text: string; thinking?: string }
   | { kind: 'tool'; id: string; name: string; summary: string; status: 'running' | 'ok' | 'error'; preview?: string }
   | { kind: 'memory'; text: string }
+  | { kind: 'compacted'; text: string }
 
 function extract(message: Message): { text: string; thinking: string } {
   if (typeof message.content === 'string') return { text: message.content, thinking: '' }
@@ -159,6 +160,12 @@ export function App() {
         case 'memory':
           // Self-curation saved a durable fact — show a subtle marker so it's transparent.
           setItems((it) => [...it, { kind: 'memory', text: event.text }])
+          break
+        case 'compacted':
+          setItems((it) => [
+            ...it,
+            { kind: 'compacted', text: event.kind === 'summarized' ? 'summarized older turns' : 'masked old tool output' },
+          ])
           break
         case 'mcpStatus':
           setMcp(event.servers)
@@ -388,6 +395,10 @@ export function App() {
             <div key={i} style={styles.memoryMarker}>
               💾 Remembered: {it.text}
             </div>
+          ) : it.kind === 'compacted' ? (
+            <div key={i} style={styles.compactMarker}>
+              🗜 Context compacted — {it.text}
+            </div>
           ) : it.kind === 'tool' ? (
             <div key={i} style={styles.toolCard}>
               <div style={styles.toolHeader}>
@@ -563,6 +574,16 @@ const styles: Record<string, React.CSSProperties> = {
     opacity: 0.7,
     fontStyle: 'italic',
     borderLeft: '2px solid var(--vscode-charts-purple, #a86)',
+  },
+  compactMarker: {
+    margin: '6px 0',
+    padding: '3px 10px',
+    fontSize: 11,
+    opacity: 0.7,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    borderTop: '1px dashed var(--vscode-panel-border)',
+    borderBottom: '1px dashed var(--vscode-panel-border)',
   },
   caret: { opacity: 0.6 },
   // Permission card — blocks the loop until the user answers.

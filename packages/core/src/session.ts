@@ -14,6 +14,8 @@ import { createRegistry } from './tools/toolRegistry'
 import { McpHub, type McpServerConfig, type McpConnect, type McpServerStatus } from './mcp/mcpHub'
 import { createArchival, type ArchivalHit } from './memory/archival'
 import { loadMemory } from './memory/memoryStore'
+import { resolveCompactConfig } from './context/compactor'
+import { curateMemory } from './memory/curator'
 
 export interface SessionOptions {
   cwd: string
@@ -35,6 +37,11 @@ export interface SessionOptions {
   embedModel?: string
   /** Self-curate durable facts into archival memory at the end of each turn (Phase 10). Default true. */
   autoMemory?: boolean
+  /** Context window (tokens) for compaction sizing (Phase 11). Overrides the model→window map. */
+  contextWindow?: number
+  /** Compaction tuning (Phase 11): compact at window*compactRatio; keep window*keepRecentRatio verbatim. */
+  compactRatio?: number
+  keepRecentRatio?: number
 }
 
 export interface CascadeSession {
@@ -86,6 +93,22 @@ export function createSession(opts: SessionOptions): CascadeSession {
   const embed = opts.provider.embed ? (texts: string[]) => opts.provider.embed!(texts, embedModel) : undefined
   const archival = createArchival({ cwd: opts.cwd, embed })
 
+  // Compaction config (Phase 11): resolved once — window via override → model map → default; ratios scale.
+  const compactConfig = resolveCompactConfig({
+    model: opts.model,
+    contextWindow: opts.contextWindow,
+    compactRatio: opts.compactRatio,
+    keepRecentRatio: opts.keepRecentRatio,
+  })
+
+  // Event-driven curation (ADR-015): harvest durable facts when context is about to be discarded — at
+  // compaction (the older chunk) and at session end. OPT-IN (autoMemory); consolidates (ADD/NOOP), no firehose.
+  const autoMemory = opts.autoMemory === true
+  const curate = (msgs: Message[]) =>
+    autoMemory && msgs.length
+      ? curateMemory({ messages: msgs, provider: opts.provider, model: opts.model, archival })
+      : Promise.resolve([] as string[])
+
   return {
     async *submit(userText: string): AsyncIterable<ActivityEvent> {
       const controller = new AbortController()
@@ -119,8 +142,15 @@ export function createSession(opts: SessionOptions): CascadeSession {
           tracer,
           registry,
           archival,
-          autoMemory: opts.autoMemory,
           recalled,
+          compact: {
+            provider: opts.provider,
+            model: opts.model,
+            config: compactConfig,
+            signal: controller.signal,
+            // Coupled curation: harvest durable facts from the OLDER messages right before they're summarized away.
+            onDiscard: autoMemory ? async (older) => void (await curate(older)) : undefined,
+          },
         })
       } catch (err) {
         const msg =
@@ -150,6 +180,9 @@ export function createSession(opts: SessionOptions): CascadeSession {
     },
 
     reset() {
+      // Session-end curation: harvest durable facts from the conversation before clearing it (fire-and-forget
+      // — New chat shouldn't block on a model call).
+      void curate([...messages])
       messages.length = 0
       // Drop any allow-always rules granted DURING the chat so a new chat truly starts fresh (the gate
       // asks again). Mode and the settings-seeded allow/deny rules are preserved — only the runtime
@@ -159,6 +192,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
     },
 
     async dispose() {
+      await curate([...messages]) // session-end curation (awaitable) before teardown
       await hub?.dispose() // close MCP subprocesses — no zombies (Phase 9 pitfall)
     },
 

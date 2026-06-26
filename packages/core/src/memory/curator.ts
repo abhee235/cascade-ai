@@ -64,6 +64,14 @@ export async function curateMemory(opts: {
     return [] // extraction is best-effort; never break the turn
   }
   const facts = parseFacts(reply)
-  for (const f of facts) await opts.archival.write(f)
-  return facts
+  // CONSOLIDATE (Mem0-style ADD/NOOP): skip a fact already semantically present (≥0.85). UPDATE/DELETE of
+  // contradictions is a future refinement; archival.write also dedups exact repeats.
+  const added: string[] = []
+  for (const f of facts) {
+    const hits = await opts.archival.search(f, 1)
+    if (hits[0] && hits[0].score >= 0.85) continue // NOOP — already known
+    await opts.archival.write(f)
+    added.push(f)
+  }
+  return added
 }

@@ -80,6 +80,9 @@ export class CascadeViewProvider implements vscode.WebviewViewProvider {
         mcpConnect: sdkConnect,
         embedModel: cfg.get<string>('embedModel') || undefined,
         autoMemory: cfg.get<boolean>('autoMemory', false),
+        contextWindow: cfg.get<number>('contextWindow') || undefined,
+        compactRatio: cfg.get<number>('compactRatio') || undefined,
+        keepRecentRatio: cfg.get<number>('keepRecentRatio') || undefined,
       })
       this.sessionCwd = cwd
     }

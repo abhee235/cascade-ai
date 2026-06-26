@@ -93,6 +93,21 @@
           "default": true,
           "description": "Write a forensic JSONL trace of each run to <workspace>/.cascade/trace-<timestamp>.jsonl (full model requests/responses, tool I/O, permission decisions, timing)."
         },
+        "cascade.contextWindow": {
+          "type": "number",
+          "default": 0,
+          "description": "Context window in tokens for compaction sizing. 0 = auto (known-model map, else 8192). For Ollama, set this to your model's num_ctx (Ollama defaults num_ctx to ~4k regardless of the model's max)."
+        },
+        "cascade.compactRatio": {
+          "type": "number",
+          "default": 0.8,
+          "description": "Compact the conversation when estimated tokens reach this fraction of the context window."
+        },
+        "cascade.keepRecentRatio": {
+          "type": "number",
+          "default": 0.25,
+          "description": "Fraction of the context window kept as verbatim recent messages during compaction (the rest is summarized)."
+        },
         "cascade.embedModel": {
           "type": "string",
           "default": "nomic-embed-text",

@@ -31,6 +31,7 @@ export type ActivityEvent =
   | { type: 'message'; message: Message } // the finalized answer (authoritative; UI commits it)
   | { type: 'turnDone'; steps: number }
   | { type: 'memory'; scope: string; text: string } // Phase 10: a fact auto-saved by self-curation (UI marker)
+  | { type: 'compacted'; kind: string } // Phase 11: context was compacted ('masked' | 'summarized')
   | { type: 'mcpStatus'; servers: { name: string; status: string; error?: string; toolNames: string[] }[] } // Phase 9: /mcp panel
   | { type: 'memoryData'; core: string; archival: { id: string; text: string; ts: string }[]; hits?: { text: string; score: number }[] } // Phase 10: /memory panel
 
