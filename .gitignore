@@ -8,3 +8,10 @@ out/
 
 # Forensic run traces (ADR-023)
 .cascade/
+
+# Local scratch: downloaded material and one-off scripts, never committed
+_temp/
+
+# Local project workspaces created by @cascade/server at runtime
+cascade-projects/
+cascade-workspace/

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Streamdown } from 'streamdown'
-import type { ActivityEvent, Message } from '@cascade/core'
+import type { ActivityEvent, Message, ProjectInfo } from '@cascade/core'
 import { WsClient } from './wsClient'
 
 const WS_URL = `ws://${location.hostname}:4319`
@@ -32,6 +32,10 @@ export function App() {
   const [recovering, setRecovering] = useState<{ attempt: number; reason: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [input, setInput] = useState('')
+  const [projects, setProjects] = useState<ProjectInfo[]>([])
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const [newName, setNewName] = useState('')
+  const [creating, setCreating] = useState(false)
   const clientRef = useRef<WsClient | null>(null)
   const endRef = useRef<HTMLDivElement>(null)
 
@@ -92,12 +96,36 @@ export function App() {
         setRecovering(null)
         setBusy(false)
         break
+      case 'projects':
+        setProjects(e.projects)
+        setActiveId(e.activeId ?? null)
+        break
     }
+  }
+
+  function createProject() {
+    const name = newName.trim()
+    if (!name) return
+    clientRef.current?.send({ type: 'project', action: 'create', name })
+    setNewName('')
+    setCreating(false)
+  }
+  function openProject(id: string) {
+    if (id === activeId) return
+    setItems([]) // fresh view; server-side history persists (transcript replay is a later phase)
+    setStreaming(null)
+    setStatus(null)
+    setBusy(false)
+    clientRef.current?.send({ type: 'project', action: 'open', id })
+  }
+  function deleteProject(id: string) {
+    clientRef.current?.send({ type: 'project', action: 'delete', id })
+    if (id === activeId) setItems([])
   }
 
   function send() {
     const text = input.trim()
-    if (!text || !connected) return
+    if (!text || !connected || !activeId) return
     setItems((it) => [...it, { kind: 'user', text }])
     setInput('')
     setBusy(true)
@@ -109,17 +137,76 @@ export function App() {
     setStatus(null)
   }
 
-  return (
-    <div className="flex h-screen flex-col bg-neutral-900 text-neutral-100 text-sm">
-      <header className="flex items-center gap-2 border-b border-neutral-800 px-4 py-2">
-        <span className="font-semibold tracking-wide">Cascade</span>
-        <span className={`ml-auto inline-flex items-center gap-1.5 text-xs ${connected ? 'text-green-400' : 'text-neutral-500'}`}>
-          <span className={`h-2 w-2 rounded-full ${connected ? 'bg-green-400' : 'bg-neutral-600'}`} />
-          {connected ? 'connected' : 'connecting…'}
-        </span>
-      </header>
+  const activeName = projects.find((p) => p.id === activeId)?.name
 
-      <div className="flex-1 overflow-y-auto px-4 py-3">
+  return (
+    <div className="flex h-screen bg-neutral-900 text-neutral-100 text-sm">
+      {/* ── Project sidebar (13.2): each project = its own workspace + dedicated session ── */}
+      <aside className="flex w-56 shrink-0 flex-col border-r border-neutral-800 bg-neutral-950">
+        <div className="flex items-center gap-2 border-b border-neutral-800 px-3 py-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">Projects</span>
+          <button className="ml-auto rounded px-1.5 text-lg leading-none text-neutral-400 hover:text-neutral-100" title="New project" onClick={() => setCreating((c) => !c)}>＋</button>
+        </div>
+        {creating && (
+          <div className="border-b border-neutral-800 p-2">
+            <input
+              autoFocus
+              className="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs outline-none focus:border-neutral-500"
+              placeholder="project name…"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') createProject()
+                if (e.key === 'Escape') (setCreating(false), setNewName(''))
+              }}
+            />
+          </div>
+        )}
+        <div className="flex-1 overflow-y-auto p-1">
+          {projects.length === 0 && <div className="px-2 py-3 text-xs text-neutral-600">No projects yet.</div>}
+          {projects.map((p) => (
+            <div
+              key={p.id}
+              className={`group flex cursor-pointer items-center gap-1 rounded px-2 py-1.5 ${p.id === activeId ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900'}`}
+              onClick={() => openProject(p.id)}
+            >
+              <span className="truncate">{p.id === activeId ? '📂' : '📁'} {p.name}</span>
+              <button
+                className="ml-auto hidden text-neutral-600 hover:text-red-400 group-hover:block"
+                title="Delete project"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  deleteProject(p.id)
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      </aside>
+
+      {/* ── Main column: header + transcript + composer (or an empty state) ── */}
+      <div className="flex flex-1 flex-col">
+        <header className="flex items-center gap-2 border-b border-neutral-800 px-4 py-2">
+          <span className="font-semibold tracking-wide">Cascade</span>
+          {activeName && <span className="text-neutral-500">/ {activeName}</span>}
+          <span className={`ml-auto inline-flex items-center gap-1.5 text-xs ${connected ? 'text-green-400' : 'text-neutral-500'}`}>
+            <span className={`h-2 w-2 rounded-full ${connected ? 'bg-green-400' : 'bg-neutral-600'}`} />
+            {connected ? 'connected' : 'connecting…'}
+          </span>
+        </header>
+
+        {!activeId ? (
+          <div className="flex flex-1 items-center justify-center text-center text-neutral-500">
+            <div>
+              <div className="text-3xl">📂</div>
+              <p className="mt-2 text-sm">Select a project, or create one to start building.</p>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="flex-1 overflow-y-auto px-4 py-3">
         {items.map((it, i) =>
           it.kind === 'memory' ? (
             <div key={i} className="my-1 border-l-2 border-purple-500/60 px-2 text-xs italic text-neutral-400">💾 Remembered: {it.text}</div>
@@ -177,10 +264,13 @@ export function App() {
             }
           }}
         />
-        {busy ? (
-          <button className="rounded-md bg-red-600 px-4 font-medium text-white" onClick={stop}>■ Stop</button>
-        ) : (
-          <button className="rounded-md bg-blue-600 px-4 font-medium text-white disabled:opacity-40" onClick={send} disabled={!connected}>Send</button>
+              {busy ? (
+                <button className="rounded-md bg-red-600 px-4 font-medium text-white" onClick={stop}>■ Stop</button>
+              ) : (
+                <button className="rounded-md bg-blue-600 px-4 font-medium text-white disabled:opacity-40" onClick={send} disabled={!connected}>Send</button>
+              )}
+            </div>
+          </>
         )}
       </div>
     </div>

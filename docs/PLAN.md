@@ -72,6 +72,7 @@ each concept to its Cascade module. Keep it open while building.
 | **Core engine / session** | `core/session.ts` → `createSession()` / `CascadeSession` |
 | **Wire protocol** | `core/protocol.ts` → `ActivityEvent` |
 | **Server (remote host)** | `server/wsServer.ts` |
+| **Projects / session registry** | `server/projectManager.ts` → `ProjectManager` |
 | **Transport (WS)** | `web/wsClient.ts` | [src/cli/transports/](src/cli/transports/) |
 | Extension frontend | `extension/CascadeViewProvider.ts` |
 | Web frontend | `web/App.tsx` | [src/server/web/](src/server/web/) |

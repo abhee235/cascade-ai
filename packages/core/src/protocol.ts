@@ -17,6 +17,11 @@ export type Message =
   | { role: 'user'; content: string | ContentBlock[] }
   | { role: 'assistant'; content: ContentBlock[] }
 
+// ── Projects (Phase 13.2) ─────────────────────────────────────────────────────────────────
+// A project = a workspace dir + its own long-lived CascadeSession, owned by the server's
+// ProjectManager (not by any one connection). This is the public, host-path-free view of it.
+export type ProjectInfo = { id: string; name: string; createdAt: string }
+
 // ── Activity events: core → frontend ────────────────────────────────────────────────────
 // The frontend renders these. Note `message` carries the FINAL answer, rendered whole
 // (activity-first UI, no prose streaming — ADR-013). More variants arrive in later phases.
@@ -35,6 +40,7 @@ export type ActivityEvent =
   | { type: 'recovering'; attempt: number; reason: string; delayMs: number } // Phase 12: retrying a failed model call (UI card)
   | { type: 'mcpStatus'; servers: { name: string; status: string; error?: string; toolNames: string[] }[] } // Phase 9: /mcp panel
   | { type: 'memoryData'; core: string; archival: { id: string; text: string; ts: string }[]; hits?: { text: string; score: number }[] } // Phase 10: /memory panel
+  | { type: 'projects'; projects: ProjectInfo[]; activeId?: string } // Phase 13.2: project sidebar snapshot
 
 // ── Inbound messages: frontend → core ───────────────────────────────────────────────────
 export type InboundMessage =
@@ -44,3 +50,4 @@ export type InboundMessage =
   | { type: 'reset' } // "New chat" — clears conversation history
   | { type: 'mcp'; action: 'list' | 'connect' | 'disconnect'; server?: string } // Phase 9: /mcp panel controls
   | { type: 'memoryView'; action: 'list' | 'search' | 'forget'; query?: string; id?: string } // Phase 10: /memory panel controls
+  | { type: 'project'; action: 'list' | 'create' | 'open' | 'delete'; name?: string; id?: string } // Phase 13.2: project controls
