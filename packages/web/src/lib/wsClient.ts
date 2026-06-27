@@ -1,5 +1,6 @@
-// wsClient.ts — the browser's connection to @cascade/server. It speaks the EXACT same protocol the extension
-// uses in-process: send InboundMessage, receive ActivityEvent. Auto-reconnects so a server restart is seamless.
+// wsClient.ts — the browser's connection to @cascade/server. It speaks the wire protocol the server relays:
+// core session events (ActivityEvent) AND app/builder events (BuilderEvent), and sends InboundMessage /
+// BuilderCommand. Auto-reconnects so a server restart is seamless.
 
 import type { ActivityEvent, InboundMessage } from '@cascade/core'
 import type { BuilderEvent, BuilderCommand } from '@cascade/app-protocol'
