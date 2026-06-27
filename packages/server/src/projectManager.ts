@@ -48,6 +48,9 @@ export class ProjectManager {
           provider: createProvider({ provider: 'ollama', model: opts.model, baseUrl: opts.baseUrl }),
           model: opts.model,
           sandbox, // 13.3: command tools run in the project's sandbox when present
+          // Sandboxed ⇒ auto-allow (the builder is contained; it shouldn't prompt for every command/edit).
+          // Without a sandbox we keep the default gate (the host is not isolated).
+          mode: sandbox ? 'bypass' : 'default',
         }))
     this.load()
   }

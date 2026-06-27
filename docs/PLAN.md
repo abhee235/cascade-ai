@@ -48,11 +48,11 @@ Cascade uses **descriptive, standard names**. This table is the single source of
 each concept to its Cascade module. Keep it open while building.
 
 | Purpose | Cascade module → function |
-|---------|---------------------------|-----------------------|
-| Host entry / activation | `src/extension.ts` → `activate()` | [src/main.tsx](src/main.tsx) |
+|---------|---------------------------|
+| Host entry / activation | `src/extension.ts` → `activate()` |
 | Webview provider | `src/CascadeViewProvider.ts` → `resolveWebviewView()` |
 | **Agentic loop** | `agent/agentLoop.ts` → `runAgentLoop()` |
-| Message model | `agent/conversation.ts` (types) | [src/types/message.ts](src/types/message.ts) |
+| Message model | `agent/conversation.ts` (types) |
 | System prompt | `agent/systemPrompt.ts` → `buildSystemPrompt()` |
 | Model provider (abstraction) | `llm/provider.ts` `ModelProvider` + `llm/factory.ts` `createProvider()` (ADR-020) |
 | Provider impl / format bridge | `llm/providers/openaiCompat.ts` (`complete()`; Phase 2 adds `stream()`) |
@@ -62,7 +62,7 @@ each concept to its Cascade module. Keep it open while building.
 | Concurrency scheduling | `tools/scheduler.ts` → `scheduleTools()` |
 | Permissions | `permissions/gate.ts` → `checkPermission()` |
 | Observability | `observability/tracer.ts` → `JsonlTracer` |
-| Bash (stream + abort) | `tools/builtins/Bash.ts` → `BashTool` | BashTool |
+| Bash (stream + abort) | `tools/builtins/Bash.ts` → `BashTool` |
 | **Memory** | `memory/memoryStore.ts` → `loadMemory()` / `updateMemory()` |
 | MCP (bg discovery + retry) | `mcp/mcpHub.ts` → `McpHub.start()` (background) / `retryFailed()`; `mcp/sdkConnect.ts` |
 | Tool registry (dynamic) | `tools/toolRegistry.ts` → `createRegistry()` / `ToolRegistry` |
@@ -73,13 +73,14 @@ each concept to its Cascade module. Keep it open while building.
 | **Wire protocol** | `core/protocol.ts` → `ActivityEvent` |
 | **Server (remote host)** | `server/wsServer.ts` |
 | **Projects / session registry** | `server/projectManager.ts` → `ProjectManager` |
-| **Transport (WS)** | `web/wsClient.ts` | [src/cli/transports/](src/cli/transports/) |
+| **Execution sandbox** | `core/sandbox/sandbox.ts` → `Sandbox` (seam) · `server/dockerSandbox.ts` → `DockerSandbox` |
+| **Transport (WS)** | `web/wsClient.ts` |
 | Extension frontend | `extension/CascadeViewProvider.ts` |
-| Web frontend | `web/App.tsx` | [src/server/web/](src/server/web/) |
+| Web frontend | `web/App.tsx` |
 
 ### Deliberate design choices
 | Topic | Common approach | Cascade | ADR |
-|-------|-------------|---------|-----|
+|-------|-----------------|---------|-----|
 | Output display | Streams prose token-by-token live | **Same — streams prose + thinking live**, plus a status/tool-step activity view (IDE-assistant style). Not a divergence. | ADR-013 |
 | MCP connect timing | Connects servers at startup (can block) | **Background** discovery at startup + lazy retry on failure (non-blocking) | ADR-014 |
 | Naming | Terse internal names | Descriptive standard (`runAgentLoop`, `executeTool`, …) | — |
