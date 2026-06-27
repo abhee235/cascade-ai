@@ -9,7 +9,7 @@
 ## Overall
 
 **Engine (the algorithm)** — `████████████████████` **100%** — Phases 0–13.3 complete & tagged.
-**Builder (the product)** — `███░░░░░░░░░░░░░░░░░` **~15%** — sandbox + shell shipped; preview/code/etc. ahead.
+**Builder (the product)** — `████░░░░░░░░░░░░░░░░` **~20%** — sandbox + shell + templates shipped; preview/code/etc. ahead.
 
 ---
 
@@ -38,17 +38,17 @@ real Ollama model (agent Bash runs in an Alpine container, host untouched).
 
 ---
 
-## 3. Builder backend roadmap (the "make it real" work)  `██░░░░░░░░░░░░░░░░░░` ~10%
+## 3. Builder backend roadmap (the "make it real" work)  `████░░░░░░░░░░░░░░░░` ~20%
 
 Each lands as a runnable, tested checkpoint. (Preview/Terminal need the 13.3 sandbox ✅.)
 
 | | Item | Notes |
 |---|---|---|
-| 🔨 | **Templates / scaffolding** | `ProjectManager.create` copies a Vite+React+Tailwind scaffold + `git init`; AI-rules via a generic core seam — **next** |
+| ✅ | **Templates / scaffolding** | `ProjectManager.create` copies a Vite+React+Tailwind scaffold + `git init`; AI-rules via a generic core seam (ADR-025, `guide/phase-15.md`) |
+| 🔨 | **File service** | read/list/write project files (for the Code pane) — **next** |
 | ⬜ | **Live preview** | run dev server in the sandbox → proxy → iframe |
 | ⬜ | **Integrated terminal** | xterm ↔ sandbox PTY over the protocol |
-| ⬜ | **File service** | read/list/write project files (for the Code pane) |
-| ⬜ | **Git checkpoints / restore** | commit each change-set; versions list + restore |
+| ⬜ | **Git checkpoints / restore** | commit each change-set; versions list + restore (baseline commit already lands at create) |
 | ⬜ | **Build-error auto-fix loop** | run checks in the sandbox; feed problems back |
 | ⬜ | **Persistence** | durable chats/versions; replay history on reattach |
 | ⬜ | **Deploy / integrations** | GitHub / Vercel / Supabase (gated, optional) |

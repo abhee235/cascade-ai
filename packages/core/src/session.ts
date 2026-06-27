@@ -47,6 +47,8 @@ export interface SessionOptions {
   /** Phase 13.3: execution sandbox. When set (the server injects a per-project Docker sandbox), command
    *  tools (Bash) run inside it; when absent, they run on the host (the extension's behavior). */
   sandbox?: import('./sandbox/sandbox').Sandbox
+  /** Phase 15: generic extra system-prompt context (e.g. a project template's AI rules). */
+  extraInstructions?: string
 }
 
 export interface CascadeSession {
@@ -158,6 +160,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
           },
           recovery: opts.recovery,
           sandbox: opts.sandbox,
+          extraInstructions: opts.extraInstructions,
         })
       } catch (err) {
         const e = err as { name?: string; message?: string; cause?: { message?: string } }

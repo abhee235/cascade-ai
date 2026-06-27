@@ -14,6 +14,9 @@
  *  This is the public, host-path-free view (the `dir` never crosses the wire). */
 export type ProjectInfo = { id: string; name: string; createdAt: string }
 
+/** A project scaffold the agent can start from (Phase 15). */
+export type TemplateInfo = { id: string; name: string; description: string }
+
 /** Builder → client. App/workspace-level events, distinct from a session's ActivityEvents.
  *  Future variants (added in their phases) — keep the discriminated union open:
  *    | { type: 'preview';  projectId: string; url: string; status: 'installing' | 'running' | 'error' }
@@ -23,9 +26,10 @@ export type ProjectInfo = { id: string; name: string; createdAt: string }
  */
 export type BuilderEvent =
   | { type: 'projects'; projects: ProjectInfo[]; activeId?: string } // project sidebar snapshot
+  | { type: 'templates'; templates: TemplateInfo[] } // available scaffolds for the create flow (Phase 15)
 
 /** Client → builder. App/workspace-level commands, distinct from a session's InboundMessages.
  *  Future variants (added in their phases): preview start/stop/refresh, terminal input/resize,
  *  version restore/checkout, file read/write, etc. */
 export type BuilderCommand =
-  | { type: 'project'; action: 'list' | 'create' | 'open' | 'delete'; name?: string; id?: string }
+  | { type: 'project'; action: 'list' | 'create' | 'open' | 'delete'; name?: string; id?: string; templateId?: string }

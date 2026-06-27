@@ -13,9 +13,12 @@ export interface SystemPromptInput {
   /** Archival memories auto-retrieved for THIS user message (proactive retrieval, ADR-015) — injected so
    *  the model sees relevant past facts without having to call MemorySearch. */
   recalled?: string
+  /** Generic extra system-prompt context the FRONTEND supplies (Phase 15). Headless: just a string. The
+   *  builder uses it to inject a project template's AI rules ("this is a Vite+React+TS app; edit src/…"). */
+  extraInstructions?: string
 }
 
-export function buildSystemPrompt({ cwd, recalled }: SystemPromptInput): string {
+export function buildSystemPrompt({ cwd, recalled, extraInstructions }: SystemPromptInput): string {
   const today = new Date().toISOString().slice(0, 10)
   const base = [
     'You are Cascade, a concise, helpful coding assistant running inside VS Code.',
@@ -30,6 +33,9 @@ export function buildSystemPrompt({ cwd, recalled }: SystemPromptInput): string 
   // It's appended to the system prompt — outside the conversation history, so compaction never drops it.
   const memory = loadMemory(cwd)
   let prompt = memory ? `${base}\n\n${memory}` : base
+  // Frontend-supplied context (e.g. a project template's AI rules). Outside the conversation history, so
+  // compaction never drops it.
+  if (extraInstructions) prompt += `\n\n${extraInstructions}`
   // Proactive retrieval: relevant archival memories for this turn, surfaced automatically (lower trust than
   // core — the model should verify, since they're retrieved by similarity).
   if (recalled) {

@@ -8,12 +8,13 @@ import type { WireEvent, WireMessage } from './wsClient'
 import { extractMessage, type Item, type Recovering, type RightTab, type Streaming } from './types'
 import { StreamingOptimizer } from './streamingOptimizer'
 import { applyTheme, getInitialTheme, type Theme } from './theme'
-import type { ProjectInfo } from '@cascade/app-protocol'
+import type { ProjectInfo, TemplateInfo } from '@cascade/app-protocol'
 
 interface UiState {
   // connection + projects
   connected: boolean
   projects: ProjectInfo[]
+  templates: TemplateInfo[]
   activeId: string | null
   // transcript (per active project; cleared on open)
   items: Item[]
@@ -33,7 +34,7 @@ interface UiState {
   handleEvent: (e: WireEvent) => void
   submit: (text: string) => void
   stop: () => void
-  createProject: (name: string) => void
+  createProject: (name: string, templateId?: string) => void
   openProject: (id: string) => void
   deleteProject: (id: string) => void
   toggleSidebar: () => void
@@ -54,6 +55,7 @@ export const useStore = create<UiState>((set, get) => {
   return {
     connected: false,
     projects: [],
+    templates: [],
     activeId: null,
     items: [],
     streaming: null,
@@ -128,6 +130,9 @@ export const useStore = create<UiState>((set, get) => {
         case 'projects':
           set({ projects: e.projects, activeId: e.activeId ?? null })
           break
+        case 'templates':
+          set({ templates: e.templates })
+          break
       }
     },
 
@@ -142,9 +147,9 @@ export const useStore = create<UiState>((set, get) => {
       get().send({ type: 'abort' })
       set({ busy: false, status: null })
     },
-    createProject: (name) => {
+    createProject: (name, templateId) => {
       const n = name.trim()
-      if (n) get().send({ type: 'project', action: 'create', name: n })
+      if (n) get().send({ type: 'project', action: 'create', name: n, templateId })
     },
     openProject: (id) => {
       if (id === get().activeId) return

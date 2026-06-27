@@ -26,6 +26,15 @@ function manager() {
 }
 
 describe('ProjectManager (13.2)', () => {
+  it('create from a template scaffolds a runnable app + git repo (Phase 15)', () => {
+    const { mgr, root } = manager()
+    const p = mgr.create('My App', 'react')
+    const dir = join(root, `my-app-${p.id.slice(0, 8)}`)
+    expect(existsSync(join(dir, 'package.json'))).toBe(true)
+    expect(existsSync(join(dir, 'src', 'App.tsx'))).toBe(true)
+    expect(existsSync(join(dir, '.git'))).toBe(true) // gitInit ran a baseline commit
+  })
+
   it('create → list reflects it; dir exists; no host path leaks', () => {
     const { mgr } = manager()
     const p = mgr.create('My App')

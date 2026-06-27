@@ -1,18 +1,27 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Folder, FolderOpen, Plus, X } from 'lucide-react'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+
+const BLANK = 'blank'
 
 export function Sidebar() {
-  const { projects, activeId, createProject, openProject, deleteProject } = useStore()
+  const { projects, templates, activeId, createProject, openProject, deleteProject } = useStore()
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
+  // Default to the first real template (so new projects are runnable apps), falling back to a blank dir.
+  const [templateId, setTemplateId] = useState<string>(BLANK)
+  // Templates arrive over the socket after mount — default to the first one once they load.
+  useEffect(() => {
+    if (templates.length && templateId === BLANK) setTemplateId(templates[0].id)
+  }, [templates, templateId])
 
   const submit = () => {
     if (name.trim()) {
-      createProject(name)
+      createProject(name, templateId === BLANK ? undefined : templateId)
       setName('')
       setCreating(false)
     }
@@ -28,7 +37,7 @@ export function Sidebar() {
       </div>
 
       {creating && (
-        <div className="border-b border-border p-2">
+        <div className="space-y-2 border-b border-border p-2">
           <Input
             autoFocus
             className="h-8 text-xs"
@@ -40,6 +49,24 @@ export function Sidebar() {
               if (e.key === 'Escape') (setCreating(false), setName(''))
             }}
           />
+          <Select value={templateId} onValueChange={setTemplateId}>
+            <SelectTrigger size="sm" className="w-full text-xs">
+              <SelectValue placeholder="Template" />
+            </SelectTrigger>
+            <SelectContent>
+              {templates.map((t) => (
+                <SelectItem key={t.id} value={t.id} className="text-xs">
+                  {t.name} — <span className="text-muted-foreground">{t.description}</span>
+                </SelectItem>
+              ))}
+              <SelectItem value={BLANK} className="text-xs">
+                Blank — <span className="text-muted-foreground">empty folder</span>
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <Button size="sm" className="w-full" onClick={submit} disabled={!name.trim()}>
+            Create
+          </Button>
         </div>
       )}
 

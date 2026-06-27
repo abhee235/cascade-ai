@@ -15,6 +15,7 @@ import type { CascadeSession, InboundMessage } from '@cascade/core'
 import type { BuilderCommand } from '@cascade/app-protocol'
 import { ProjectManager } from './projectManager.js'
 import { DockerSandbox, dockerAvailable } from './dockerSandbox.js'
+import { listTemplates } from './templates.js'
 
 /** What a connection can receive: a core session message OR an app/builder command. */
 type Inbound = InboundMessage | BuilderCommand
@@ -36,8 +37,9 @@ export function handleConnection(ws: WebSocket, manager: ProjectManager): void {
   let active: CascadeSession | undefined
   let activeId: string | undefined
 
-  // Greet the new connection with the current project list so the sidebar can render immediately.
+  // Greet the new connection with the project list + available templates so the UI can render immediately.
   send({ type: 'projects', projects: manager.list(), activeId })
+  send({ type: 'templates', templates: listTemplates() })
 
   // Return the active session, or nudge the user to open one. Captured into a const at each call site so
   // TS narrowing survives the `await`s that follow (a `let` closure var would re-widen).
@@ -58,7 +60,7 @@ export function handleConnection(ws: WebSocket, manager: ProjectManager): void {
     try {
       switch (msg.type) {
         case 'project': {
-          if (msg.action === 'create' && msg.name) manager.create(msg.name)
+          if (msg.action === 'create' && msg.name) manager.create(msg.name, msg.templateId)
           else if (msg.action === 'delete' && msg.id) {
             await manager.delete(msg.id)
             if (activeId === msg.id) ((active = undefined), (activeId = undefined))
