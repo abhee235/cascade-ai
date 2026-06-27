@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@cascade/app-protocol": "*",
     "@cascade/core": "*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

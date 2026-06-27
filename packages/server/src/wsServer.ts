@@ -12,7 +12,11 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { CascadeSession, InboundMessage } from '@cascade/core'
+import type { BuilderCommand } from '@cascade/app-protocol'
 import { ProjectManager } from './projectManager.js'
+
+/** What a connection can receive: a core session message OR an app/builder command. */
+type Inbound = InboundMessage | BuilderCommand
 
 const PORT = Number(process.env.CASCADE_PORT ?? 4319)
 const MODEL = process.env.CASCADE_MODEL ?? 'qwen2.5-coder:latest'
@@ -44,7 +48,7 @@ export function handleConnection(ws: WebSocket, manager: ProjectManager): void {
   }
 
   ws.on('message', async (data) => {
-    let msg: InboundMessage
+    let msg: Inbound
     try {
       msg = JSON.parse(data.toString())
     } catch {

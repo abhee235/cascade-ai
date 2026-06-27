@@ -9,6 +9,7 @@
     "start": "tsx src/wsServer.ts"
   },
   "dependencies": {
+    "@cascade/app-protocol": "*",
     "@cascade/core": "*",
     "ws": "^8.18.0"
   },

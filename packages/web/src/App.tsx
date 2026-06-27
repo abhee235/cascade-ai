@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Streamdown } from 'streamdown'
-import type { ActivityEvent, Message, ProjectInfo } from '@cascade/core'
-import { WsClient } from './wsClient'
+import type { Message } from '@cascade/core'
+import type { ProjectInfo } from '@cascade/app-protocol'
+import { WsClient, type WireEvent } from './wsClient'
 
 const WS_URL = `ws://${location.hostname}:4319`
 
@@ -49,7 +50,7 @@ export function App() {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [items, streaming, status, recovering])
 
-  function onEvent(e: ActivityEvent) {
+  function onEvent(e: WireEvent) {
     switch (e.type) {
       case 'status':
         setStatus(e.text)

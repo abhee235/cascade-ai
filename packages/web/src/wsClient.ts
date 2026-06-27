@@ -2,12 +2,18 @@
 // uses in-process: send InboundMessage, receive ActivityEvent. Auto-reconnects so a server restart is seamless.
 
 import type { ActivityEvent, InboundMessage } from '@cascade/core'
+import type { BuilderEvent, BuilderCommand } from '@cascade/app-protocol'
+
+/** Everything the server can push: a core session event OR an app/builder event. */
+export type WireEvent = ActivityEvent | BuilderEvent
+/** Everything the client can send: a core session message OR an app/builder command. */
+export type WireMessage = InboundMessage | BuilderCommand
 
 export class WsClient {
   private ws?: WebSocket
   constructor(
     private readonly url: string,
-    private readonly onEvent: (e: ActivityEvent) => void,
+    private readonly onEvent: (e: WireEvent) => void,
     private readonly onConnected: (connected: boolean) => void,
   ) {}
 
@@ -21,14 +27,14 @@ export class WsClient {
     }
     ws.onmessage = (ev) => {
       try {
-        this.onEvent(JSON.parse(ev.data) as ActivityEvent)
+        this.onEvent(JSON.parse(ev.data) as WireEvent)
       } catch {
         /* ignore */
       }
     }
   }
 
-  send(msg: InboundMessage) {
+  send(msg: WireMessage) {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg))
   }
 }

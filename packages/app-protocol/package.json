@@ -1,0 +1,20 @@
+{
+  "name": "@cascade/app-protocol",
+  "version": "0.0.0",
+  "description": "Cascade app/builder wire protocol — the wrapper-layer messages (projects, and later preview/terminal/versions/files) that the server and web frontends speak ALONGSIDE core's session protocol. Types only; depends on nothing.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}

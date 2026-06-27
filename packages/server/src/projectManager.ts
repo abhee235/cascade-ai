@@ -9,7 +9,8 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { createProvider, createSession, type CascadeSession, type ProjectInfo } from '@cascade/core'
+import { createProvider, createSession, type CascadeSession } from '@cascade/core'
+import type { ProjectInfo } from '@cascade/app-protocol'
 
 /** Internal record: the public ProjectInfo + the host dir + the lazily-created session. */
 type Project = ProjectInfo & { dir: string; session?: CascadeSession }
