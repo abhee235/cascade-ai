@@ -17,6 +17,7 @@ import { ProjectManager } from './projectManager.js'
 import { DockerSandbox, dockerAvailable } from './dockerSandbox.js'
 import { listTemplates } from './templates.js'
 import { readFile, readTree } from './fileService.js'
+import { PreviewManager } from './previewManager.js'
 
 /** What a connection can receive: a core session message OR an app/builder command. */
 type Inbound = InboundMessage | BuilderCommand
@@ -31,7 +32,7 @@ const PROJECTS_ROOT = process.env.CASCADE_PROJECTS_ROOT || join(process.cwd(), '
  * opened (its `active` session); the `project` control message switches that. The session itself lives in
  * the manager, not here.
  */
-export function handleConnection(ws: WebSocket, manager: ProjectManager): void {
+export function handleConnection(ws: WebSocket, manager: ProjectManager, preview?: PreviewManager): void {
   const send = (msg: unknown) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg))
   }
@@ -76,7 +77,11 @@ export function handleConnection(ws: WebSocket, manager: ProjectManager): void {
             activeId = msg.id
           }
           send({ type: 'projects', projects: manager.list(), activeId })
-          if (msg.action === 'open') sendTree() // populate the Code pane for the opened project
+          if (msg.action === 'open') {
+            sendTree() // populate the Code pane for the opened project
+            const pv = activeId && preview?.state(activeId) // re-show a preview already running for this project
+            if (pv) send({ type: 'preview', status: pv.status, url: pv.url })
+          }
           break
         }
         case 'submit': {
@@ -102,6 +107,23 @@ export function handleConnection(ws: WebSocket, manager: ProjectManager): void {
             }
           }
           break
+        case 'preview': { // start/stop the active project's live preview (M3)
+          if (!activeId || !preview) break
+          if (msg.action === 'stop') {
+            preview.stop(activeId)
+            send({ type: 'preview', status: 'stopped' })
+            break
+          }
+          const sandbox = manager.sandboxOf(activeId)
+          if (sandbox instanceof DockerSandbox) {
+            const id = activeId
+            void preview.start(id, sandbox, (s) => send({ type: 'preview', status: s.status, url: s.url }))
+          } else {
+            // No Docker ⇒ no isolated dev server. (Running on the host is out of scope for v1.)
+            send({ type: 'preview', status: 'error' })
+          }
+          break
+        }
         case 'permission':
           active?.respondPermission(msg.id, msg.decision)
           break
@@ -151,8 +173,9 @@ async function start() {
   const sandboxFor = hasDocker ? (dir: string) => new DockerSandbox(dir) : undefined
 
   const manager = new ProjectManager({ root: PROJECTS_ROOT, model: MODEL, baseUrl: BASE_URL, sandboxFor })
+  const preview = new PreviewManager()
   const wss = new WebSocketServer({ port: PORT })
-  wss.on('connection', (ws) => handleConnection(ws, manager))
+  wss.on('connection', (ws) => handleConnection(ws, manager, preview))
   const shutdown = () => void manager.dispose().finally(() => process.exit(0))
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)

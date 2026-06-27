@@ -60,4 +60,15 @@ describe.skipIf(!RUN)('DockerSandbox (live; CASCADE_DOCKER=1)', () => {
       await sbx.dispose()
     }
   }, 60_000)
+
+  it('publishes the dev port to a host port (for live preview)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cascade-dsbx-'))
+    const sbx = new DockerSandbox(dir, 'alpine')
+    try {
+      const port = await sbx.getHostPort()
+      expect(port).toBeGreaterThan(0)
+    } finally {
+      await sbx.dispose()
+    }
+  }, 60_000)
 })

@@ -1,0 +1,65 @@
+// previewManager.ts — live preview (M3). Runs the project's dev server INSIDE its Docker container and
+// surfaces the URL the web app iframes. The container already publishes the dev port to a host port
+// (DockerSandbox), so once `npm run dev` is up we just poll that host URL. Server-only; emits `preview`
+// status over the protocol.
+
+import type { DockerSandbox } from './dockerSandbox.js'
+
+export type PreviewStatus = 'installing' | 'starting' | 'running' | 'error' | 'stopped'
+export interface PreviewState {
+  status: PreviewStatus
+  url?: string
+}
+
+export class PreviewManager {
+  private readonly states = new Map<string, PreviewState>()
+
+  state(projectId: string): PreviewState | undefined {
+    return this.states.get(projectId)
+  }
+
+  /** Install deps (first time), start the dev server detached, and wait for the host port to answer. */
+  async start(projectId: string, sandbox: DockerSandbox, emit: (s: PreviewState) => void): Promise<void> {
+    const cached = this.states.get(projectId)
+    if (cached?.status === 'running' && cached.url) return emit(cached)
+
+    const set = (s: PreviewState) => {
+      this.states.set(projectId, s)
+      emit(s)
+    }
+    try {
+      set({ status: 'installing' })
+      const has = await sandbox.exec('[ -d node_modules ] && echo yes || echo no')
+      if (!has.output.includes('yes')) {
+        const inst = await sandbox.exec('npm install --no-audit --no-fund')
+        if (inst.exitCode !== 0) return set({ status: 'error' })
+      }
+
+      set({ status: 'starting' })
+      await sandbox.execDetached('npm run dev')
+      const url = `http://localhost:${await sandbox.getHostPort()}`
+      const up = await waitForHttp(url, 60_000)
+      set(up ? { status: 'running', url } : { status: 'error' })
+    } catch {
+      set({ status: 'error' })
+    }
+  }
+
+  stop(projectId: string): void {
+    this.states.delete(projectId)
+  }
+}
+
+/** Poll a URL until it answers (any HTTP response = the dev server is listening) or we time out. */
+async function waitForHttp(url: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try {
+      await fetch(url, { signal: AbortSignal.timeout(2000) })
+      return true
+    } catch {
+      await new Promise((r) => setTimeout(r, 1000))
+    }
+  }
+  return false
+}

@@ -74,6 +74,11 @@ export class ProjectManager {
     return this.projects.get(id)?.dir
   }
 
+  /** The project's sandbox (created on open) — SERVER-INTERNAL. For live preview (the dev server runs in it). */
+  sandboxOf(id: string): Sandbox | undefined {
+    return this.projects.get(id)?.sandbox
+  }
+
   /** Public, host-path-free snapshot for the sidebar. */
   list(): ProjectInfo[] {
     return [...this.projects.values()]

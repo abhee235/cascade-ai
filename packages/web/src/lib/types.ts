@@ -11,6 +11,7 @@ export type Item =
 export type Streaming = { text: string; thinking: string }
 export type Recovering = { attempt: number; reason: string }
 export type RightTab = 'preview' | 'code' | 'console'
+export type PreviewState = { status: 'installing' | 'starting' | 'running' | 'error' | 'stopped'; url?: string }
 
 /** Split a core Message into rendered text + collapsible thinking. */
 export function extractMessage(m: Message): { text: string; thinking: string } {

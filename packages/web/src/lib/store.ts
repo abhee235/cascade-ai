@@ -5,7 +5,7 @@
 
 import { create } from 'zustand'
 import type { WireEvent, WireMessage } from './wsClient'
-import { extractMessage, type Item, type Recovering, type RightTab, type Streaming } from './types'
+import { extractMessage, type Item, type PreviewState, type Recovering, type RightTab, type Streaming } from './types'
 import { StreamingOptimizer } from './streamingOptimizer'
 import { applyTheme, getInitialTheme, type Theme } from './theme'
 import type { FileNode, ProjectInfo, TemplateInfo } from '@cascade/app-protocol'
@@ -25,6 +25,8 @@ interface UiState {
   // code pane (M4)
   fileTree: FileNode[]
   openFile: { path: string; content: string } | null
+  // live preview (M3)
+  preview: PreviewState | null
   // shell
   sidebarCollapsed: boolean
   rightTab: RightTab
@@ -44,6 +46,8 @@ interface UiState {
   setRightTab: (t: RightTab) => void
   toggleTheme: () => void
   requestFile: (path: string) => void
+  startPreview: () => void
+  stopPreview: () => void
 }
 
 export const useStore = create<UiState>((set, get) => {
@@ -68,6 +72,7 @@ export const useStore = create<UiState>((set, get) => {
     busy: false,
     fileTree: [],
     openFile: null,
+    preview: null,
     sidebarCollapsed: false,
     rightTab: 'preview',
     theme: getInitialTheme(),
@@ -145,6 +150,9 @@ export const useStore = create<UiState>((set, get) => {
         case 'fileContent':
           set({ openFile: { path: e.path, content: e.content } })
           break
+        case 'preview':
+          set({ preview: { status: e.status, url: e.url } })
+          break
       }
     },
 
@@ -165,7 +173,7 @@ export const useStore = create<UiState>((set, get) => {
     },
     openProject: (id) => {
       if (id === get().activeId) return
-      set({ items: [], streaming: null, status: null, busy: false, fileTree: [], openFile: null })
+      set({ items: [], streaming: null, status: null, busy: false, fileTree: [], openFile: null, preview: null })
       get().send({ type: 'project', action: 'open', id })
     },
     deleteProject: (id) => {
@@ -175,6 +183,14 @@ export const useStore = create<UiState>((set, get) => {
     toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
     setRightTab: (rightTab) => set({ rightTab }),
     requestFile: (path) => get().send({ type: 'file', action: 'read', path }),
+    startPreview: () => {
+      set({ preview: { status: 'installing' } }) // optimistic; server confirms via `preview` events
+      get().send({ type: 'preview', action: 'start' })
+    },
+    stopPreview: () => {
+      get().send({ type: 'preview', action: 'stop' })
+      set({ preview: null })
+    },
     toggleTheme: () => {
       const theme: Theme = get().theme === 'dark' ? 'light' : 'dark'
       applyTheme(theme)
