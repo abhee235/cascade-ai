@@ -14,6 +14,7 @@ import { WebSocketServer, type WebSocket } from 'ws'
 import type { CascadeSession, InboundMessage } from '@cascade/core'
 import type { BuilderCommand } from '@cascade/app-protocol'
 import { ProjectManager } from './projectManager.js'
+import { DockerSandbox, dockerAvailable } from './dockerSandbox.js'
 
 /** What a connection can receive: a core session message OR an app/builder command. */
 type Inbound = InboundMessage | BuilderCommand
@@ -115,14 +116,24 @@ export function handleConnection(ws: WebSocket, manager: ProjectManager): void {
   })
 }
 
-function start() {
-  const manager = new ProjectManager({ root: PROJECTS_ROOT, model: MODEL, baseUrl: BASE_URL })
+async function start() {
+  // 13.3: isolate each project's command execution in its own Docker container when Docker is available.
+  // Opt out with CASCADE_SANDBOX=off. Without Docker we fall back to HOST exec (usable, but not isolated).
+  const sandboxEnabled = process.env.CASCADE_SANDBOX !== 'off'
+  const hasDocker = sandboxEnabled && (await dockerAvailable())
+  const sandboxFor = hasDocker ? (dir: string) => new DockerSandbox(dir) : undefined
+
+  const manager = new ProjectManager({ root: PROJECTS_ROOT, model: MODEL, baseUrl: BASE_URL, sandboxFor })
   const wss = new WebSocketServer({ port: PORT })
   wss.on('connection', (ws) => handleConnection(ws, manager))
   const shutdown = () => void manager.dispose().finally(() => process.exit(0))
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
-  console.log(`Cascade server listening on ws://127.0.0.1:${PORT}  (model: ${MODEL}, projects: ${PROJECTS_ROOT})`)
+  console.log(
+    `Cascade server listening on ws://127.0.0.1:${PORT}  (model: ${MODEL}, projects: ${PROJECTS_ROOT}, sandbox: ${hasDocker ? 'docker' : 'host'})`,
+  )
+  if (sandboxEnabled && !hasDocker)
+    console.warn('⚠️  Docker not available — agent commands run on the HOST (no isolation). Install/start Docker Desktop for per-project sandboxing.')
 }
 
 // Run only when invoked directly (tsx src/wsServer.ts) — NOT when imported by a test.

@@ -32,6 +32,7 @@ export interface LoopDeps {
   compact?: CompactDeps // Phase 11: compact the history when it nears the window
   depth?: number // Phase 12: subagent nesting depth (0 = main agent)
   recovery?: Pick<RecoveryOptions, 'maxRetries' | 'baseDelayMs' | 'maxDelayMs' | 'sleep'> // Phase 12: tune/inject for tests
+  sandbox?: import('../sandbox/sandbox').Sandbox // Phase 13.3: redirect command tools here (injected by the server)
 }
 
 const MAX_SUBAGENT_DEPTH = 2
@@ -48,7 +49,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   // Share ONE registry instance for the turn: the loop advertises with it, and the scheduler/runTool look
   // up with it — so what the model is offered and what we execute always agree.
   const depth = deps.depth ?? 0
-  const ctx: ToolContext = { cwd: deps.cwd, abortSignal: deps.signal, permission: deps.permission, tracer, registry, archival: deps.archival, depth }
+  const ctx: ToolContext = { cwd: deps.cwd, abortSignal: deps.signal, permission: deps.permission, tracer, registry, archival: deps.archival, depth, sandbox: deps.sandbox }
   // Subagent delegation (ADR-017): inject a spawn closure (avoids an import cycle). Absent at the depth cap.
   // The child runs a NESTED runAgentLoop with its OWN messages + a filtered tool set (never Subagent → no
   // recursion; read-only subset for `explore`). Only its final text returns — its steps stay in its context.
@@ -66,6 +67,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
         registry: childRegistry,
         tracer,
         permission: deps.permission,
+        sandbox: deps.sandbox, // subagent's commands run in the same sandbox
         maxTurns: 8,
         depth: depth + 1,
       })) {

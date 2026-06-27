@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { BashTool } from '../src/tools/builtins/Bash'
 import { scheduleTools } from '../src/tools/scheduler'
 import type { ToolContext } from '../src/tools/Tool'
+import type { Sandbox } from '../src/sandbox/sandbox'
 import type { ActivityEvent, ContentBlock } from '../src/protocol'
 
 const ctx = (): ToolContext => ({ cwd: tmpdir(), abortSignal: new AbortController().signal })
@@ -49,6 +50,41 @@ describe('BashTool', () => {
     const prog = events.filter((e) => e.type === 'toolProgress') as Extract<ActivityEvent, { type: 'toolProgress' }>[]
     expect(prog.map((p) => p.chunk).join('')).toContain('scheduler-progress')
     expect((result[0] as any).isError).toBeFalsy()
+  })
+
+  // ── 13.3: when a sandbox is injected, Bash runs THERE, not on the host ──
+  it('routes through ctx.sandbox.exec when present (host never touched) and streams its output', async () => {
+    const seen: string[] = []
+    const chunks: string[] = []
+    const sandbox: Sandbox = {
+      async exec(command, opts) {
+        seen.push(command)
+        opts?.onData?.('sandboxed: ')
+        opts?.onData?.('hello')
+        return { output: 'sandboxed: hello', exitCode: 0 }
+      },
+      async dispose() {},
+    }
+    // A command that, IF it ran on the host, would NOT produce "sandboxed:" — proving the sandbox handled it.
+    const result = await BashTool.call({ command: 'echo from-host' }, { ...ctx(), sandbox }, (c) => chunks.push(c))
+    expect(seen).toEqual(['echo from-host']) // the sandbox received the exact command
+    expect(result.isError).toBeFalsy()
+    expect(result.content).toContain('sandboxed: hello')
+    expect(chunks.join('')).toContain('sandboxed: hello') // streamed via onData → onProgress
+  })
+
+  it('sandbox nonzero exit ⇒ isError + [exit N]', async () => {
+    const sandbox: Sandbox = { async exec() { return { output: 'boom', exitCode: 2 } }, async dispose() {} }
+    const result = await BashTool.call({ command: 'false' }, { ...ctx(), sandbox })
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('[exit 2]')
+  })
+
+  it('sandbox exec throwing ⇒ a graceful error result (not a crash)', async () => {
+    const sandbox: Sandbox = { async exec() { throw new Error('docker down') }, async dispose() {} }
+    const result = await BashTool.call({ command: 'ls' }, { ...ctx(), sandbox })
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('docker down')
   })
 
   it('kills the child when the signal aborts', async () => {

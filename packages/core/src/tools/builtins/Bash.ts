@@ -33,8 +33,24 @@ export const BashTool: Tool<z.infer<typeof inputSchema>> = {
   isReadOnly: (input) => isReadOnlyCommand(input.command),
   isConcurrencySafe: (input) => isReadOnlyCommand(input.command), // safe commands can parallelize; mutating ones run solo
 
-  call(input, ctx, onProgress) {
-    return new Promise((resolve) => {
+  async call(input, ctx, onProgress) {
+    // 13.3: when a sandbox is injected (the server's per-project Docker container), the command runs THERE
+    // and the host is never touched. When absent (the extension), fall through to the host spawn below.
+    if (ctx.sandbox) {
+      try {
+        const { output, exitCode } = await ctx.sandbox.exec(input.command, {
+          cwd: ctx.cwd,
+          signal: ctx.abortSignal,
+          onData: (chunk) => onProgress?.(chunk),
+        })
+        const body = output.length > MAX_OUTPUT ? `${output.slice(0, MAX_OUTPUT)}\n…[truncated]` : output
+        return { content: `${body || '(no output)'}${exitCode ? `\n[exit ${exitCode}]` : ''}`, isError: exitCode !== 0 }
+      } catch (e) {
+        return { content: `Failed to run command in sandbox: ${(e as Error).message}`, isError: true }
+      }
+    }
+
+    return new Promise<{ content: string; isError?: boolean }>((resolve) => {
       // `signal` makes Node kill the child when the session aborts (Stop button) — no zombie shells.
       const child = spawn(input.command, { shell: true, cwd: ctx.cwd, signal: ctx.abortSignal })
       let out = ''

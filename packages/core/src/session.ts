@@ -44,6 +44,9 @@ export interface SessionOptions {
   keepRecentRatio?: number
   /** Resilience tuning (Phase 12): retry/backoff for transient model-call failures. */
   recovery?: { maxRetries?: number; baseDelayMs?: number; maxDelayMs?: number; sleep?: (ms: number) => Promise<void> }
+  /** Phase 13.3: execution sandbox. When set (the server injects a per-project Docker sandbox), command
+   *  tools (Bash) run inside it; when absent, they run on the host (the extension's behavior). */
+  sandbox?: import('./sandbox/sandbox').Sandbox
 }
 
 export interface CascadeSession {
@@ -154,6 +157,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
             onDiscard: autoMemory ? async (older) => void (await curate(older)) : undefined,
           },
           recovery: opts.recovery,
+          sandbox: opts.sandbox,
         })
       } catch (err) {
         const e = err as { name?: string; message?: string; cause?: { message?: string } }

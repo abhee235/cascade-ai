@@ -9,6 +9,7 @@ import type { PermissionController } from '../permissions/gate'
 import type { Tracer } from '../observability/tracer'
 import type { ToolRegistry } from './toolRegistry'
 import type { ArchivalMemory } from '../memory/archival'
+import type { Sandbox } from '../sandbox/sandbox'
 
 export interface ToolContext {
   cwd: string
@@ -25,6 +26,9 @@ export interface ToolContext {
   archival?: ArchivalMemory
   /** Phase 12 (ADR-017): nesting depth (0 = main agent). Used to cap subagent recursion. */
   depth?: number
+  /** Phase 13.3: generic execution capability. When present, command-running tools (Bash) execute HERE
+   *  (the server injects a per-project Docker sandbox); when absent, they run on the host. Core is agnostic. */
+  sandbox?: Sandbox
   /** Phase 12: delegate a subtask to a nested agent loop (own context + tool subset) → returns its final
    *  text. Injected by the loop (avoids an import cycle); absent at/over the depth cap. */
   spawnSubagent?(opts: { prompt: string; readOnly?: boolean }): Promise<string>

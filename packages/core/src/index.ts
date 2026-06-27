@@ -38,3 +38,6 @@ export type { ArchivalMemory, ArchivalHit, ArchivalEntry } from './memory/archiv
 // Resilience (ADR-016): retry/backoff + overflow→compact around the model call.
 export { streamWithRecovery, classifyError, RecoveryError } from './llm/resilience'
 export type { ErrorKind, RecoveryOptions } from './llm/resilience'
+// Sandbox (Phase 13.3): the generic execution seam. Core defines the shape; a frontend/wrapper injects an
+// implementation (the server's Docker sandbox). Absent ⇒ tools run on the host.
+export type { Sandbox, ExecOptions, ExecResult } from './sandbox/sandbox'

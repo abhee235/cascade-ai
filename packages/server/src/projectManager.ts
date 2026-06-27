@@ -9,20 +9,23 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { createProvider, createSession, type CascadeSession } from '@cascade/core'
+import { createProvider, createSession, type CascadeSession, type Sandbox } from '@cascade/core'
 import type { ProjectInfo } from '@cascade/app-protocol'
 
-/** Internal record: the public ProjectInfo + the host dir + the lazily-created session. */
-type Project = ProjectInfo & { dir: string; session?: CascadeSession }
+/** Internal record: the public ProjectInfo + the host dir + the lazily-created session & sandbox. */
+type Project = ProjectInfo & { dir: string; session?: CascadeSession; sandbox?: Sandbox }
 
 export interface ProjectManagerOptions {
   /** Host dir under which each project gets its own subdir. */
   root: string
   model: string
   baseUrl?: string
-  /** How to build a project's session. Injected so 13.3 can wrap tools in a Docker sandbox, and tests can
-   *  pass a FakeProvider. Default: a real Ollama-backed session rooted at the project dir. */
-  createSessionFor?: (dir: string) => CascadeSession
+  /** Build a per-project execution sandbox (13.3). The default wiring passes a DockerSandbox when Docker is
+   *  available; tests pass none (host exec). The manager owns the sandbox lifecycle (disposed with the project). */
+  sandboxFor?: (dir: string) => Sandbox | undefined
+  /** How to build a project's session. Injected so tests can pass a FakeProvider. Default: an Ollama-backed
+   *  session rooted at the project dir, with the project's sandbox (if any) injected. */
+  createSessionFor?: (dir: string, sandbox?: Sandbox) => CascadeSession
 }
 
 /** name → a filesystem-safe slug (so dirs are readable); id keeps them unique. */
@@ -31,7 +34,7 @@ const slug = (name: string) =>
 
 export class ProjectManager {
   private readonly projects = new Map<string, Project>()
-  private readonly createSessionFor: (dir: string) => CascadeSession
+  private readonly createSessionFor: (dir: string, sandbox?: Sandbox) => CascadeSession
   private readonly metaFile: string
 
   constructor(private readonly opts: ProjectManagerOptions) {
@@ -39,11 +42,12 @@ export class ProjectManager {
     this.metaFile = join(opts.root, 'projects.json')
     this.createSessionFor =
       opts.createSessionFor ??
-      ((dir) =>
+      ((dir, sandbox) =>
         createSession({
           cwd: dir,
           provider: createProvider({ provider: 'ollama', model: opts.model, baseUrl: opts.baseUrl }),
           model: opts.model,
+          sandbox, // 13.3: command tools run in the project's sandbox when present
         }))
     this.load()
   }
@@ -66,27 +70,33 @@ export class ProjectManager {
     return { id: project.id, name: project.name, createdAt: project.createdAt }
   }
 
-  /** Attach to a project: lazily build (and cache) its session on first open. Throws if unknown. */
+  /** Attach to a project: lazily build (and cache) its sandbox + session on first open. Throws if unknown. */
   open(id: string): CascadeSession {
     const project = this.projects.get(id)
     if (!project) throw new Error(`No such project: ${id}`)
-    if (!project.session) project.session = this.createSessionFor(project.dir)
+    if (!project.session) {
+      project.sandbox = this.opts.sandboxFor?.(project.dir)
+      project.session = this.createSessionFor(project.dir, project.sandbox)
+    }
     return project.session
   }
 
-  /** Delete a project: tear down its session and remove its dir. */
+  /** Delete a project: tear down its session + sandbox and remove its dir. */
   async delete(id: string): Promise<void> {
     const project = this.projects.get(id)
     if (!project) return
     await project.session?.dispose()
+    await project.sandbox?.dispose()
     this.projects.delete(id)
     rmSync(project.dir, { recursive: true, force: true })
     this.save()
   }
 
-  /** Dispose every live session (server shutdown). Dirs stay on disk. */
+  /** Dispose every live session + sandbox (server shutdown). Dirs stay on disk. */
   async dispose(): Promise<void> {
-    await Promise.all([...this.projects.values()].map((p) => p.session?.dispose()))
+    await Promise.all(
+      [...this.projects.values()].flatMap((p) => [p.session?.dispose(), p.sandbox?.dispose()]),
+    )
   }
 
   // ── persistence: only metadata, never sessions ──────────────────────────────────────────
