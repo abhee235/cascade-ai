@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { Folder, FolderOpen, Plus, X } from 'lucide-react'
-import { useStore } from '../../lib/store'
-import { cn } from '../../lib/utils'
+import { useStore } from '@/lib/store'
+import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 
 export function Sidebar() {
   const { projects, activeId, createProject, openProject, deleteProject } = useStore()
@@ -20,20 +22,16 @@ export function Sidebar() {
     <aside className="flex h-full flex-col bg-background">
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Projects</span>
-        <button
-          className="ml-auto rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-          title="New project"
-          onClick={() => setCreating((c) => !c)}
-        >
-          <Plus className="h-4 w-4" />
-        </button>
+        <Button variant="ghost" size="icon-sm" className="ml-auto" title="New project" onClick={() => setCreating((c) => !c)}>
+          <Plus />
+        </Button>
       </div>
 
       {creating && (
         <div className="border-b border-border p-2">
-          <input
+          <Input
             autoFocus
-            className="w-full rounded border border-input bg-card px-2 py-1 text-xs outline-none focus:border-ring"
+            className="h-8 text-xs"
             placeholder="project name…"
             value={name}
             onChange={(e) => setName(e.target.value)}

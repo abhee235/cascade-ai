@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { Streamdown } from 'streamdown'
 import { Loader2, RefreshCw, Square } from 'lucide-react'
-import { useStore } from '../../lib/store'
+import { useStore } from '@/lib/store'
 import { ActivityCard } from './ActivityCard'
-import { Button } from '../ui/button'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
 
 export function ChatPanel() {
   const { items, streaming, status, recovering, busy, connected, activeId, submit, stop } = useStore()
@@ -52,8 +53,8 @@ export function ChatPanel() {
       </div>
 
       <div className="flex gap-2 border-t border-border p-3">
-        <textarea
-          className="flex-1 resize-none rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus:border-ring"
+        <Textarea
+          className="flex-1 resize-none"
           rows={2}
           placeholder={connected ? 'Ask Cascade…' : 'connecting to server…'}
           value={input}

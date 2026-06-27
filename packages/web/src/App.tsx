@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { WsClient } from './lib/wsClient'
 import { useStore } from './lib/store'
 import { AppShell } from './components/layout/AppShell'
+import { TooltipProvider } from '@/components/ui/tooltip'
 
 const WS_URL = `ws://${location.hostname}:4319`
 
@@ -13,5 +14,9 @@ export function App() {
     client.connect()
   }, [])
 
-  return <AppShell />
+  return (
+    <TooltipProvider delayDuration={300}>
+      <AppShell />
+    </TooltipProvider>
+  )
 }

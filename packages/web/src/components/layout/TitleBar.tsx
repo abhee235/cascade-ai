@@ -1,9 +1,9 @@
-import { PanelLeft } from 'lucide-react'
+import { Moon, PanelLeft, Sun } from 'lucide-react'
 import { useStore } from '../../lib/store'
 import { cn } from '../../lib/utils'
 
 export function TitleBar() {
-  const { connected, projects, activeId, toggleSidebar } = useStore()
+  const { connected, projects, activeId, toggleSidebar, theme, toggleTheme } = useStore()
   const activeName = projects.find((p) => p.id === activeId)?.name
 
   return (
@@ -20,12 +20,19 @@ export function TitleBar() {
       <span
         className={cn(
           'ml-auto inline-flex items-center gap-1.5 text-xs',
-          connected ? 'text-green-400' : 'text-muted-foreground',
+          connected ? 'text-green-500' : 'text-muted-foreground',
         )}
       >
-        <span className={cn('h-2 w-2 rounded-full', connected ? 'bg-green-400' : 'bg-muted-foreground/50')} />
+        <span className={cn('h-2 w-2 rounded-full', connected ? 'bg-green-500' : 'bg-muted-foreground/50')} />
         {connected ? 'connected' : 'connecting…'}
       </span>
+      <button
+        className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+        title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
+        onClick={toggleTheme}
+      >
+        {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+      </button>
     </header>
   )
 }

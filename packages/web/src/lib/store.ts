@@ -7,6 +7,7 @@ import { create } from 'zustand'
 import type { WireEvent, WireMessage } from './wsClient'
 import { extractMessage, type Item, type Recovering, type RightTab, type Streaming } from './types'
 import { StreamingOptimizer } from './streamingOptimizer'
+import { applyTheme, getInitialTheme, type Theme } from './theme'
 import type { ProjectInfo } from '@cascade/app-protocol'
 
 interface UiState {
@@ -23,6 +24,7 @@ interface UiState {
   // shell
   sidebarCollapsed: boolean
   rightTab: RightTab
+  theme: Theme
   // transport (injected by App)
   send: (m: WireMessage) => void
   setSend: (send: (m: WireMessage) => void) => void
@@ -36,6 +38,7 @@ interface UiState {
   deleteProject: (id: string) => void
   toggleSidebar: () => void
   setRightTab: (t: RightTab) => void
+  toggleTheme: () => void
 }
 
 export const useStore = create<UiState>((set, get) => {
@@ -59,6 +62,7 @@ export const useStore = create<UiState>((set, get) => {
     busy: false,
     sidebarCollapsed: false,
     rightTab: 'preview',
+    theme: getInitialTheme(),
     send: () => {},
     setSend: (send) => set({ send }),
     setConnected: (connected) => set({ connected }),
@@ -153,5 +157,10 @@ export const useStore = create<UiState>((set, get) => {
     },
     toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
     setRightTab: (rightTab) => set({ rightTab }),
+    toggleTheme: () => {
+      const theme: Theme = get().theme === 'dark' ? 'light' : 'dark'
+      applyTheme(theme)
+      set({ theme })
+    },
   }
 })
