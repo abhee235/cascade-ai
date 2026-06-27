@@ -6,6 +6,7 @@ import { Code2, Eye, SquareTerminal, type LucideIcon } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useStore } from '@/lib/store'
 import type { RightTab } from '@/lib/types'
+import { CodePane } from './CodePane'
 
 const TABS: { id: RightTab; label: string; icon: LucideIcon; title: string; sub: string }[] = [
   { id: 'preview', label: 'Preview', icon: Eye, title: 'Live preview', sub: 'Runs the project in a sandbox and shows it here (coming soon).' },
@@ -33,15 +34,21 @@ export function BuilderPane() {
         </TabsList>
       </div>
 
-      {TABS.map((t) => (
-        <TabsContent key={t.id} value={t.id} className="flex items-center justify-center p-6 text-center">
-          <div className="text-muted-foreground">
-            <t.icon className="mx-auto h-8 w-8 opacity-50" />
-            <p className="mt-2 text-sm font-medium">{t.title}</p>
-            <p className="mt-1 text-xs opacity-70">{activeId ? t.sub : 'Open a project to start.'}</p>
-          </div>
-        </TabsContent>
-      ))}
+      {TABS.map((t) =>
+        t.id === 'code' ? (
+          <TabsContent key={t.id} value={t.id} className="min-h-0">
+            <CodePane />
+          </TabsContent>
+        ) : (
+          <TabsContent key={t.id} value={t.id} className="flex items-center justify-center p-6 text-center">
+            <div className="text-muted-foreground">
+              <t.icon className="mx-auto h-8 w-8 opacity-50" />
+              <p className="mt-2 text-sm font-medium">{t.title}</p>
+              <p className="mt-1 text-xs opacity-70">{activeId ? t.sub : 'Open a project to start.'}</p>
+            </div>
+          </TabsContent>
+        ),
+      )}
     </Tabs>
   )
 }

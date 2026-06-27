@@ -9,7 +9,7 @@
 ## Overall
 
 **Engine (the algorithm)** — `████████████████████` **100%** — Phases 0–13.3 complete & tagged.
-**Builder (the product)** — `████░░░░░░░░░░░░░░░░` **~20%** — sandbox + shell + templates shipped; preview/code/etc. ahead.
+**Builder (the product)** — `█████░░░░░░░░░░░░░░░` **~25%** — sandbox + shell + templates + code pane shipped; preview/etc. ahead.
 
 ---
 
@@ -45,8 +45,8 @@ Each lands as a runnable, tested checkpoint. (Preview/Terminal need the 13.3 san
 | | Item | Notes |
 |---|---|---|
 | ✅ | **Templates / scaffolding** | `ProjectManager.create` copies a Vite+React+Tailwind scaffold + `git init`; AI-rules via a generic core seam (ADR-025, `guide/phase-15.md`) |
-| 🔨 | **File service** | read/list/write project files (for the Code pane) — **next** |
-| ⬜ | **Live preview** | run dev server in the sandbox → proxy → iframe |
+| ✅ | **File service** | read tree + file content over the protocol (host-side, guarded); ADR-026. *Write/save deferred (gated).* |
+| 🔨 | **Live preview** | run dev server in the sandbox → proxy → iframe — **next** |
 | ⬜ | **Integrated terminal** | xterm ↔ sandbox PTY over the protocol |
 | ⬜ | **Git checkpoints / restore** | commit each change-set; versions list + restore (baseline commit already lands at create) |
 | ⬜ | **Build-error auto-fix loop** | run checks in the sandbox; feed problems back |
@@ -55,14 +55,14 @@ Each lands as a runnable, tested checkpoint. (Preview/Terminal need the 13.3 san
 
 ---
 
-## 4. Builder web frontend — milestones (`docs/PLAN-web-frontend.md`)  `███░░░░░░░░░░░░░░░░░` ~15%
+## 4. Builder web frontend — milestones (`docs/PLAN-web-frontend.md`)  `█████░░░░░░░░░░░░░░░` ~25%
 
 | | Milestone | Notes |
 |---|---|---|
 | ✅ | **M1 Shell** | resizable 3-pane, zustand store, **design system** (dark/light toggle), **real shadcn/ui** (Radix), per-tool activity cards, StreamingOptimizer |
-| 🔨 | **M2 Activity cards** | file-edit diffs, AddDependency, MCP, **permission card** |
-| ⬜ | **M3 Preview** | iframe + toolbar (needs preview proxy) |
-| ⬜ | **M4 Code** | FileTree + Monaco + diff (needs file service) |
+| ✅ | **M4 Code** | FileTree + **Monaco** (read-only), refreshes on open + each turn (ADR-026) |
+| 🔨 | **M3 Preview** | iframe + toolbar (needs preview proxy) — **next** |
+| ⬜ | **M2 Activity cards** | file-edit diffs, AddDependency, MCP, **permission card** |
 | ⬜ | **M5 Console/Problems** | dev-server logs + problems + "Fix all" |
 | ⬜ | **M6 Versions** | checkpoint list + diff + restore |
 | ⬜ | **M7 Terminal** | xterm pane |

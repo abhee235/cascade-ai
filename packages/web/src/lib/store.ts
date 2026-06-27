@@ -8,7 +8,7 @@ import type { WireEvent, WireMessage } from './wsClient'
 import { extractMessage, type Item, type Recovering, type RightTab, type Streaming } from './types'
 import { StreamingOptimizer } from './streamingOptimizer'
 import { applyTheme, getInitialTheme, type Theme } from './theme'
-import type { ProjectInfo, TemplateInfo } from '@cascade/app-protocol'
+import type { FileNode, ProjectInfo, TemplateInfo } from '@cascade/app-protocol'
 
 interface UiState {
   // connection + projects
@@ -22,6 +22,9 @@ interface UiState {
   status: string | null
   recovering: Recovering | null
   busy: boolean
+  // code pane (M4)
+  fileTree: FileNode[]
+  openFile: { path: string; content: string } | null
   // shell
   sidebarCollapsed: boolean
   rightTab: RightTab
@@ -40,6 +43,7 @@ interface UiState {
   toggleSidebar: () => void
   setRightTab: (t: RightTab) => void
   toggleTheme: () => void
+  requestFile: (path: string) => void
 }
 
 export const useStore = create<UiState>((set, get) => {
@@ -62,6 +66,8 @@ export const useStore = create<UiState>((set, get) => {
     status: null,
     recovering: null,
     busy: false,
+    fileTree: [],
+    openFile: null,
     sidebarCollapsed: false,
     rightTab: 'preview',
     theme: getInitialTheme(),
@@ -133,6 +139,12 @@ export const useStore = create<UiState>((set, get) => {
         case 'templates':
           set({ templates: e.templates })
           break
+        case 'files':
+          set({ fileTree: e.tree })
+          break
+        case 'fileContent':
+          set({ openFile: { path: e.path, content: e.content } })
+          break
       }
     },
 
@@ -153,7 +165,7 @@ export const useStore = create<UiState>((set, get) => {
     },
     openProject: (id) => {
       if (id === get().activeId) return
-      set({ items: [], streaming: null, status: null, busy: false })
+      set({ items: [], streaming: null, status: null, busy: false, fileTree: [], openFile: null })
       get().send({ type: 'project', action: 'open', id })
     },
     deleteProject: (id) => {
@@ -162,6 +174,7 @@ export const useStore = create<UiState>((set, get) => {
     },
     toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
     setRightTab: (rightTab) => set({ rightTab }),
+    requestFile: (path) => get().send({ type: 'file', action: 'read', path }),
     toggleTheme: () => {
       const theme: Theme = get().theme === 'dark' ? 'light' : 'dark'
       applyTheme(theme)

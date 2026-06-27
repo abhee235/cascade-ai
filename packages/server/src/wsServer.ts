@@ -16,6 +16,7 @@ import type { BuilderCommand } from '@cascade/app-protocol'
 import { ProjectManager } from './projectManager.js'
 import { DockerSandbox, dockerAvailable } from './dockerSandbox.js'
 import { listTemplates } from './templates.js'
+import { readFile, readTree } from './fileService.js'
 
 /** What a connection can receive: a core session message OR an app/builder command. */
 type Inbound = InboundMessage | BuilderCommand
@@ -40,6 +41,12 @@ export function handleConnection(ws: WebSocket, manager: ProjectManager): void {
   // Greet the new connection with the project list + available templates so the UI can render immediately.
   send({ type: 'projects', projects: manager.list(), activeId })
   send({ type: 'templates', templates: listTemplates() })
+
+  // Send the active project's file tree (M4) — on open and after each turn (the agent may have edited files).
+  const sendTree = () => {
+    const dir = activeId && manager.dirOf(activeId)
+    if (dir) send({ type: 'files', tree: readTree(dir) })
+  }
 
   // Return the active session, or nudge the user to open one. Captured into a const at each call site so
   // TS narrowing survives the `await`s that follow (a `let` closure var would re-widen).
@@ -69,14 +76,32 @@ export function handleConnection(ws: WebSocket, manager: ProjectManager): void {
             activeId = msg.id
           }
           send({ type: 'projects', projects: manager.list(), activeId })
+          if (msg.action === 'open') sendTree() // populate the Code pane for the opened project
           break
         }
         case 'submit': {
           const s = requireActive()
           if (!s) break
           for await (const ev of s.submit(msg.text)) send(ev)
+          sendTree() // the agent may have created/edited files — refresh the tree
           break
         }
+        case 'files': // request the active project's file tree
+          sendTree()
+          break
+        case 'file': // request one file's content
+          if (activeId) {
+            const dir = manager.dirOf(activeId)
+            try {
+              if (dir) {
+                const { content, truncated } = readFile(dir, msg.path)
+                send({ type: 'fileContent', path: msg.path, content, truncated })
+              }
+            } catch (e) {
+              send({ type: 'fileContent', path: msg.path, content: `⚠️ ${(e as Error).message}`, truncated: false })
+            }
+          }
+          break
         case 'permission':
           active?.respondPermission(msg.id, msg.decision)
           break

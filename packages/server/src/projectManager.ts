@@ -69,6 +69,11 @@ export class ProjectManager {
     this.load()
   }
 
+  /** The host dir of a project — SERVER-INTERNAL only (never crosses the wire). For the file service. */
+  dirOf(id: string): string | undefined {
+    return this.projects.get(id)?.dir
+  }
+
   /** Public, host-path-free snapshot for the sidebar. */
   list(): ProjectInfo[] {
     return [...this.projects.values()]
