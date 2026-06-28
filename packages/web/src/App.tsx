@@ -37,6 +37,7 @@ export function App() {
       if (e.data.__cascade === 'preview-error') useStore.getState().onPreviewError(e.data.payload)
       else if (e.data.__cascade === 'preview-edit') useStore.getState().editPreviewText(e.data.loc, e.data.tag, e.data.text) // M9: committed in-place edit
       else if (e.data.__cascade === 'preview-ai') useStore.getState().aiEditPreview(e.data.loc, e.data.tag, e.data.text) // M9: ✦ AI button
+      else if (e.data.__cascade === 'set-class') useStore.getState().setPreviewClass(e.data.loc, e.data.className) // M9 toolbar: persist Tailwind classes
     }
     window.addEventListener('message', onMsg)
 

@@ -18,7 +18,7 @@ import type { BuilderCommand } from '@cascade/app-protocol'
 import { ProjectManager } from './projectManager.js'
 import { DockerSandbox, dockerAvailable, sweepSandboxContainers } from './dockerSandbox.js'
 import { ensureVisualEditConfig, listTemplates } from './templates.js'
-import { createFile, deletePath, editJsxTextAtLoc, makeDir, readDiff, readFile, readTree, renamePath, writeFile } from './fileService.js'
+import { createFile, deletePath, editJsxTextAtLoc, makeDir, readDiff, readFile, readTree, renamePath, setClassAtLoc, writeFile } from './fileService.js'
 import { PreviewManager } from './previewManager.js'
 import { PreviewProxy } from './previewProxy.js'
 import { runCheck } from './checkProject.js'
@@ -183,6 +183,10 @@ export function handleConnection(
             } else if (msg.action === 'editText') {
               const ok = editJsxTextAtLoc(dir, msg.path, msg.line, msg.col, msg.text) // M9 inline text edit
               send({ type: 'fileEdited', path: msg.path, ok }) // ok:false ⇒ client falls back to an AI edit
+            } else if (msg.action === 'setClass') {
+              // M9 toolbar: write the new className. The live preview already reflects it; failure (dynamic
+              // className) just surfaces a toast — don't fall back to AI here.
+              if (!setClassAtLoc(dir, msg.path, msg.line, msg.col, msg.className)) send({ type: 'fileOpError', action: 'setClass', message: "Couldn't update styles — this element's className is dynamic." })
             } else if (msg.action === 'create' || msg.action === 'mkdir' || msg.action === 'rename' || msg.action === 'delete') {
               // M9 file-tree ops. On failure (e.g. name collision, traversal) surface a toast and keep the tree intact.
               try {

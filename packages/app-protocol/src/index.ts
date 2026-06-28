@@ -59,6 +59,7 @@ export type BuilderCommand =
   | { type: 'file'; action: 'read' | 'diff'; path: string } // read a file (M4) or get its diff vs last commit (M2)
   | { type: 'file'; action: 'write'; path: string; content: string } // overwrite a file (M9 visual editing / Code-pane save)
   | { type: 'file'; action: 'editText'; path: string; line: number; col: number; text: string } // replace a JSX element's text (M9)
+  | { type: 'file'; action: 'setClass'; path: string; line: number; col: number; className: string } // set a JSX element's className (M9 toolbar)
   | { type: 'file'; action: 'create' | 'mkdir' | 'delete'; path: string } // file-tree ops: new file / new folder / delete (M9)
   | { type: 'file'; action: 'rename'; path: string; to: string } // rename/move a file or folder (M9)
   | { type: 'preview'; action: 'start' | 'stop' } // start/stop the active project's live preview (M3)

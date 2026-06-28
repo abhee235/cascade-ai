@@ -132,6 +132,37 @@ export function editJsxTextAtLoc(root: string, relPath: string, line: number, co
   return true
 }
 
+/** Visual editing (M9 toolbar): set the `className` of the JSX element whose opening tag starts at `line:col`
+ *  to `className` (the parent computes the new Tailwind class string). Replaces an existing static className
+ *  string in place, or inserts one after the tag name. Returns false for a dynamic className={expr} (we won't
+ *  rewrite an expression) so the caller can surface that. Surgical splice — preserves the rest of the file. */
+export function setClassAtLoc(root: string, relPath: string, line: number, col: number, className: string): boolean {
+  const { content } = readFile(root, relPath)
+  const ast = parse(content, { sourceType: 'module', plugins: ['jsx', 'typescript'] })
+  let edit: { start: number; end: number; insert: boolean } | null = null
+  traverse(ast, {
+    JSXOpeningElement(path) {
+      const o = path.node
+      if (o.loc?.start.line !== line || o.loc?.start.column !== col) return
+      const attr = o.attributes.find((a) => a.type === 'JSXAttribute' && a.name.name === 'className')
+      if (attr && attr.type === 'JSXAttribute') {
+        const v = attr.value
+        const lit = v?.type === 'StringLiteral' ? v : v?.type === 'JSXExpressionContainer' && v.expression.type === 'StringLiteral' ? v.expression : null
+        if (lit?.start != null && lit.end != null) edit = { start: lit.start + 1, end: lit.end - 1, insert: false } // inside the quotes
+        // else: a dynamic className={expr} → leave it (edit stays null → returns false)
+      } else if (o.name.type === 'JSXIdentifier' && o.name.end != null) {
+        edit = { start: o.name.end, end: o.name.end, insert: true } // no className yet → insert after the tag name
+      }
+      path.stop()
+    },
+  })
+  if (!edit) return false
+  const e: { start: number; end: number; insert: boolean } = edit
+  const ins = e.insert ? ` className="${className}"` : className
+  writeFile(root, relPath, content.slice(0, e.start) + ins + content.slice(e.end))
+  return true
+}
+
 /** A file's diff inputs: its content at the last git commit (`original`) vs now (`modified`). For the
  *  Monaco DiffEditor in the Code pane. `original` is '' for a new/untracked file or a non-git project. */
 export function readDiff(root: string, relPath: string): { original: string; modified: string } {

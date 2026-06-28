@@ -107,6 +107,7 @@ interface UiState {
   toggleSelectMode: () => void // arm/disarm "select an element" mode
   setSelectMode: (on: boolean) => void
   editPreviewText: (loc: string, tag: string, text: string) => void // commit an in-place edit → write source (splice the JSX)
+  setPreviewClass: (loc: string, className: string) => void // M9 toolbar: write a new className to source
   aiEditPreview: (loc: string, tag: string, text: string) => void // hand the element to the chat composer for an AI edit
   setComposerDraft: (text: string) => void // composer reads + clears this (prefill channel)
 }
@@ -501,6 +502,10 @@ export const useStore = create<UiState>((set, get) => {
       if (!p) return
       lastEditCtx = { file: p.file, line: p.line, tag, text } // remembered for the AI fallback if the splice is refused
       get().send({ type: 'file', action: 'editText', path: p.file, line: p.line, col: p.col, text })
+    },
+    setPreviewClass: (loc, className) => {
+      const p = parseLoc(loc)
+      if (p) get().send({ type: 'file', action: 'setClass', path: p.file, line: p.line, col: p.col, className })
     },
     aiEditPreview: (loc, tag, text) => {
       const p = parseLoc(loc)
