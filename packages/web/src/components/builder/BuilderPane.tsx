@@ -2,20 +2,20 @@
 // built on shadcn/Radix Tabs. M1 ships the shell + tabs with empty states; live preview (iframe + proxy),
 // file tree + Monaco, and console get wired in their milestones.
 
-import { Code2, Eye, History, SquareTerminal, type LucideIcon } from 'lucide-react'
+// BuilderPane.tsx — the top of the builder's right side: Preview · Code · Versions tabs. (Console/Problems/
+// Terminal/Ports live in the VS Code-style bottom panel — see BottomPanel.tsx.)
+import { Code2, Eye, History, type LucideIcon } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useStore } from '@/lib/store'
 import type { RightTab } from '@/lib/types'
 import { CodePane } from './CodePane'
 import { PreviewPane } from './PreviewPane'
-import { ConsolePane } from './ConsolePane'
 import { VersionsPane } from './VersionsPane'
 
 const TABS: { id: RightTab; label: string; icon: LucideIcon; title: string; sub: string }[] = [
-  { id: 'preview', label: 'Preview', icon: Eye, title: 'Live preview', sub: 'Runs the project in a sandbox and shows it here (coming soon).' },
-  { id: 'code', label: 'Code', icon: Code2, title: 'Code', sub: 'File tree + editor (coming soon).' },
-  { id: 'console', label: 'Console', icon: SquareTerminal, title: 'Console', sub: 'Dev-server logs + terminal (coming soon).' },
-  { id: 'versions', label: 'Versions', icon: History, title: 'Versions', sub: 'Checkpoints + restore (coming soon).' },
+  { id: 'preview', label: 'Preview', icon: Eye, title: 'Live preview', sub: 'Runs the project in a sandbox and shows it here.' },
+  { id: 'code', label: 'Code', icon: Code2, title: 'Code', sub: 'File tree + editor.' },
+  { id: 'versions', label: 'Versions', icon: History, title: 'Versions', sub: 'Checkpoints + restore.' },
 ]
 
 export function BuilderPane() {
@@ -46,10 +46,6 @@ export function BuilderPane() {
         ) : t.id === 'preview' ? (
           <TabsContent key={t.id} value={t.id} className="min-h-0">
             <PreviewPane />
-          </TabsContent>
-        ) : t.id === 'console' ? (
-          <TabsContent key={t.id} value={t.id} className="min-h-0">
-            <ConsolePane />
           </TabsContent>
         ) : t.id === 'versions' ? (
           <TabsContent key={t.id} value={t.id} className="min-h-0">

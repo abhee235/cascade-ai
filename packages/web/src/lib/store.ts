@@ -5,7 +5,7 @@
 
 import { create } from 'zustand'
 import type { WireEvent, WireMessage } from './wsClient'
-import { extractMessage, type Item, type Page, type PreviewState, type Recovering, type RightTab, type Streaming } from './types'
+import { extractMessage, type BottomTab, type Item, type Page, type PreviewState, type Recovering, type RightTab, type Streaming } from './types'
 import { StreamingOptimizer } from './streamingOptimizer'
 import { applyTheme, getInitialTheme, type Theme } from './theme'
 import type { FileNode, Problem, ProjectInfo, TemplateInfo, Version } from '@cascade/app-protocol'
@@ -40,6 +40,11 @@ interface UiState {
   checking: boolean
   // git checkpoint history (M6), newest first
   versions: Version[]
+  // VS Code-style bottom panel + integrated terminal (M7)
+  bottomTab: BottomTab
+  bottomOpen: boolean
+  bottomMaximized: boolean
+  terminalSink?: (chunk: string) => void // xterm.write, registered by TerminalPane (data is imperative, not state)
   // shell
   sidebarCollapsed: boolean
   rightTab: RightTab
@@ -72,6 +77,15 @@ interface UiState {
   runCheck: () => void // M5.3: ask the server to type-check the project
   fixProblems: () => void // M5.3: hand the current problems to the agent to fix
   restoreVersion: (id: string) => void // M6: restore the project to a checkpoint
+  // bottom panel + terminal (M7)
+  setBottomTab: (t: BottomTab) => void
+  toggleBottom: () => void
+  toggleBottomMax: () => void
+  setTerminalSink: (fn: ((chunk: string) => void) | undefined) => void
+  startTerminal: (cols: number, rows: number) => void
+  stopTerminal: () => void
+  terminalInput: (data: string) => void
+  terminalResize: (cols: number, rows: number) => void
 }
 
 export const useStore = create<UiState>((set, get) => {
@@ -143,6 +157,10 @@ export const useStore = create<UiState>((set, get) => {
     problems: [],
     checking: false,
     versions: [],
+    bottomTab: 'terminal',
+    bottomOpen: true,
+    bottomMaximized: false,
+    terminalSink: undefined,
     sidebarCollapsed: false,
     rightTab: 'preview',
     theme: getInitialTheme(),
@@ -273,6 +291,12 @@ export const useStore = create<UiState>((set, get) => {
         case 'versions':
           set({ versions: e.versions })
           break
+        case 'terminalData':
+          get().terminalSink?.(e.data)
+          break
+        case 'terminalExit':
+          get().terminalSink?.('\r\n\x1b[90m[process exited]\x1b[0m\r\n')
+          break
       }
     },
 
@@ -364,6 +388,16 @@ export const useStore = create<UiState>((set, get) => {
       submit(`Fix these TypeScript errors so the project type-checks cleanly:\n${list}`)
     },
     restoreVersion: (id) => get().send({ type: 'version', action: 'restore', id }),
+    setBottomTab: (bottomTab) => set({ bottomTab, bottomOpen: true }),
+    toggleBottom: () => set((s) => ({ bottomOpen: !s.bottomOpen, bottomMaximized: false })),
+    toggleBottomMax: () => set((s) => ({ bottomMaximized: !s.bottomMaximized, bottomOpen: true })),
+    setTerminalSink: (terminalSink) => set({ terminalSink }),
+    startTerminal: (cols, rows) => {
+      if (get().activeId) get().send({ type: 'terminal', action: 'start', cols, rows })
+    },
+    stopTerminal: () => get().send({ type: 'terminal', action: 'stop' }),
+    terminalInput: (data) => get().send({ type: 'terminalInput', data }),
+    terminalResize: (cols, rows) => get().send({ type: 'terminalResize', cols, rows }),
     toggleTheme: () => {
       const theme: Theme = get().theme === 'dark' ? 'light' : 'dark'
       applyTheme(theme)

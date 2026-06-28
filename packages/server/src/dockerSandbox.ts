@@ -119,6 +119,11 @@ export class DockerSandbox implements Sandbox {
     return this.hostPort
   }
 
+  /** The running container's id (ensures it's up). Used by the integrated terminal (M7) to exec a shell. */
+  async getContainerId(): Promise<string> {
+    return this.ensure()
+  }
+
   async dispose(): Promise<void> {
     const id = this.containerId
     this.containerId = undefined

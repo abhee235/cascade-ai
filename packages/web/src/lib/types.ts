@@ -10,7 +10,8 @@ export type Item =
 
 export type Streaming = { text: string; thinking: string }
 export type Recovering = { attempt: number; reason: string }
-export type RightTab = 'preview' | 'code' | 'console' | 'versions'
+export type RightTab = 'preview' | 'code' | 'versions' // top builder pane (Console moved to the bottom panel)
+export type BottomTab = 'terminal' | 'problems' | 'output' | 'ports' // VS Code-style bottom panel (M7)
 export type Page = 'home' | 'project' | 'projects' | 'chats' | 'settings'
 export type PreviewState = { status: 'installing' | 'starting' | 'running' | 'error' | 'stopped'; url?: string }
 

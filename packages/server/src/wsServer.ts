@@ -23,6 +23,7 @@ import { PreviewManager } from './previewManager.js'
 import { PreviewProxy } from './previewProxy.js'
 import { runCheck } from './checkProject.js'
 import { VersionManager } from './versionManager.js'
+import { createTerminal, type TerminalHandle } from './terminalSession.js'
 
 /** What a connection can receive: a core session message OR an app/builder command. */
 type Inbound = InboundMessage | BuilderCommand
@@ -68,6 +69,7 @@ export function handleConnection(
   let active: CascadeSession | undefined
   let activeId: string | undefined
   let stopTail: (() => void) | undefined // M5: stops the Console log stream (tail) for this connection
+  let term: TerminalHandle | undefined // M7: the integrated terminal's PTY for this connection
 
   // Send a preview status to the client. When it's running, point the proxy at the container and hand the
   // client the STABLE proxy origin instead of the container's random port (M5.2).
@@ -134,6 +136,8 @@ export function handleConnection(
           } else if (msg.action === 'open' && msg.id) {
             stopTail?.() // detach the previous project's log stream before switching
             stopTail = undefined
+            term?.kill() // close the previous project's terminal too
+            term = undefined
             active = manager.open(msg.id)
             activeId = msg.id
           }
@@ -225,6 +229,34 @@ export function handleConnection(
           }
           break
         }
+        case 'terminal': { // M7: open/close an interactive shell in the project's sandbox container
+          if (!activeId) break
+          if (msg.action === 'stop') {
+            term?.kill()
+            term = undefined
+            break
+          }
+          const sandbox = manager.sandboxOf(activeId)
+          if (!(sandbox instanceof DockerSandbox)) break
+          term?.kill() // replace any existing shell on this connection
+          const id = await sandbox.getContainerId()
+          term = await createTerminal(
+            id,
+            { cols: msg.cols ?? 80, rows: msg.rows ?? 24 },
+            (data) => send({ type: 'terminalData', data }),
+            () => {
+              send({ type: 'terminalExit' })
+              term = undefined
+            },
+          )
+          break
+        }
+        case 'terminalInput':
+          term?.write(msg.data)
+          break
+        case 'terminalResize':
+          term?.resize(msg.cols, msg.rows)
+          break
         case 'permission':
           active?.respondPermission(msg.id, msg.decision)
           break
@@ -263,6 +295,8 @@ export function handleConnection(
   ws.on('close', () => {
     stopTail?.() // end the Console log stream (the dev server itself stays up in the container)
     stopTail = undefined
+    term?.kill() // end the terminal shell (the container stays up)
+    term = undefined
     active = undefined
     activeId = undefined
   })
