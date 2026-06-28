@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { readFile, writeFile } from 'node:fs/promises'
 import { isAbsolute, resolve } from 'node:path'
 import type { Tool } from '../Tool'
+import { lineDiff } from '../../utils/diff'
 
 const inputSchema = z.object({
   file_path: z.string().describe('Path to the file to edit, relative to the workspace or absolute.'),
@@ -31,8 +32,12 @@ export const EditTool: Tool<z.infer<typeof inputSchema>> = {
           content: `old_string appears ${count}× in ${input.file_path}; it must be unique. Include surrounding context.`,
           isError: true,
         }
-      await writeFile(path, content.replace(input.old_string, input.new_string), 'utf8')
-      return { content: `Edited ${input.file_path} (1 replacement).` }
+      const after = content.replace(input.old_string, input.new_string)
+      await writeFile(path, after, 'utf8')
+      return {
+        content: `Edited ${input.file_path} (1 replacement).`,
+        display: { kind: 'fileEdit', path: input.file_path, op: 'edit', diff: lineDiff(content, after) },
+      }
     } catch (e) {
       return { content: `Error editing ${input.file_path}: ${e instanceof Error ? e.message : String(e)}`, isError: true }
     }

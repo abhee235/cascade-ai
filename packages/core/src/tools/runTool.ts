@@ -45,6 +45,7 @@ export async function executeTool(
       tool_use_id: toolUse.id,
       content: result.content,
       isError: result.isError,
+      display: result.display, // M2: UI rendering hint (e.g. a file-edit diff) — passed through to the frontend
     }
   } catch (e) {
     return err(`${toolUse.name} threw: ${e instanceof Error ? e.message : String(e)}`)

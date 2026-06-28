@@ -16,7 +16,7 @@ import type { BuilderCommand } from '@cascade/app-protocol'
 import { ProjectManager } from './projectManager.js'
 import { DockerSandbox, dockerAvailable } from './dockerSandbox.js'
 import { listTemplates } from './templates.js'
-import { readFile, readTree } from './fileService.js'
+import { readDiff, readFile, readTree } from './fileService.js'
 import { PreviewManager } from './previewManager.js'
 
 /** What a connection can receive: a core session message OR an app/builder command. */
@@ -94,19 +94,22 @@ export function handleConnection(ws: WebSocket, manager: ProjectManager, preview
         case 'files': // request the active project's file tree
           sendTree()
           break
-        case 'file': // request one file's content
-          if (activeId) {
-            const dir = manager.dirOf(activeId)
-            try {
-              if (dir) {
-                const { content, truncated } = readFile(dir, msg.path)
-                send({ type: 'fileContent', path: msg.path, content, truncated })
-              }
-            } catch (e) {
-              send({ type: 'fileContent', path: msg.path, content: `⚠️ ${(e as Error).message}`, truncated: false })
+        case 'file': { // request one file's content (read) or its diff vs HEAD (diff)
+          const dir = activeId ? manager.dirOf(activeId) : undefined
+          if (!dir) break
+          try {
+            if (msg.action === 'diff') {
+              const { original, modified } = readDiff(dir, msg.path)
+              send({ type: 'fileDiff', path: msg.path, original, modified })
+            } else {
+              const { content, truncated } = readFile(dir, msg.path)
+              send({ type: 'fileContent', path: msg.path, content, truncated })
             }
+          } catch (e) {
+            send({ type: 'fileContent', path: msg.path, content: `⚠️ ${(e as Error).message}`, truncated: false })
           }
           break
+        }
         case 'preview': { // start/stop the active project's live preview (M3)
           if (!activeId || !preview) break
           if (msg.action === 'stop') {

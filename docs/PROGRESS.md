@@ -62,7 +62,7 @@ Each lands as a runnable, tested checkpoint. (Preview/Terminal need the 13.3 san
 | ✅ | **M1 Shell** | resizable 3-pane, zustand store, **design system** (dark/light toggle), **real shadcn/ui** (Radix), per-tool activity cards, StreamingOptimizer |
 | ✅ | **M4 Code** | FileTree + **Monaco** (read-only, self-hosted), refreshes on open + each turn (ADR-026) |
 | ✅ | **M3 Preview** | Run → install/start spinner → **iframe** + reload/stop toolbar (ADR-027) |
-| 🔨 | **M2 Activity cards** | file-edit diffs, AddDependency, MCP, **permission card** — **next** |
+| 🔨 | **M2 Activity cards** | ✅ **file-edit diff cards** (ADR-028); AddDependency / changeSet / MCP cards remain |
 | ⬜ | **M5 Console/Problems** | dev-server logs + problems + "Fix all" |
 | ⬜ | **M6 Versions** | checkpoint list + diff + restore |
 | ⬜ | **M7 Terminal** | xterm pane |

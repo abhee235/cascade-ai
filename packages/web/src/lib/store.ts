@@ -22,9 +22,11 @@ interface UiState {
   status: string | null
   recovering: Recovering | null
   busy: boolean
-  // code pane (M4)
+  // code pane (M4) + diff view (M2)
   fileTree: FileNode[]
   openFile: { path: string; content: string } | null
+  fileDiff: { path: string; original: string; modified: string } | null
+  codeView: 'code' | 'diff'
   // live preview (M3)
   preview: PreviewState | null
   // shell
@@ -46,6 +48,8 @@ interface UiState {
   setRightTab: (t: RightTab) => void
   toggleTheme: () => void
   requestFile: (path: string) => void
+  openFileInCode: (path: string, view?: 'code' | 'diff') => void
+  setCodeView: (v: 'code' | 'diff') => void
   startPreview: () => void
   stopPreview: () => void
 }
@@ -72,6 +76,8 @@ export const useStore = create<UiState>((set, get) => {
     busy: false,
     fileTree: [],
     openFile: null,
+    fileDiff: null,
+    codeView: 'code',
     preview: null,
     sidebarCollapsed: false,
     rightTab: 'preview',
@@ -115,7 +121,7 @@ export const useStore = create<UiState>((set, get) => {
         case 'toolResult':
           set((s) => ({
             items: s.items.map((x) =>
-              x.kind === 'tool' && x.id === e.id ? { ...x, status: e.ok ? 'ok' : 'error', preview: e.preview } : x,
+              x.kind === 'tool' && x.id === e.id ? { ...x, status: e.ok ? 'ok' : 'error', preview: e.preview, display: e.display } : x,
             ),
           }))
           break
@@ -150,6 +156,9 @@ export const useStore = create<UiState>((set, get) => {
         case 'fileContent':
           set({ openFile: { path: e.path, content: e.content } })
           break
+        case 'fileDiff':
+          set({ fileDiff: { path: e.path, original: e.original, modified: e.modified } })
+          break
         case 'preview':
           set({ preview: { status: e.status, url: e.url } })
           break
@@ -173,7 +182,7 @@ export const useStore = create<UiState>((set, get) => {
     },
     openProject: (id) => {
       if (id === get().activeId) return
-      set({ items: [], streaming: null, status: null, busy: false, fileTree: [], openFile: null, preview: null })
+      set({ items: [], streaming: null, status: null, busy: false, fileTree: [], openFile: null, fileDiff: null, codeView: 'code', preview: null })
       get().send({ type: 'project', action: 'open', id })
     },
     deleteProject: (id) => {
@@ -183,6 +192,16 @@ export const useStore = create<UiState>((set, get) => {
     toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
     setRightTab: (rightTab) => set({ rightTab }),
     requestFile: (path) => get().send({ type: 'file', action: 'read', path }),
+    openFileInCode: (path, view = 'code') => {
+      set({ rightTab: 'code', codeView: view })
+      get().requestFile(path)
+      if (view === 'diff') get().send({ type: 'file', action: 'diff', path })
+    },
+    setCodeView: (codeView) => {
+      set({ codeView })
+      const f = get().openFile
+      if (codeView === 'diff' && f && get().fileDiff?.path !== f.path) get().send({ type: 'file', action: 'diff', path: f.path })
+    },
     startPreview: () => {
       set({ preview: { status: 'installing' } }) // optimistic; server confirms via `preview` events
       get().send({ type: 'preview', action: 'start' })

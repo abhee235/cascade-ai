@@ -4,6 +4,7 @@
 // cap file size, block path traversal, flag binaries.
 
 import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join, relative, resolve, sep } from 'node:path'
 import type { FileNode } from '@cascade/app-protocol'
 
@@ -44,4 +45,25 @@ export function readFile(root: string, relPath: string): { content: string; trun
   if (buf.subarray(0, 8000).includes(0)) return { content: '⟨binary file⟩', truncated: false }
   const truncated = buf.length > MAX_FILE_BYTES
   return { content: buf.subarray(0, MAX_FILE_BYTES).toString('utf8'), truncated }
+}
+
+/** A file's diff inputs: its content at the last git commit (`original`) vs now (`modified`). For the
+ *  Monaco DiffEditor in the Code pane. `original` is '' for a new/untracked file or a non-git project. */
+export function readDiff(root: string, relPath: string): { original: string; modified: string } {
+  const abs = resolve(root, relPath)
+  if (abs !== root && !abs.startsWith(root + sep)) throw new Error('Path is outside the project')
+  let modified = ''
+  try {
+    modified = readFile(root, relPath).content
+  } catch {
+    modified = '' // deleted or unreadable
+  }
+  let original = ''
+  try {
+    // git uses forward-slash paths; the wire already sends them that way.
+    original = execFileSync('git', ['show', `HEAD:${relPath}`], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 8 * 1024 * 1024 })
+  } catch {
+    original = '' // new file, untracked, or no git
+  }
+  return { original, modified }
 }

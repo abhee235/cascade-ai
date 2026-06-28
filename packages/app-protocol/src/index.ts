@@ -33,6 +33,7 @@ export type BuilderEvent =
   | { type: 'templates'; templates: TemplateInfo[] } // available scaffolds for the create flow (Phase 15)
   | { type: 'files'; tree: FileNode[] } // the active project's file tree (M4)
   | { type: 'fileContent'; path: string; content: string; truncated?: boolean } // a single file's content (M4)
+  | { type: 'fileDiff'; path: string; original: string; modified: string } // a file's diff vs last commit (M2; Monaco DiffEditor)
   | { type: 'preview'; status: 'installing' | 'starting' | 'running' | 'error' | 'stopped'; url?: string } // live preview (M3)
 
 /** Client → builder. App/workspace-level commands, distinct from a session's InboundMessages.
@@ -41,5 +42,5 @@ export type BuilderEvent =
 export type BuilderCommand =
   | { type: 'project'; action: 'list' | 'create' | 'open' | 'delete'; name?: string; id?: string; templateId?: string }
   | { type: 'files'; action: 'list' } // request the active project's file tree (M4)
-  | { type: 'file'; action: 'read'; path: string } // request a single file's content (M4)
+  | { type: 'file'; action: 'read' | 'diff'; path: string } // read a file (M4) or get its diff vs last commit (M2)
   | { type: 'preview'; action: 'start' | 'stop' } // start/stop the active project's live preview (M3)

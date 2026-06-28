@@ -1,10 +1,10 @@
-import type { Message } from '@cascade/core'
+import type { Message, ToolDisplay } from '@cascade/core'
 
 /** One rendered row in the chat transcript. The agent-action cards (kind:'tool') are dispatched by name. */
 export type Item =
   | { kind: 'user'; text: string }
   | { kind: 'assistant'; text: string; thinking?: string }
-  | { kind: 'tool'; id: string; name: string; summary: string; status: 'running' | 'ok' | 'error'; preview?: string }
+  | { kind: 'tool'; id: string; name: string; summary: string; status: 'running' | 'ok' | 'error'; preview?: string; display?: ToolDisplay }
   | { kind: 'memory'; text: string }
   | { kind: 'compacted'; text: string }
 

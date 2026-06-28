@@ -7,11 +7,15 @@
 
 // ── Internal message model (typed content blocks) ───────────────────────────────────────
 // Grows in Phase 3+. In Phase 0 only `text` is exercised.
+// A generic UI rendering hint a tool can attach to its result (M2). The engine just passes it through; the
+// FRONTEND interprets it (e.g. a file-edit shows a diff card instead of a plain output preview).
+export type ToolDisplay = { kind: 'fileEdit'; path: string; op: 'create' | 'edit' | 'overwrite'; diff: string }
+
 export type ContentBlock =
   | { type: 'text'; text: string }
   | { type: 'thinking'; thinking: string }
   | { type: 'tool_use'; id: string; name: string; input: unknown }
-  | { type: 'tool_result'; tool_use_id: string; content: string; isError?: boolean }
+  | { type: 'tool_result'; tool_use_id: string; content: string; isError?: boolean; display?: ToolDisplay }
 
 export type Message =
   | { role: 'user'; content: string | ContentBlock[] }
@@ -27,7 +31,7 @@ export type ActivityEvent =
   | { type: 'toolStart'; id: string; name: string; summary: string } // a tool is about to run (Phase 4)
   | { type: 'permission'; id: string; tool: string; detail: string } // a write needs approval; loop BLOCKS until respondPermission (Phase 7)
   | { type: 'toolProgress'; id: string; chunk: string } // live output from a running tool, e.g. Bash stdout (Phase 8)
-  | { type: 'toolResult'; id: string; ok: boolean; preview: string } // a tool finished (Phase 4)
+  | { type: 'toolResult'; id: string; ok: boolean; preview: string; display?: ToolDisplay } // a tool finished (Phase 4; M2 display hint)
   | { type: 'message'; message: Message } // the finalized answer (authoritative; UI commits it)
   | { type: 'turnDone'; steps: number }
   | { type: 'memory'; scope: string; text: string } // Phase 10: a fact auto-saved by self-curation (UI marker)

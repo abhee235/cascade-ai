@@ -2,9 +2,10 @@
 
 
 import { z } from 'zod'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, resolve } from 'node:path'
 import type { Tool } from '../Tool'
+import { lineDiff } from '../../utils/diff'
 
 const inputSchema = z.object({
   file_path: z.string().describe('Path to the file to write, relative to the workspace or absolute.'),
@@ -22,9 +23,18 @@ export const WriteTool: Tool<z.infer<typeof inputSchema>> = {
   async call(input, ctx) {
     const path = isAbsolute(input.file_path) ? input.file_path : resolve(ctx.cwd, input.file_path)
     try {
+      const before = await readFile(path, 'utf8').catch(() => undefined) // undefined ⇒ new file
       await mkdir(dirname(path), { recursive: true }) // create parent dirs
       await writeFile(path, input.content, 'utf8')
-      return { content: `Wrote ${input.content.length} chars to ${input.file_path}` }
+      return {
+        content: `Wrote ${input.content.length} chars to ${input.file_path}`,
+        display: {
+          kind: 'fileEdit',
+          path: input.file_path,
+          op: before === undefined ? 'create' : 'overwrite',
+          diff: lineDiff(before ?? '', input.content),
+        },
+      }
     } catch (e) {
       // Return the error so the model can fix the path/retry (self-correction) — don't throw.
       return {

@@ -145,8 +145,9 @@ export async function* scheduleTools(
       byId.set(tu.id, block)
       const isError = block.type === 'tool_result' && !!block.isError
       const content = block.type === 'tool_result' ? block.content : ''
+      const display = block.type === 'tool_result' ? block.display : undefined
       tracer.event({ t: 'tool_result', id: tu.id, name: tu.name, ok: !isError, ms, content })
-      yield { type: 'toolResult', id: tu.id, ok: !isError, preview: content.slice(0, 200) }
+      yield { type: 'toolResult', id: tu.id, ok: !isError, preview: content.slice(0, 200), display }
     }
   }
 

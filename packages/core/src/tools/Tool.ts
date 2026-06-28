@@ -39,6 +39,8 @@ export interface ToolResult {
   content: string
   /** True if the tool failed — the model sees the error and can self-correct (Phase 5 lesson). */
   isError?: boolean
+  /** M2: a generic UI rendering hint (e.g. a file-edit diff) — passed through to the frontend, not the model. */
+  display?: import('../protocol').ToolDisplay
 }
 
 export interface Tool<I = unknown> {

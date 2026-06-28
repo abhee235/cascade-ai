@@ -3,7 +3,7 @@ import { Streamdown } from 'streamdown'
 import { mermaid } from '@streamdown/mermaid'
 import { createMathPlugin } from '@streamdown/math'
 import { createCodePlugin } from '@streamdown/code'
-import type { ActivityEvent, Message } from '@cascade/core'
+import type { ActivityEvent, Message, ToolDisplay } from '@cascade/core'
 
 // VS Code injects this into the webview global scope.
 declare function acquireVsCodeApi(): { postMessage(msg: unknown): void }
@@ -36,11 +36,28 @@ function Md({ children }: { children: string }) {
   return <Streamdown plugins={mdPlugins}>{normalizeMath(children)}</Streamdown>
 }
 
+/** Inline unified-diff for a file edit (shown right in the panel). */
+function DiffBlock({ diff }: { diff: string }) {
+  return (
+    <div style={styles.diffBlock}>
+      {diff.split('\n').map((line, i) => {
+        const c = line[0]
+        const style = c === '+' ? styles.diffAdd : c === '-' ? styles.diffDel : styles.diffCtx
+        return (
+          <div key={i} style={style}>
+            {line || ' '}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // Transcript items: user/assistant messages and tool cards, interleaved in order.
 type Item =
   | { kind: 'user'; text: string }
   | { kind: 'assistant'; text: string; thinking?: string }
-  | { kind: 'tool'; id: string; name: string; summary: string; status: 'running' | 'ok' | 'error'; preview?: string }
+  | { kind: 'tool'; id: string; name: string; summary: string; status: 'running' | 'ok' | 'error'; preview?: string; display?: ToolDisplay }
   | { kind: 'memory'; text: string }
   | { kind: 'compacted'; text: string }
 
@@ -153,7 +170,7 @@ export function App() {
           setItems((it) =>
             it.map((x) =>
               x.kind === 'tool' && x.id === event.id
-                ? { ...x, status: event.ok ? 'ok' : 'error', preview: event.preview }
+                ? { ...x, status: event.ok ? 'ok' : 'error', preview: event.preview, display: event.display }
                 : x,
             ),
           )
@@ -411,6 +428,18 @@ export function App() {
             <div key={i} style={styles.compactMarker}>
               🗜 Context compacted — {it.text}
             </div>
+          ) : it.kind === 'tool' && it.display?.kind === 'fileEdit' ? (
+            // File edit → an inline diff (in the extension panel).
+            <div key={i} style={styles.toolCard}>
+              <div style={styles.toolHeader}>
+                <span>{it.display.op === 'create' ? '➕' : '✎'}</span>
+                <span style={styles.toolName}>{it.display.path}</span>
+                <span style={styles.toolSummary}>
+                  {it.display.op === 'create' ? 'created' : it.display.op === 'overwrite' ? 'rewrote' : 'edited'}
+                </span>
+              </div>
+              <DiffBlock diff={it.display.diff} />
+            </div>
           ) : it.kind === 'tool' ? (
             <div key={i} style={styles.toolCard}>
               <div style={styles.toolHeader}>
@@ -666,6 +695,28 @@ const styles: Record<string, React.CSSProperties> = {
     maxHeight: 120,
     overflow: 'auto',
   },
+  // Inline file-edit diff (extension panel)
+  diffBlock: {
+    borderTop: '1px solid var(--vscode-panel-border)',
+    fontFamily: 'var(--vscode-editor-font-family, monospace)',
+    fontSize: 11,
+    lineHeight: 1.5,
+    maxHeight: 320,
+    overflow: 'auto',
+  },
+  diffAdd: {
+    whiteSpace: 'pre-wrap',
+    padding: '0 10px',
+    color: 'var(--vscode-gitDecoration-addedResourceForeground, var(--vscode-charts-green, #3a3))',
+    background: 'var(--vscode-diffEditor-insertedTextBackground, rgba(0,200,0,0.10))',
+  },
+  diffDel: {
+    whiteSpace: 'pre-wrap',
+    padding: '0 10px',
+    color: 'var(--vscode-gitDecoration-deletedResourceForeground, var(--vscode-charts-red, #c33))',
+    background: 'var(--vscode-diffEditor-removedTextBackground, rgba(200,0,0,0.10))',
+  },
+  diffCtx: { whiteSpace: 'pre-wrap', padding: '0 10px', opacity: 0.65 },
   composer: { position: 'relative', display: 'flex', gap: 6, padding: 8, borderTop: '1px solid var(--vscode-panel-border)' },
   input: {
     flex: 1,
