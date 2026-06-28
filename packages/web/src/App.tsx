@@ -4,14 +4,26 @@ import { useStore } from './lib/store'
 import { AppLayout } from './components/layout/AppLayout'
 import { TooltipProvider } from '@/components/ui/tooltip'
 
-const WS_URL = `ws://${location.hostname}:4319`
+const SERVER = `${location.hostname}:4319`
+
+// Fetch the per-run auth token (CORS-guarded to our origin) and build the tokenized WS URL. Re-run before each
+// (re)connect so a server restart's new token is picked up (M7 security). A cross-site page can't read /token.
+async function resolveWsUrl(): Promise<string> {
+  let token = ''
+  try {
+    token = (await (await fetch(`http://${SERVER}/token`)).json()).token ?? ''
+  } catch {
+    /* server not up yet — connect without a token (a no-origin client is allowed; a browser will be rejected) */
+  }
+  return `ws://${SERVER}/?token=${encodeURIComponent(token)}`
+}
 
 export function App() {
   useEffect(() => {
     const { handleEvent, setConnected, setSend, initRouter, reopenActive } = useStore.getState()
     // On every (re)connect, re-assert the active project so the new server connection knows which project
     // this client is on (a fresh connection starts with no active project).
-    const client = new WsClient(WS_URL, handleEvent, (connected) => {
+    const client = new WsClient(resolveWsUrl, handleEvent, (connected) => {
       setConnected(connected)
       if (connected) reopenActive()
     })

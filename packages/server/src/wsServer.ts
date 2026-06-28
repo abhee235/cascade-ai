@@ -10,6 +10,8 @@
 
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { randomBytes } from 'node:crypto'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { CascadeSession, InboundMessage } from '@cascade/core'
 import type { BuilderCommand } from '@cascade/app-protocol'
@@ -30,6 +32,22 @@ const PREVIEW_PORT = Number(process.env.CASCADE_PREVIEW_PORT ?? 4320) // M5.2: s
 const MODEL = process.env.CASCADE_MODEL ?? 'qwen2.5-coder:latest'
 const BASE_URL = process.env.CASCADE_BASE_URL || undefined
 const PROJECTS_ROOT = process.env.CASCADE_PROJECTS_ROOT || join(process.cwd(), 'cascade-projects')
+
+// ── Security (M7) ──────────────────────────────────────────────────────────────────────────────────────
+// Bind to localhost only by default (the `ws` `{ port }` form binds ALL interfaces — LAN-exposed). Override
+// with CASCADE_HOST only when you knowingly want remote access (then also set CASCADE_ALLOWED_ORIGINS).
+const HOST = process.env.CASCADE_HOST ?? '127.0.0.1'
+// Browser clients must come from one of these origins (the Vite web app). A WebSocket is NOT protected by
+// CORS/same-origin, so without this check ANY website you visit could open ws://127.0.0.1:4319 and drive the
+// agent / a terminal (Cross-Site WebSocket Hijacking). Browsers always send a truthful Origin header.
+const ALLOWED_ORIGINS = new Set([
+  ...(process.env.CASCADE_ALLOWED_ORIGINS?.split(',').map((s) => s.trim()).filter(Boolean) ?? []),
+  'http://localhost:5319',
+  'http://127.0.0.1:5319',
+])
+// A per-run secret the legit web app fetches from GET /token (CORS-guarded to ALLOWED_ORIGINS, so a cross-site
+// page can't read it) and presents as ?token= on the WS URL — defense-in-depth alongside the Origin check.
+const WS_TOKEN = randomBytes(24).toString('hex')
 
 /**
  * Wire one WebSocket to the ProjectManager. Inbound JSON drives whichever project the connection has
@@ -250,6 +268,34 @@ export function handleConnection(
   })
 }
 
+/** HTTP handler on the WS port: GET /token returns the per-run secret, CORS-restricted to allowed origins
+ *  (so a cross-site page cannot READ it). Everything else is WebSocket-only. */
+function handleHttp(req: IncomingMessage, res: ServerResponse): void {
+  const origin = req.headers.origin
+  if (req.method === 'GET' && (req.url ?? '').startsWith('/token')) {
+    if (origin && ALLOWED_ORIGINS.has(origin)) res.setHeader('Access-Control-Allow-Origin', origin)
+    res.setHeader('Content-Type', 'application/json')
+    res.end(JSON.stringify({ token: WS_TOKEN }))
+    return
+  }
+  res.writeHead(426, { 'Content-Type': 'text/plain' })
+  res.end('Upgrade Required: this is a WebSocket endpoint')
+}
+
+/** Validate the WS upgrade. Browser clients (always send Origin) must be an allowed origin AND present the
+ *  token — this blocks Cross-Site WebSocket Hijacking. No-Origin clients (Node tests/CLI) are trusted local
+ *  tooling and allowed without a token. */
+function verifyWsClient(
+  info: { origin?: string; req: IncomingMessage },
+  cb: (ok: boolean, code?: number, message?: string) => void,
+): void {
+  const origin = info.origin ?? info.req.headers.origin
+  if (!origin) return cb(true) // non-browser client — cannot be a CSWSH victim
+  if (!ALLOWED_ORIGINS.has(origin)) return cb(false, 403, 'Forbidden origin')
+  const token = new URL(info.req.url ?? '/', 'http://localhost').searchParams.get('token')
+  return token === WS_TOKEN ? cb(true) : cb(false, 401, 'Invalid token')
+}
+
 async function start() {
   // 13.3: isolate each project's command execution in its own Docker container when Docker is available.
   // Opt out with CASCADE_SANDBOX=off. Without Docker we fall back to HOST exec (usable, but not isolated).
@@ -270,15 +316,19 @@ async function start() {
   previewProxy?.listen()
   const preview = new PreviewManager(previewProxy ? PREVIEW_PORT : undefined)
   const versions = new VersionManager() // M6: git checkpoints/restore (stateless; runs git in each project dir)
-  const wss = new WebSocketServer({ port: PORT })
+  // M7 security: an explicit http.Server so we can bind localhost, serve the token over CORS, and validate the
+  // WS upgrade's Origin + token (see handleHttp / verifyWsClient).
+  const httpServer = createServer(handleHttp)
+  const wss = new WebSocketServer({ server: httpServer, verifyClient: verifyWsClient })
   wss.on('connection', (ws) => handleConnection(ws, manager, preview, previewProxy, PREVIEW_PORT, versions))
+  httpServer.listen(PORT, HOST)
   // Graceful exit (Ctrl-C / SIGTERM): dispose sessions + remove this run's sandbox containers. (A hard
   // SIGKILL skips this — the startup sweep above is the backstop.)
   const shutdown = () => void Promise.allSettled([manager.dispose(), sweepSandboxContainers()]).finally(() => process.exit(0))
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
   console.log(
-    `Cascade server listening on ws://127.0.0.1:${PORT}  (model: ${MODEL}, projects: ${PROJECTS_ROOT}, sandbox: ${hasDocker ? 'docker' : 'host'})`,
+    `Cascade server listening on ws://${HOST}:${PORT}  (model: ${MODEL}, projects: ${PROJECTS_ROOT}, sandbox: ${hasDocker ? 'docker' : 'host'})`,
   )
   if (sandboxEnabled && !hasDocker)
     console.warn('⚠️  Docker not available — agent commands run on the HOST (no isolation). Install/start Docker Desktop for per-project sandboxing.')

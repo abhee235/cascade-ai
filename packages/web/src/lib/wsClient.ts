@@ -15,14 +15,23 @@ export class WsClient {
   private queue: WireMessage[] = [] // messages enqueued while the socket isn't OPEN; flushed on (re)open
   private closed = false // set by close() so an intentional teardown doesn't reconnect
   constructor(
-    private readonly url: string,
+    // Re-resolved before EACH (re)connect so we pick up a fresh per-run auth token after a server restart (M7).
+    private readonly urlProvider: () => Promise<string>,
     private readonly onEvent: (e: WireEvent) => void,
     private readonly onConnected: (connected: boolean) => void,
   ) {}
 
-  connect() {
+  async connect() {
     if (this.closed) return
-    const ws = new WebSocket(this.url)
+    let url: string
+    try {
+      url = await this.urlProvider()
+    } catch {
+      if (!this.closed) setTimeout(() => this.connect(), 1000) // server/token not ready — retry
+      return
+    }
+    if (this.closed) return
+    const ws = new WebSocket(url)
     this.ws = ws
     ws.onopen = () => {
       // Flush anything queued while connecting (e.g. the project `open` sent during the initial load), so it

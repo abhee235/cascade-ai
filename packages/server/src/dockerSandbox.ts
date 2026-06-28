@@ -37,6 +37,18 @@ export async function dockerAvailable(): Promise<boolean> {
 /** The dev-server port the container publishes (the scaffold runs `vite --host --port 5173`). */
 const DEV_PORT = Number(process.env.CASCADE_DEV_PORT ?? 5173)
 
+// M7 security: confine the sandbox so a terminal user — or a CSWSH hijacker — can't exhaust or escape the host.
+// We add resource + privilege limits that DON'T break the dev workflow: we deliberately skip `--read-only`
+// (npm/tmp writes), `--network none` (npm install needs the registry) and non-root (bind-mount perms).
+// Env-overridable for tuning. Identical flags on macOS/Linux/Windows.
+const HARDENING = [
+  '--pids-limit', process.env.CASCADE_PIDS ?? '512', // fork-bomb cap
+  '--memory', process.env.CASCADE_MEM ?? '2g', // OOM-DoS cap (generous so builds don't get killed)
+  '--cpus', process.env.CASCADE_CPUS ?? '2', // runaway-compute cap
+  '--security-opt', 'no-new-privileges', // block setuid privilege escalation
+  '--cap-drop', 'ALL', // node/npm/vite need no Linux capabilities
+]
+
 /** Label stamped on every sandbox container, so we can sweep our own (and only our own) leftovers. */
 const SANDBOX_LABEL = 'cascade.sandbox'
 
@@ -75,7 +87,7 @@ export class DockerSandbox implements Sandbox {
     // the agent's edits + Vite still see them.
     const nmVolume = `cascade-nm-${(projectDir.split('/').pop() || 'project').replace(/[^a-zA-Z0-9_.-]/g, '-')}`
     this.starting = dockerRun([
-      'run', '-d', '--rm', '--label', `${SANDBOX_LABEL}=1`, '-w', '/workspace', '-v', mount, '-v', `${nmVolume}:/workspace/node_modules`, '-p', `0:${DEV_PORT}`, this.image, 'sh', '-c', 'tail -f /dev/null',
+      'run', '-d', '--rm', ...HARDENING, '--label', `${SANDBOX_LABEL}=1`, '-w', '/workspace', '-v', mount, '-v', `${nmVolume}:/workspace/node_modules`, '-p', `0:${DEV_PORT}`, this.image, 'sh', '-c', 'tail -f /dev/null',
     ]).then(async ({ output, exitCode }) => {
       if (exitCode !== 0) throw new Error(`docker run failed: ${output.trim() || 'unknown error'}`)
       const id = output.trim().split('\n').pop()!.trim()
