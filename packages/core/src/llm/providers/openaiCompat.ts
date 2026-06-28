@@ -35,13 +35,15 @@ export function toOpenAIMessages(messages: Message[], system?: string): OpenAIMe
     if (m.role === 'user') {
       // tool_result blocks become role:'tool' messages keyed by the tool_use id.
       for (const b of blocks) {
-        if (b.type === 'tool_result') out.push({ role: 'tool', tool_call_id: b.tool_use_id, content: b.content })
+        if (b.type === 'tool_result') out.push({ role: 'tool', tool_call_id: b.tool_use_id, content: b.content ?? '' })
       }
       const text = textOf(blocks)
       if (text) out.push({ role: 'user', content: text })
     } else {
       const toolUses = blocks.filter((b): b is Extract<ContentBlock, { type: 'tool_use' }> => b.type === 'tool_use')
-      const msg: OpenAIMessage = { role: 'assistant', content: textOf(blocks) || null }
+      // Use '' (not null) for a tool-call message with no text: the OpenAI spec allows null content here,
+      // but Ollama (>=0.30.x) rejects it with HTTP 400 "invalid message content type: <nil>".
+      const msg: OpenAIMessage = { role: 'assistant', content: textOf(blocks) }
       if (toolUses.length) {
         msg.tool_calls = toolUses.map((tu) => ({
           id: tu.id,
