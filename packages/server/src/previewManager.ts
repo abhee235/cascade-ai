@@ -36,8 +36,13 @@ export class PreviewManager {
       }
 
       set({ status: 'starting' })
-      await sandbox.execDetached('npm run dev')
-      const url = `http://localhost:${await sandbox.getHostPort()}`
+      // The host port must be known BEFORE starting dev: Vite bakes the HMR websocket port into the client,
+      // and the iframe is served on this (random) published host port — not the container's 5173. We pass it
+      // as VITE_HMR_CLIENT_PORT so the HMR socket connects back through the right port. CHOKIDAR_USEPOLLING
+      // makes Vite detect file edits on the Windows Docker bind mount (inotify events don't cross it).
+      const hostPort = await sandbox.getHostPort()
+      await sandbox.execDetached(`CHOKIDAR_USEPOLLING=true VITE_HMR_CLIENT_PORT=${hostPort} npm run dev`)
+      const url = `http://localhost:${hostPort}`
       const up = await waitForHttp(url, 60_000)
       set(up ? { status: 'running', url } : { status: 'error' })
     } catch {
