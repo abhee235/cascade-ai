@@ -18,6 +18,7 @@ import { DockerSandbox, dockerAvailable, sweepSandboxContainers } from './docker
 import { listTemplates } from './templates.js'
 import { readDiff, readFile, readTree } from './fileService.js'
 import { PreviewManager } from './previewManager.js'
+import { runCheck } from './checkProject.js'
 
 /** What a connection can receive: a core session message OR an app/builder command. */
 type Inbound = InboundMessage | BuilderCommand
@@ -148,6 +149,18 @@ export function handleConnection(ws: WebSocket, manager: ProjectManager, preview
             // No Docker ⇒ no isolated dev server. (Running on the host is out of scope for v1.)
             send({ type: 'preview', status: 'error' })
           }
+          break
+        }
+        case 'check': { // M5.3: run a type-check in the sandbox and return structured problems
+          if (!activeId) break
+          const sandbox = manager.sandboxOf(activeId)
+          if (!(sandbox instanceof DockerSandbox)) {
+            send({ type: 'problems', problems: [], checking: false })
+            break
+          }
+          send({ type: 'problems', problems: [], checking: true })
+          const problems = await runCheck(sandbox)
+          send({ type: 'problems', problems, checking: false })
           break
         }
         case 'permission':

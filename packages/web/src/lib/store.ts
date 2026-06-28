@@ -8,7 +8,7 @@ import type { WireEvent, WireMessage } from './wsClient'
 import { extractMessage, type Item, type Page, type PreviewState, type Recovering, type RightTab, type Streaming } from './types'
 import { StreamingOptimizer } from './streamingOptimizer'
 import { applyTheme, getInitialTheme, type Theme } from './theme'
-import type { FileNode, ProjectInfo, TemplateInfo } from '@cascade/app-protocol'
+import type { FileNode, Problem, ProjectInfo, TemplateInfo } from '@cascade/app-protocol'
 
 interface UiState {
   // routing (lightweight in-store router)
@@ -35,6 +35,9 @@ interface UiState {
   preview: PreviewState | null
   // dev-server console logs (M5), newest last; capped to keep memory bounded
   logs: string[]
+  // type-check problems (M5.3) + whether a check is currently running
+  problems: Problem[]
+  checking: boolean
   // shell
   sidebarCollapsed: boolean
   rightTab: RightTab
@@ -64,6 +67,8 @@ interface UiState {
   startPreview: () => void
   stopPreview: () => void
   clearLogs: () => void
+  runCheck: () => void // M5.3: ask the server to type-check the project
+  fixProblems: () => void // M5.3: hand the current problems to the agent to fix
 }
 
 export const useStore = create<UiState>((set, get) => {
@@ -132,6 +137,8 @@ export const useStore = create<UiState>((set, get) => {
     codeView: 'code',
     preview: null,
     logs: [],
+    problems: [],
+    checking: false,
     sidebarCollapsed: false,
     rightTab: 'preview',
     theme: getInitialTheme(),
@@ -256,6 +263,9 @@ export const useStore = create<UiState>((set, get) => {
         case 'log':
           set((s) => ({ logs: [...s.logs, e.line].slice(-2000) }))
           break
+        case 'problems':
+          set({ problems: e.problems, checking: e.checking ?? false })
+          break
       }
     },
 
@@ -277,7 +287,7 @@ export const useStore = create<UiState>((set, get) => {
     openProject: (id) => {
       if (id === get().activeId) return
       // Set activeId optimistically so submit() works before the server's `projects` snapshot round-trips.
-      set({ activeId: id, items: [], streaming: null, status: null, busy: false, fileTree: [], openFile: null, fileDiff: null, codeView: 'code', preview: null, logs: [] })
+      set({ activeId: id, items: [], streaming: null, status: null, busy: false, fileTree: [], openFile: null, fileDiff: null, codeView: 'code', preview: null, logs: [], problems: [], checking: false })
       get().send({ type: 'project', action: 'open', id })
     },
     deleteProject: (id) => {
@@ -335,6 +345,17 @@ export const useStore = create<UiState>((set, get) => {
       set({ preview: null })
     },
     clearLogs: () => set({ logs: [] }),
+    runCheck: () => {
+      if (!get().activeId) return
+      set({ checking: true, problems: [] })
+      get().send({ type: 'check' })
+    },
+    fixProblems: () => {
+      const { problems, submit } = get()
+      if (!problems.length) return
+      const list = problems.map((p) => `- ${p.file}(${p.line},${p.col}): ${p.message}`).join('\n')
+      submit(`Fix these TypeScript errors so the project type-checks cleanly:\n${list}`)
+    },
     toggleTheme: () => {
       const theme: Theme = get().theme === 'dark' ? 'light' : 'dark'
       applyTheme(theme)

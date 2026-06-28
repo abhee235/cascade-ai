@@ -21,6 +21,9 @@ export type TemplateInfo = { id: string; name: string; description: string }
  *  the wire. Dirs carry `children`; files don't. */
 export type FileNode = { name: string; path: string; type: 'file' | 'dir'; children?: FileNode[] }
 
+/** A build/type-check problem (M5.3). `file` is RELATIVE to the project root. */
+export type Problem = { file: string; line: number; col: number; message: string }
+
 /** Builder → client. App/workspace-level events, distinct from a session's ActivityEvents.
  *  Future variants (added in their phases) — keep the discriminated union open:
  *    | { type: 'preview';  projectId: string; url: string; status: 'installing' | 'running' | 'error' }
@@ -37,6 +40,7 @@ export type BuilderEvent =
   | { type: 'fileDiff'; path: string; original: string; modified: string } // a file's diff vs last commit (M2; Monaco DiffEditor)
   | { type: 'preview'; status: 'installing' | 'starting' | 'running' | 'error' | 'stopped'; url?: string } // live preview (M3)
   | { type: 'log'; line: string } // a dev-server stdout/stderr line for the Console pane (M5)
+  | { type: 'problems'; problems: Problem[]; checking?: boolean } // type-check results for the Problems panel (M5.3)
 
 /** Client → builder. App/workspace-level commands, distinct from a session's InboundMessages.
  *  Future variants (added in their phases): preview start/stop/refresh, terminal input/resize,
@@ -46,3 +50,4 @@ export type BuilderCommand =
   | { type: 'files'; action: 'list' } // request the active project's file tree (M4)
   | { type: 'file'; action: 'read' | 'diff'; path: string } // read a file (M4) or get its diff vs last commit (M2)
   | { type: 'preview'; action: 'start' | 'stop' } // start/stop the active project's live preview (M3)
+  | { type: 'check' } // run a type-check; results come back as a `problems` event (M5.3)
