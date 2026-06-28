@@ -18,6 +18,8 @@ import {
   ChevronRight,
   XCircle,
   Loader2,
+  SquareArrowOutUpRight,
+  Layers,
   type LucideIcon,
 } from 'lucide-react'
 import type { ToolDisplay } from '@cascade/core'
@@ -35,30 +37,84 @@ function diffStat(diff: string): { added: number; removed: number } {
   return { added, removed }
 }
 
-/** Compact, clickable file-edit card: verb + filename + path + +/− stat. The actual diff
- *  opens in the Code pane (Monaco DiffEditor) on click — not inline in the chat. */
+/** Renders a unified diff inline with colored add/remove/context lines (GitHub-style, compact). Caps very large
+ *  diffs so the chat stays scannable. */
+function DiffView({ diff }: { diff: string }) {
+  const all = diff.split('\n')
+  const CAP = 240
+  const lines = all.slice(0, CAP)
+  return (
+    <div className="max-h-72 overflow-auto border-t border-border bg-background/50 font-mono text-[11px] leading-[1.45]">
+      {lines.map((l, i) => {
+        const c = l[0]
+        if (l.startsWith('+++') || l.startsWith('---')) return null // file headers — redundant with the card header
+        const cls =
+          c === '+' ? 'bg-green-500/10 text-green-600 dark:text-green-400' : c === '-' ? 'bg-red-500/10 text-red-600 dark:text-red-400' : l.startsWith('@@') ? 'text-sky-600 dark:text-sky-400' : 'text-muted-foreground'
+        return (
+          <div key={i} className={cn('whitespace-pre-wrap px-3', cls)}>
+            {l || ' '}
+          </div>
+        )
+      })}
+      {all.length > CAP && <div className="px-3 py-1 text-muted-foreground/70">… {all.length - CAP} more lines</div>}
+    </div>
+  )
+}
+
+/** File-edit card: verb + filename + path + +/− stat, expanding to an INLINE diff. A side
+ *  action opens the same diff in the Code pane (Monaco) for a fuller view. */
 function FileEditCard({ display }: { display: ToolDisplay }) {
   const openFileInCode = useStore((s) => s.openFileInCode)
+  const [open, setOpen] = useState(false)
   const Icon = display.op === 'edit' ? FilePen : FilePlus
   const { added, removed } = diffStat(display.diff)
   const name = display.path.split('/').pop()
   const dir = display.path.includes('/') ? display.path.slice(0, display.path.lastIndexOf('/')) : ''
   return (
-    <button
-      onClick={() => openFileInCode(display.path, 'diff')}
-      title="Open diff in the Code pane"
-      className="my-1.5 flex w-full items-center gap-2 rounded-md border border-border bg-card/60 px-3 py-1.5 text-xs hover:bg-accent/50"
-    >
-      <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-      <span className="shrink-0 text-muted-foreground">{display.op === 'create' ? 'Created' : display.op === 'overwrite' ? 'Rewrote' : 'Edited'}</span>
-      <span className="font-mono font-medium">{name}</span>
-      {dir && <span className="truncate font-mono text-muted-foreground/70">{dir}</span>}
-      <span className="ml-auto shrink-0 font-mono text-[10px]">
-        {added > 0 && <span className="text-green-500">+{added}</span>}
-        {added > 0 && removed > 0 && ' '}
-        {removed > 0 && <span className="text-red-500">−{removed}</span>}
-      </span>
-    </button>
+    <div className="my-1.5 overflow-hidden rounded-md border border-border bg-card/60">
+      <div className="flex items-center gap-2 px-3 py-1.5 text-xs">
+        <button type="button" onClick={() => setOpen((o) => !o)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+          <ChevronRight className={cn('h-3 w-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
+          <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span className="shrink-0 text-muted-foreground">{display.op === 'create' ? 'Created' : display.op === 'overwrite' ? 'Rewrote' : 'Edited'}</span>
+          <span className="font-mono font-medium">{name}</span>
+          {dir && <span className="truncate font-mono text-muted-foreground/70">{dir}</span>}
+        </button>
+        <span className="shrink-0 font-mono text-[10px]">
+          {added > 0 && <span className="text-green-500">+{added}</span>}
+          {added > 0 && removed > 0 && ' '}
+          {removed > 0 && <span className="text-red-500">−{removed}</span>}
+        </span>
+        <button
+          type="button"
+          title="Open in the Code pane"
+          onClick={() => openFileInCode(display.path, 'diff')}
+          className="shrink-0 text-muted-foreground hover:text-foreground"
+        >
+          <SquareArrowOutUpRight className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      {open && <DiffView diff={display.diff} />}
+    </div>
+  )
+}
+
+/** Bash/command card (terminal-style): the command on a dark header, live stdout streaming below, exit status. */
+function CommandCard({ item }: { item: Extract<Item, { kind: 'tool' }> }) {
+  const command = item.summary.replace(/^Running:\s*/, '')
+  const StatusIcon = item.status === 'running' ? Loader2 : item.status === 'ok' ? CheckCircle2 : XCircle
+  return (
+    <div className="my-1.5 overflow-hidden rounded-md border border-border">
+      <div className="flex items-center gap-2 bg-neutral-900 px-3 py-1.5 font-mono text-[11px] text-neutral-100">
+        <Terminal className="h-3.5 w-3.5 shrink-0 text-neutral-400" />
+        <span className="shrink-0 text-green-400">$</span>
+        <span className="min-w-0 flex-1 truncate">{command}</span>
+        <StatusIcon className={cn('h-3.5 w-3.5 shrink-0', item.status === 'running' && 'animate-spin text-neutral-400', item.status === 'ok' && 'text-green-500', item.status === 'error' && 'text-red-500')} />
+      </div>
+      {item.preview && (
+        <pre className="max-h-56 overflow-auto whitespace-pre-wrap bg-neutral-950 px-3 py-1.5 font-mono text-[11px] text-neutral-300">{item.preview}</pre>
+      )}
+    </div>
   )
 }
 
@@ -135,6 +191,33 @@ function ToolCard({ item }: { item: Extract<Item, { kind: 'tool' }> }) {
   )
 }
 
+/** A turn's run of file edits, grouped into one reviewable "change set" with a +/− summary. */
+export function ChangeSet({ items }: { items: Extract<Item, { kind: 'tool' }>[] }) {
+  const [open, setOpen] = useState(true)
+  let added = 0
+  let removed = 0
+  for (const it of items) if (it.display?.kind === 'fileEdit') ((s) => ((added += s.added), (removed += s.removed)))(diffStat(it.display.diff))
+  return (
+    <div className="my-1.5 rounded-md border border-border bg-card/40">
+      <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-2 px-3 py-1.5 text-xs">
+        <ChevronRight className={cn('h-3 w-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
+        <Layers className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="font-medium">{items.length} files changed</span>
+        <span className="ml-auto shrink-0 font-mono text-[10px]">
+          <span className="text-green-500">+{added}</span> <span className="text-red-500">−{removed}</span>
+        </span>
+      </button>
+      {open && (
+        <div className="px-1.5 pb-1.5">
+          {items.map((it, i) => (
+            <ActivityCard key={i} item={it} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function ActivityCard({ item }: { item: Item }) {
   switch (item.kind) {
     case 'memory':
@@ -151,6 +234,7 @@ export function ActivityCard({ item }: { item: Item }) {
       )
     case 'tool': {
       if (item.display?.kind === 'fileEdit') return <FileEditCard display={item.display} />
+      if (item.name.toLowerCase() === 'bash') return <CommandCard item={item} />
       return <ToolCard item={item} />
     }
     default: {

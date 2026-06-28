@@ -2,9 +2,31 @@ import { useEffect, useRef, useState } from 'react'
 import { Streamdown } from 'streamdown'
 import { ArrowUp, FileText, Loader2, Paperclip, RefreshCw, Square, X } from 'lucide-react'
 import { useStore } from '@/lib/store'
-import { ActivityCard } from './ActivityCard'
+import type { Item } from '@/lib/types'
+import { ActivityCard, ChangeSet } from './ActivityCard'
 import { ChatHeader } from './ChatHeader'
 import { cn } from '@/lib/utils'
+
+const isFileEdit = (it: Item): it is Extract<Item, { kind: 'tool' }> => it.kind === 'tool' && it.display?.kind === 'fileEdit'
+
+// Render the transcript, collapsing a run of consecutive file edits into one "change set" card (a single edit
+// renders on its own). Everything else renders as an individual activity card.
+function renderTranscript(items: Item[]) {
+  const out: React.ReactNode[] = []
+  for (let i = 0; i < items.length; ) {
+    if (isFileEdit(items[i])) {
+      let j = i
+      while (j < items.length && isFileEdit(items[j])) j++
+      const run = items.slice(i, j) as Extract<Item, { kind: 'tool' }>[]
+      out.push(run.length > 1 ? <ChangeSet key={i} items={run} /> : <ActivityCard key={i} item={run[0]} />)
+      i = j
+    } else {
+      out.push(<ActivityCard key={i} item={items[i]} />)
+      i++
+    }
+  }
+  return out
+}
 
 // An attachment staged in the composer (M11): images go to the model as data-URIs; text/code files are
 // injected into the message as fenced context (works with any model).
@@ -82,9 +104,7 @@ export function ChatPanel() {
     <div className="flex h-full flex-col text-sm">
       <ChatHeader />
       <div className="flex-1 overflow-y-auto px-4 py-3">
-        {items.map((it, i) => (
-          <ActivityCard key={i} item={it} />
-        ))}
+        {renderTranscript(items)}
 
         {/* Live turn: while only thinking has arrived, show a "Thinking…" pill; once the answer text starts
             streaming, render it as plain flow (no role label) — matches the finished assistant style. */}
