@@ -4,10 +4,11 @@
 
 // BuilderPane.tsx — the top of the builder's right side: Preview · Code · Versions tabs. (Console/Problems/
 // Terminal/Ports live in the VS Code-style bottom panel — see BottomPanel.tsx.)
-import { Code2, Eye, History, type LucideIcon } from 'lucide-react'
+import { Code2, Eye, History, SquareTerminal, type LucideIcon } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useStore } from '@/lib/store'
 import type { RightTab } from '@/lib/types'
+import { cn } from '@/lib/utils'
 import { CodePane } from './CodePane'
 import { PreviewPane } from './PreviewPane'
 import { VersionsPane } from './VersionsPane'
@@ -19,7 +20,7 @@ const TABS: { id: RightTab; label: string; icon: LucideIcon; title: string; sub:
 ]
 
 export function BuilderPane() {
-  const { rightTab, setRightTab, activeId } = useStore()
+  const { rightTab, setRightTab, activeId, bottomOpen, toggleBottom, setBottomTab } = useStore()
 
   return (
     <Tabs
@@ -36,6 +37,18 @@ export function BuilderPane() {
             </TabsTrigger>
           ))}
         </TabsList>
+        {/* Toggle the bottom panel (Terminal/Problems/Output/Ports) from the top — the way to reopen it. */}
+        <button
+          type="button"
+          onClick={() => (bottomOpen ? toggleBottom() : setBottomTab('terminal'))}
+          title="Toggle panel (Ctrl+`)"
+          className={cn(
+            'ml-auto flex items-center gap-1.5 rounded px-2 py-1 text-sm transition-colors',
+            bottomOpen ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+          )}
+        >
+          <SquareTerminal className="h-4 w-4" /> Terminal
+        </button>
       </div>
 
       {TABS.map((t) =>

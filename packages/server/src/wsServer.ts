@@ -69,7 +69,11 @@ export function handleConnection(
   let active: CascadeSession | undefined
   let activeId: string | undefined
   let stopTail: (() => void) | undefined // M5: stops the Console log stream (tail) for this connection
-  let term: TerminalHandle | undefined // M7: the integrated terminal's PTY for this connection
+  const terms = new Map<string, TerminalHandle>() // M7: the connection's terminal sessions, keyed by id
+  const killAllTerms = () => {
+    for (const t of terms.values()) t.kill()
+    terms.clear()
+  }
 
   // Send a preview status to the client. When it's running, point the proxy at the container and hand the
   // client the STABLE proxy origin instead of the container's random port (M5.2).
@@ -136,8 +140,7 @@ export function handleConnection(
           } else if (msg.action === 'open' && msg.id) {
             stopTail?.() // detach the previous project's log stream before switching
             stopTail = undefined
-            term?.kill() // close the previous project's terminal too
-            term = undefined
+            killAllTerms() // close the previous project's terminals too
             active = manager.open(msg.id)
             activeId = msg.id
           }
@@ -229,33 +232,37 @@ export function handleConnection(
           }
           break
         }
-        case 'terminal': { // M7: open/close an interactive shell in the project's sandbox container
+        case 'terminal': { // M7: open/close an interactive shell (one of possibly several sessions)
           if (!activeId) break
           if (msg.action === 'stop') {
-            term?.kill()
-            term = undefined
+            terms.get(msg.id)?.kill()
+            terms.delete(msg.id)
             break
           }
           const sandbox = manager.sandboxOf(activeId)
           if (!(sandbox instanceof DockerSandbox)) break
-          term?.kill() // replace any existing shell on this connection
-          const id = await sandbox.getContainerId()
-          term = await createTerminal(
-            id,
-            { cols: msg.cols ?? 80, rows: msg.rows ?? 24 },
-            (data) => send({ type: 'terminalData', data }),
-            () => {
-              send({ type: 'terminalExit' })
-              term = undefined
-            },
+          terms.get(msg.id)?.kill() // replace if this id already had a shell
+          const containerId = await sandbox.getContainerId()
+          const sid = msg.id
+          terms.set(
+            sid,
+            await createTerminal(
+              containerId,
+              { cols: msg.cols ?? 80, rows: msg.rows ?? 24 },
+              (data) => send({ type: 'terminalData', id: sid, data }),
+              () => {
+                send({ type: 'terminalExit', id: sid })
+                terms.delete(sid)
+              },
+            ),
           )
           break
         }
         case 'terminalInput':
-          term?.write(msg.data)
+          terms.get(msg.id)?.write(msg.data)
           break
         case 'terminalResize':
-          term?.resize(msg.cols, msg.rows)
+          terms.get(msg.id)?.resize(msg.cols, msg.rows)
           break
         case 'permission':
           active?.respondPermission(msg.id, msg.decision)
@@ -295,8 +302,7 @@ export function handleConnection(
   ws.on('close', () => {
     stopTail?.() // end the Console log stream (the dev server itself stays up in the container)
     stopTail = undefined
-    term?.kill() // end the terminal shell (the container stays up)
-    term = undefined
+    killAllTerms() // end the terminal shells (the container stays up)
     active = undefined
     activeId = undefined
   })

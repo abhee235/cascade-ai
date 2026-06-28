@@ -1,7 +1,7 @@
-// TerminalPane.tsx — the integrated terminal (M7): an xterm.js view of a real `sh` running in the project's
-// sandbox container. Keystrokes stream to the PTY; output arrives as `terminalData` events and is written to
-// xterm IMPERATIVELY (the store exposes a `terminalSink` we register here). xterm.js is the same engine VS
-// Code uses, so it looks like the VS Code terminal. The theme follows the app's light/dark mode.
+// TerminalPane.tsx — one xterm.js terminal session (M7) bound to a server-side PTY in the sandbox container.
+// Keyed by session `id`; multiple can be mounted at once (only the active one is visible). Output arrives as
+// `terminalData` events routed to the per-session sink we register here. xterm.js is the same engine VS Code
+// uses, so it looks like the VS Code terminal; the palette follows the app's light/dark mode.
 
 import { useEffect, useRef } from 'react'
 import { Terminal, type ITheme } from '@xterm/xterm'
@@ -9,8 +9,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { useStore } from '@/lib/store'
 
-// xterm needs concrete colors (not CSS vars), so we keep palettes matched to our neutral theme tokens and
-// switch them with the app theme.
+// xterm needs concrete colors (not CSS vars), so we keep palettes matched to our neutral theme tokens.
 const DARK: ITheme = {
   background: '#1a1a1a',
   foreground: '#e4e4e7',
@@ -27,7 +26,7 @@ const LIGHT: ITheme = {
 }
 const themeFor = (t: string): ITheme => (t === 'dark' ? DARK : LIGHT)
 
-export function TerminalPane() {
+export function TerminalPane({ id }: { id: string }) {
   const ref = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const theme = useStore((s) => s.theme)
@@ -50,39 +49,41 @@ export function TerminalPane() {
     const fit = new FitAddon()
     term.loadAddon(fit) // only fit — NO clipboard(OSC 52)/image addons (untrusted-output risk)
     term.open(el)
-    try {
-      fit.fit()
-    } catch {
-      /* element may not be measured yet — the ResizeObserver fits once it is */
-    }
 
-    setTerminalSink((chunk) => term.write(chunk)) // server output → xterm
-    term.onData((d) => terminalInput(d)) // keystrokes → PTY (never filtered; confinement is the boundary)
-    startTerminal(term.cols, term.rows)
-
-    const ro = new ResizeObserver(() => {
+    const doFit = () => {
       try {
         fit.fit()
-        terminalResize(term.cols, term.rows)
       } catch {
-        /* ignore transient 0-size */
+        /* element not measured yet */
       }
+    }
+    // Fit AFTER layout so the last row isn't clipped (the container must have its real height first).
+    requestAnimationFrame(() => {
+      doFit()
+      setTerminalSink(id, (chunk) => term.write(chunk)) // server output → xterm
+      startTerminal(id, term.cols, term.rows) // size the PTY to the fitted terminal
+    })
+    term.onData((d) => terminalInput(id, d)) // keystrokes → PTY (never filtered; confinement is the boundary)
+
+    const ro = new ResizeObserver(() => {
+      doFit()
+      terminalResize(id, term.cols, term.rows)
     })
     ro.observe(el)
 
     return () => {
       ro.disconnect()
-      setTerminalSink(undefined)
-      stopTerminal()
+      setTerminalSink(id, undefined)
+      stopTerminal(id)
       termRef.current = null
       term.dispose()
     }
-  }, [])
+  }, [id])
 
   // Live-update the palette when the app theme toggles (without recreating the terminal).
   useEffect(() => {
     if (termRef.current) termRef.current.options.theme = themeFor(theme)
   }, [theme])
 
-  return <div ref={ref} className="h-full w-full overflow-hidden bg-background px-2 py-1" />
+  return <div ref={ref} className="h-full w-full overflow-hidden" />
 }

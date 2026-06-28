@@ -1,61 +1,59 @@
 // ProjectPage.tsx — the builder for the active project: chat ∣ (Preview/Code/Versions over a VS Code-style
-// bottom panel: Terminal/Problems/Output/Ports). Only reachable once a project is open.
+// bottom panel: Terminal/Problems/Output/Ports). The bottom panel is ALWAYS mounted — collapse/maximize change
+// its size, never its mount position — so terminal sessions survive every layout change.
 
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 import { useStore } from '@/lib/store'
+import { cn } from '@/lib/utils'
 import { SidebarTrigger } from '@/components/ui/sidebar'
 import { ChatPanel } from '@/components/chat/ChatPanel'
 import { BuilderPane } from '@/components/builder/BuilderPane'
 import { BottomPanel } from '@/components/builder/BottomPanel'
-import type { BottomTab } from '@/lib/types'
 import { HomePage } from './HomePage'
 
 const Handle = () => (
   <Separator className="w-px shrink-0 cursor-col-resize bg-border transition-colors hover:bg-ring data-[state=dragging]:bg-ring" />
 )
-const VHandle = () => (
-  <Separator className="h-px shrink-0 cursor-row-resize bg-border transition-colors hover:bg-ring data-[state=dragging]:bg-ring" />
-)
 
-// When the panel is hidden, a thin strip lets the user reopen it on a chosen tab (like VS Code's collapsed panel).
-function CollapsedBar() {
-  const setBottomTab = useStore((s) => s.setBottomTab)
-  return (
-    <div className="flex h-8 shrink-0 items-center gap-1 border-t border-border bg-card px-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-      {(['terminal', 'problems', 'output', 'ports'] as BottomTab[]).map((t) => (
-        <button key={t} type="button" onClick={() => setBottomTab(t)} className="px-2 py-0.5 transition-colors hover:text-foreground">
-          {t}
-        </button>
-      ))}
-    </div>
-  )
+// A vertical drag handle that resizes the bottom panel (height in px, clamped to the container).
+function VResize({ height, setHeight, containerRef }: { height: number; setHeight: (h: number) => void; containerRef: React.RefObject<HTMLDivElement | null> }) {
+  const onDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const startY = e.clientY
+    const startH = height
+    const max = (containerRef.current?.clientHeight ?? 800) - 140
+    const move = (ev: PointerEvent) => setHeight(Math.max(120, Math.min(max, startH + (startY - ev.clientY))))
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+  return <div onPointerDown={onDown} className="h-1 shrink-0 cursor-row-resize bg-border transition-colors hover:bg-ring" />
 }
 
-// The right side: Preview/Code/Versions over the collapsible/maximizable bottom panel.
 function BuilderArea() {
   const { bottomOpen, bottomMaximized } = useStore()
-  if (bottomMaximized) return <BottomPanel />
-  if (!bottomOpen) {
-    return (
-      <div className="flex h-full flex-col">
-        <div className="min-h-0 flex-1">
-          <BuilderPane />
-        </div>
-        <CollapsedBar />
-      </div>
-    )
-  }
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [bottomHeight, setBottomHeight] = useState(300)
+
   return (
-    <Group orientation="vertical" className="flex h-full flex-col">
-      <Panel minSize="15%">
+    <div ref={containerRef} className="flex h-full flex-col">
+      {/* Top builder (Preview/Code/Versions) — hidden (not unmounted) when the panel is maximized. */}
+      <div className={cn('min-h-0', bottomMaximized ? 'hidden' : 'flex-1')}>
         <BuilderPane />
-      </Panel>
-      <VHandle />
-      <Panel defaultSize="34%" minSize="10%" maxSize="85%">
+      </div>
+      {bottomOpen && !bottomMaximized && <VResize height={bottomHeight} setHeight={setBottomHeight} containerRef={containerRef} />}
+      {/* Bottom panel — ALWAYS mounted so terminal sessions persist; size/visibility is what changes. */}
+      <div
+        className={cn('min-h-0 overflow-hidden', !bottomOpen && !bottomMaximized && 'hidden', bottomMaximized && 'flex-1')}
+        style={bottomOpen && !bottomMaximized ? { height: bottomHeight } : undefined}
+      >
         <BottomPanel />
-      </Panel>
-    </Group>
+      </div>
+    </div>
   )
 }
 

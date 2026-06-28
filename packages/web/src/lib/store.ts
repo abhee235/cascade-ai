@@ -44,7 +44,8 @@ interface UiState {
   bottomTab: BottomTab
   bottomOpen: boolean
   bottomMaximized: boolean
-  terminalSink?: (chunk: string) => void // xterm.write, registered by TerminalPane (data is imperative, not state)
+  terminals: string[] // open terminal session ids (order = tab order)
+  activeTerminalId: string | null
   // shell
   sidebarCollapsed: boolean
   rightTab: RightTab
@@ -81,11 +82,14 @@ interface UiState {
   setBottomTab: (t: BottomTab) => void
   toggleBottom: () => void
   toggleBottomMax: () => void
-  setTerminalSink: (fn: ((chunk: string) => void) | undefined) => void
-  startTerminal: (cols: number, rows: number) => void
-  stopTerminal: () => void
-  terminalInput: (data: string) => void
-  terminalResize: (cols: number, rows: number) => void
+  newTerminal: () => void // add a new terminal session + make it active
+  closeTerminal: (id: string) => void
+  setActiveTerminal: (id: string) => void
+  setTerminalSink: (id: string, fn: ((chunk: string) => void) | undefined) => void // xterm.write per session
+  startTerminal: (id: string, cols: number, rows: number) => void
+  stopTerminal: (id: string) => void
+  terminalInput: (id: string, data: string) => void
+  terminalResize: (id: string, cols: number, rows: number) => void
 }
 
 export const useStore = create<UiState>((set, get) => {
@@ -100,6 +104,11 @@ export const useStore = create<UiState>((set, get) => {
   // When the model's current thinking burst started (per model step), so a finished message can show
   // "Thought for Ns". Reset after each message and at the start of a turn.
   let thinkStart: number | null = null
+
+  // M7: per-terminal-session xterm.write sinks (imperative — kept out of React state). TerminalPane registers
+  // its writer here on mount; `terminalData` events route to the matching session.
+  const terminalSinks = new Map<string, (chunk: string) => void>()
+  let termSeq = 0 // monotonic id source for new terminal sessions
 
   // ── URL routing (History API; no react-router). The in-store `page`/`activeId` is the source of truth;
   // these keep the address bar in sync so a project shows /project/<slug>, and reload/back/forward work. ──
@@ -160,7 +169,8 @@ export const useStore = create<UiState>((set, get) => {
     bottomTab: 'terminal',
     bottomOpen: true,
     bottomMaximized: false,
-    terminalSink: undefined,
+    terminals: [],
+    activeTerminalId: null,
     sidebarCollapsed: false,
     rightTab: 'preview',
     theme: getInitialTheme(),
@@ -292,10 +302,10 @@ export const useStore = create<UiState>((set, get) => {
           set({ versions: e.versions })
           break
         case 'terminalData':
-          get().terminalSink?.(e.data)
+          terminalSinks.get(e.id)?.(e.data)
           break
         case 'terminalExit':
-          get().terminalSink?.('\r\n\x1b[90m[process exited]\x1b[0m\r\n')
+          terminalSinks.get(e.id)?.('\r\n\x1b[90m[process exited]\x1b[0m\r\n')
           break
       }
     },
@@ -318,7 +328,8 @@ export const useStore = create<UiState>((set, get) => {
     openProject: (id) => {
       if (id === get().activeId) return
       // Set activeId optimistically so submit() works before the server's `projects` snapshot round-trips.
-      set({ activeId: id, items: [], streaming: null, status: null, busy: false, fileTree: [], openFile: null, fileDiff: null, codeView: 'code', preview: null, logs: [], problems: [], checking: false, versions: [] })
+      terminalSinks.clear() // the server kills the old project's shells on switch; drop their writers
+      set({ activeId: id, items: [], streaming: null, status: null, busy: false, fileTree: [], openFile: null, fileDiff: null, codeView: 'code', preview: null, logs: [], problems: [], checking: false, versions: [], terminals: [], activeTerminalId: null })
       get().send({ type: 'project', action: 'open', id })
     },
     deleteProject: (id) => {
@@ -391,13 +402,30 @@ export const useStore = create<UiState>((set, get) => {
     setBottomTab: (bottomTab) => set({ bottomTab, bottomOpen: true }),
     toggleBottom: () => set((s) => ({ bottomOpen: !s.bottomOpen, bottomMaximized: false })),
     toggleBottomMax: () => set((s) => ({ bottomMaximized: !s.bottomMaximized, bottomOpen: true })),
-    setTerminalSink: (terminalSink) => set({ terminalSink }),
-    startTerminal: (cols, rows) => {
-      if (get().activeId) get().send({ type: 'terminal', action: 'start', cols, rows })
+    newTerminal: () => {
+      const id = `t${++termSeq}`
+      set((s) => ({ terminals: [...s.terminals, id], activeTerminalId: id, bottomTab: 'terminal', bottomOpen: true }))
     },
-    stopTerminal: () => get().send({ type: 'terminal', action: 'stop' }),
-    terminalInput: (data) => get().send({ type: 'terminalInput', data }),
-    terminalResize: (cols, rows) => get().send({ type: 'terminalResize', cols, rows }),
+    closeTerminal: (id) => {
+      get().send({ type: 'terminal', action: 'stop', id })
+      terminalSinks.delete(id)
+      set((s) => {
+        const terminals = s.terminals.filter((t) => t !== id)
+        const activeTerminalId = s.activeTerminalId === id ? (terminals[terminals.length - 1] ?? null) : s.activeTerminalId
+        return { terminals, activeTerminalId }
+      })
+    },
+    setActiveTerminal: (activeTerminalId) => set({ activeTerminalId }),
+    setTerminalSink: (id, fn) => {
+      if (fn) terminalSinks.set(id, fn)
+      else terminalSinks.delete(id)
+    },
+    startTerminal: (id, cols, rows) => {
+      if (get().activeId) get().send({ type: 'terminal', action: 'start', id, cols, rows })
+    },
+    stopTerminal: (id) => get().send({ type: 'terminal', action: 'stop', id }),
+    terminalInput: (id, data) => get().send({ type: 'terminalInput', id, data }),
+    terminalResize: (id, cols, rows) => get().send({ type: 'terminalResize', id, cols, rows }),
     toggleTheme: () => {
       const theme: Theme = get().theme === 'dark' ? 'light' : 'dark'
       applyTheme(theme)

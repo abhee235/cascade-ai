@@ -45,8 +45,8 @@ export type BuilderEvent =
   | { type: 'log'; line: string } // a dev-server stdout/stderr line for the Console pane (M5)
   | { type: 'problems'; problems: Problem[]; checking?: boolean } // type-check results for the Problems panel (M5.3)
   | { type: 'versions'; versions: Version[] } // checkpoint history for the Versions panel (M6)
-  | { type: 'terminalData'; data: string } // a chunk of the integrated terminal's PTY output (M7)
-  | { type: 'terminalExit' } // the terminal's shell ended (M7)
+  | { type: 'terminalData'; id: string; data: string } // a chunk of a terminal session's PTY output (M7)
+  | { type: 'terminalExit'; id: string } // a terminal session's shell ended (M7)
 
 /** Client → builder. App/workspace-level commands, distinct from a session's InboundMessages.
  *  Future variants (added in their phases): preview start/stop/refresh, terminal input/resize,
@@ -59,6 +59,6 @@ export type BuilderCommand =
   | { type: 'check' } // run a type-check; results come back as a `problems` event (M5.3)
   | { type: 'versions'; action: 'list' } // request the checkpoint history (M6)
   | { type: 'version'; action: 'restore'; id: string } // restore the project to a checkpoint (M6)
-  | { type: 'terminal'; action: 'start' | 'stop'; cols?: number; rows?: number } // open/close a shell (M7)
-  | { type: 'terminalInput'; data: string } // keystrokes → the terminal's PTY (M7)
-  | { type: 'terminalResize'; cols: number; rows: number } // xterm resized → resize the PTY (M7)
+  | { type: 'terminal'; action: 'start' | 'stop'; id: string; cols?: number; rows?: number } // open/close a session (M7)
+  | { type: 'terminalInput'; id: string; data: string } // keystrokes → a session's PTY (M7)
+  | { type: 'terminalResize'; id: string; cols: number; rows: number } // a session's xterm resized (M7)

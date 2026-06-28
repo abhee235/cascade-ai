@@ -23,7 +23,9 @@ export async function createTerminal(
 ): Promise<TerminalHandle> {
   const container = docker.getContainer(containerId)
   const exec = await container.exec({
-    Cmd: ['sh'],
+    // Prefer bash when the image has it (e.g. debian/ubuntu), else fall back to sh (e.g. alpine). `exec`
+    // replaces the launcher so the PTY is the real shell.
+    Cmd: ['/bin/sh', '-c', 'if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi'],
     WorkingDir: '/workspace',
     AttachStdin: true,
     AttachStdout: true,
