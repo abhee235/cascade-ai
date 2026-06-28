@@ -1,16 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
 import { Streamdown } from 'streamdown'
-import { ArrowUp, Loader2, Paperclip, RefreshCw, Square } from 'lucide-react'
+import { ArrowUp, FileText, Loader2, Paperclip, RefreshCw, Square, X } from 'lucide-react'
 import { useStore } from '@/lib/store'
 import { ActivityCard } from './ActivityCard'
 import { ChatHeader } from './ChatHeader'
 import { cn } from '@/lib/utils'
 
+// An attachment staged in the composer (M11): images go to the model as data-URIs; text/code files are
+// injected into the message as fenced context (works with any model).
+type Attachment = { id: string; name: string; kind: 'image' | 'text'; dataUrl?: string; text?: string }
+const TEXT_EXT = /\.(txt|md|markdown|json|jsonc|ya?ml|toml|csv|tsv|html?|css|scss|jsx?|tsx?|mjs|cjs|py|rb|go|rs|java|kt|c|h|cpp|cs|php|sh|sql|env|gitignore|prisma|graphql|vue|svelte)$/i
+
 export function ChatPanel() {
   const { items, streaming, status, recovering, busy, connected, activeId, submit, stop, composerDraft, setComposerDraft } = useStore()
   const [input, setInput] = useState('')
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [dragging, setDragging] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -39,13 +47,36 @@ export function ChatPanel() {
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`
   }
 
+  const addFiles = (files: FileList | File[]) => {
+    for (const file of Array.from(files)) {
+      const id = `${file.name}-${file.size}-${Math.random().toString(36).slice(2, 6)}`
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader()
+        reader.onload = () => setAttachments((a) => [...a, { id, name: file.name, kind: 'image', dataUrl: String(reader.result) }])
+        reader.readAsDataURL(file)
+      } else if (file.type.startsWith('text/') || TEXT_EXT.test(file.name)) {
+        const reader = new FileReader()
+        reader.onload = () => setAttachments((a) => [...a, { id, name: file.name, kind: 'text', text: String(reader.result).slice(0, 100_000) }])
+        reader.readAsText(file)
+      }
+      // other binary types are ignored (no model path)
+    }
+  }
+  const removeAttachment = (id: string) => setAttachments((a) => a.filter((x) => x.id !== id))
+
   const onSend = () => {
-    submit(input)
+    // Text/code files become fenced context prepended to the message; images go to the model as data-URIs.
+    const textFiles = attachments.filter((a) => a.kind === 'text')
+    const context = textFiles.map((f) => `Attached file \`${f.name}\`:\n\`\`\`\n${f.text}\n\`\`\``).join('\n\n')
+    const text = context ? `${context}${input.trim() ? `\n\n${input.trim()}` : ''}` : input
+    const images = attachments.filter((a) => a.kind === 'image').map((a) => a.dataUrl!).filter(Boolean)
+    submit(text, images.length ? images : undefined)
     setInput('')
+    setAttachments([])
     if (taRef.current) taRef.current.style.height = 'auto'
   }
 
-  const canSend = !!input.trim() && connected && !!activeId
+  const canSend = (!!input.trim() || attachments.length > 0) && connected && !!activeId
 
   return (
     <div className="flex h-full flex-col text-sm">
@@ -88,7 +119,62 @@ export function ChatPanel() {
 
       {/* shadcn-style composer: one rounded container, textarea on top, a toolbar row beneath. */}
       <div className="px-3 pb-3 pt-1">
-        <div className="flex flex-col gap-2 rounded-2xl border border-input bg-card px-3 py-2.5 shadow-sm transition-colors focus-within:border-ring focus-within:ring-1 focus-within:ring-ring">
+        <div
+          className={cn(
+            'relative flex flex-col gap-2 rounded-2xl border bg-card px-3 py-2.5 shadow-sm transition-colors focus-within:border-ring focus-within:ring-1 focus-within:ring-ring',
+            dragging ? 'border-primary ring-1 ring-primary' : 'border-input',
+          )}
+          onDragOver={(e) => {
+            e.preventDefault()
+            if (!dragging) setDragging(true)
+          }}
+          onDragLeave={(e) => {
+            if (e.currentTarget === e.target) setDragging(false)
+          }}
+          onDrop={(e) => {
+            e.preventDefault()
+            setDragging(false)
+            if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files)
+          }}
+        >
+          {dragging && (
+            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-primary/10 text-xs font-medium text-primary">
+              Drop images or files to attach
+            </div>
+          )}
+
+          {/* Staged attachment chips */}
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {attachments.map((a) => (
+                <div key={a.id} className="group relative flex items-center gap-1.5 rounded-lg border border-border bg-background py-1 pl-1 pr-2 text-xs">
+                  {a.kind === 'image' ? (
+                    <img src={a.dataUrl} alt={a.name} className="h-7 w-7 rounded object-cover" />
+                  ) : (
+                    <span className="flex h-7 w-7 items-center justify-center rounded bg-accent">
+                      <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                    </span>
+                  )}
+                  <span className="max-w-[120px] truncate text-muted-foreground">{a.name}</span>
+                  <button type="button" title="Remove" onClick={() => removeAttachment(a.id)} className="text-muted-foreground hover:text-red-500">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <input
+            ref={fileRef}
+            type="file"
+            multiple
+            accept="image/*,text/*,.md,.json,.ts,.tsx,.js,.jsx,.css,.html,.py,.go,.rs,.java,.yaml,.yml,.sql,.sh"
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files) addFiles(e.target.files)
+              e.target.value = '' // allow re-selecting the same file
+            }}
+          />
           <textarea
             ref={taRef}
             rows={1}
@@ -109,7 +195,8 @@ export function ChatPanel() {
           <div className="flex items-center gap-1">
             <button
               type="button"
-              title="Attach (coming soon)"
+              title="Attach files or images"
+              onClick={() => fileRef.current?.click()}
               className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
               <Paperclip className="h-4 w-4" />

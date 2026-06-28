@@ -211,7 +211,7 @@ export function handleConnection(
         case 'submit': {
           const s = requireActive()
           if (!s) break
-          for await (const ev of s.submit(msg.text)) send(ev)
+          for await (const ev of s.submit(msg.text, msg.images)) send(ev) // M11: images = attached data-URIs
           sendTree() // the agent may have created/edited files — refresh the tree
           saveChat(msg.text) // M11: persist the turn to the active chat (+ title it from the first message)
           sendChats() // the title may have changed

@@ -14,6 +14,7 @@ export type ToolDisplay = { kind: 'fileEdit'; path: string; op: 'create' | 'edit
 export type ContentBlock =
   | { type: 'text'; text: string }
   | { type: 'thinking'; thinking: string }
+  | { type: 'image'; url: string } // a data URI (data:image/png;base64,…) attached to a user turn (M11)
   | { type: 'tool_use'; id: string; name: string; input: unknown }
   | { type: 'tool_result'; tool_use_id: string; content: string; isError?: boolean; display?: ToolDisplay }
 
@@ -42,7 +43,7 @@ export type ActivityEvent =
 
 // ── Inbound messages: frontend → core ───────────────────────────────────────────────────
 export type InboundMessage =
-  | { type: 'submit'; text: string }
+  | { type: 'submit'; text: string; images?: string[] } // images: data URIs for a multimodal turn (M11)
   | { type: 'permission'; id: string; decision: 'allow' | 'allow-always' | 'deny' }
   | { type: 'abort' }
   | { type: 'reset' } // "New chat" — clears conversation history

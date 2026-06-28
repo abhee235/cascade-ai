@@ -5,7 +5,7 @@
 // stateless — "memory" is just us resending the whole transcript every turn. submit() appends the user
 // turn, streams the reply (forwarding deltas live — ADR-013), then appends the assistant turn.
 
-import type { ActivityEvent, Message } from './protocol'
+import type { ActivityEvent, ContentBlock, Message } from './protocol'
 import type { ModelProvider } from './llm/provider'
 import { runAgentLoop } from './agent/agentLoop'
 import type { PermissionController, PermissionMode, PermissionState } from './permissions/gate'
@@ -55,7 +55,7 @@ export interface SessionOptions {
 }
 
 export interface CascadeSession {
-  submit(userText: string): AsyncIterable<ActivityEvent>
+  submit(userText: string, images?: string[]): AsyncIterable<ActivityEvent>
   respondPermission(id: string, decision: 'allow' | 'allow-always' | 'deny'): void
   abort(): void
   /** Clear conversation history ("New chat"). */
@@ -124,11 +124,14 @@ export function createSession(opts: SessionOptions): CascadeSession {
       : Promise.resolve([] as string[])
 
   return {
-    async *submit(userText: string): AsyncIterable<ActivityEvent> {
+    async *submit(userText: string, images?: string[]): AsyncIterable<ActivityEvent> {
       const controller = new AbortController()
       inFlight = controller
 
-      messages.push({ role: 'user', content: userText }) // append the user turn to history
+      // Multimodal turn (M11): attach image data-URIs as image blocks alongside the text; otherwise keep the
+      // plain-string form (smaller history, unchanged behaviour for the common case).
+      const content: string | ContentBlock[] = images?.length ? [{ type: 'text', text: userText }, ...images.map((url) => ({ type: 'image' as const, url }))] : userText
+      messages.push({ role: 'user', content }) // append the user turn to history
       tracer.event({ t: 'submit', text: userText })
       hub?.retryFailed() // lazy retry: give a previously-failed server another chance at the start of a turn
 

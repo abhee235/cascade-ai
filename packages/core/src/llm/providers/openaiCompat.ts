@@ -13,9 +13,12 @@ interface OpenAIToolCall {
   type: 'function'
   function: { name: string; arguments: string }
 }
+// Content can be a plain string or, for a multimodal user turn (M11), an array of text/image parts (the
+// OpenAI-compatible vision shape that Ollama vision models accept).
+type OpenAIContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }
 interface OpenAIMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
-  content: string | null
+  content: string | OpenAIContentPart[] | null
   tool_calls?: OpenAIToolCall[]
   tool_call_id?: string
 }
@@ -38,7 +41,16 @@ export function toOpenAIMessages(messages: Message[], system?: string): OpenAIMe
         if (b.type === 'tool_result') out.push({ role: 'tool', tool_call_id: b.tool_use_id, content: b.content ?? '' })
       }
       const text = textOf(blocks)
-      if (text) out.push({ role: 'user', content: text })
+      const images = blocks.filter((b): b is Extract<ContentBlock, { type: 'image' }> => b.type === 'image')
+      if (images.length) {
+        // Multimodal: send text + image parts (vision models accept data-URI image_url).
+        const parts: OpenAIContentPart[] = []
+        if (text) parts.push({ type: 'text', text })
+        for (const img of images) parts.push({ type: 'image_url', image_url: { url: img.url } })
+        out.push({ role: 'user', content: parts })
+      } else if (text) {
+        out.push({ role: 'user', content: text })
+      }
     } else {
       const toolUses = blocks.filter((b): b is Extract<ContentBlock, { type: 'tool_use' }> => b.type === 'tool_use')
       // Use '' (not null) for a tool-call message with no text: the OpenAI spec allows null content here,
@@ -123,6 +135,12 @@ export class OpenAICompatProvider implements ModelProvider {
   }
 
   async *stream(req: CompletionRequest, signal?: AbortSignal): AsyncIterable<StreamEvent> {
+    // M11: image turns go through Ollama's NATIVE /api/chat — its OpenAI-compat /v1 endpoint silently drops
+    // image_url (verified on Ollama 0.30.10), whereas /api/chat accepts an `images:[base64]` array per message.
+    if (req.messages.some((m) => Array.isArray(m.content) && m.content.some((b) => b.type === 'image'))) {
+      yield* this.streamNative(req, signal)
+      return
+    }
     const res = await fetch(`${this.cfg.baseUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: this.headers(),
@@ -190,4 +208,71 @@ export class OpenAICompatProvider implements ModelProvider {
     }
     yield { type: 'done', stopReason }
   }
+
+  // M11: Ollama-native streaming (/api/chat) for multimodal turns. NDJSON, one JSON object per line; each
+  // carries `message.content` (+ optional `thinking`/`tool_calls`) and the last one has `done:true`. Tool
+  // calls arrive whole here (arguments already an object), so we emit them directly.
+  private async *streamNative(req: CompletionRequest, signal?: AbortSignal): AsyncIterable<StreamEvent> {
+    const body = JSON.stringify({ model: req.model, messages: toNativeMessages(req.messages, req.system), tools: toOpenAITools(req.tools), stream: true })
+    const res = await fetch(`${this.cfg.baseUrl}/api/chat`, { method: 'POST', headers: this.headers(), body, signal })
+    if (!res.ok || !res.body) {
+      const b = await res.text().catch(() => '')
+      throw new Error(`${this.id} HTTP ${res.status}: ${b.slice(0, 300) || res.statusText}`)
+    }
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let stopReason: 'end_turn' | 'max_tokens' | 'tool_use' = 'end_turn'
+    let toolIdx = 0
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+      for (const line of lines) {
+        const t = line.trim()
+        if (!t) continue
+        let obj: any
+        try {
+          obj = JSON.parse(t)
+        } catch {
+          continue
+        }
+        const m = obj.message
+        if (m?.thinking) yield { type: 'thinking_delta', thinking: m.thinking }
+        if (m?.content) yield { type: 'text_delta', text: m.content }
+        if (Array.isArray(m?.tool_calls)) {
+          for (const tc of m.tool_calls) {
+            stopReason = 'tool_use'
+            yield { type: 'tool_use', id: tc.id || `call_${toolIdx++}`, name: tc.function?.name ?? '', input: tc.function?.arguments ?? {} }
+          }
+        }
+        if (obj.done && obj.done_reason === 'length') stopReason = 'max_tokens'
+      }
+    }
+    yield { type: 'done', stopReason }
+  }
+}
+
+// Internal messages → Ollama NATIVE /api/chat messages. Like the OpenAI mapping, but images attach as a
+// `images:[base64]` array on the user message (data-URI prefix stripped) and tool-call arguments stay objects.
+function toNativeMessages(messages: Message[], system?: string): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = []
+  if (system) out.push({ role: 'system', content: system })
+  for (const m of messages) {
+    const blocks = asBlocks(m.content)
+    if (m.role === 'user') {
+      for (const b of blocks) if (b.type === 'tool_result') out.push({ role: 'tool', content: b.content ?? '' })
+      const text = textOf(blocks)
+      const images = blocks.filter((b): b is Extract<ContentBlock, { type: 'image' }> => b.type === 'image').map((b) => b.url.replace(/^data:[^;]+;base64,/, ''))
+      if (text || images.length) out.push(images.length ? { role: 'user', content: text, images } : { role: 'user', content: text })
+    } else {
+      const toolUses = blocks.filter((b): b is Extract<ContentBlock, { type: 'tool_use' }> => b.type === 'tool_use')
+      const msg: Record<string, unknown> = { role: 'assistant', content: textOf(blocks) }
+      if (toolUses.length) msg.tool_calls = toolUses.map((tu) => ({ function: { name: tu.name, arguments: tu.input ?? {} } }))
+      out.push(msg)
+    }
+  }
+  return out
 }

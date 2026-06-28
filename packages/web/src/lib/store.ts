@@ -68,7 +68,7 @@ interface UiState {
   // actions
   setConnected: (b: boolean) => void
   handleEvent: (e: WireEvent) => void
-  submit: (text: string) => void
+  submit: (text: string, images?: string[]) => void
   stop: () => void
   newChat: () => void // M11: start a fresh chat in the active project
   switchChat: (id: string) => void // M11: switch to a saved chat (loads its history)
@@ -387,12 +387,13 @@ export const useStore = create<UiState>((set, get) => {
       }
     },
 
-    submit: (text) => {
+    submit: (text, images) => {
       const t = text.trim()
       const { connected, activeId, send } = get()
-      if (!t || !connected || !activeId) return
-      set((s) => ({ items: [...s.items, { kind: 'user', text: t }], busy: true }))
-      send({ type: 'submit', text: t })
+      if ((!t && !images?.length) || !connected || !activeId) return
+      const label = images?.length ? `${t}${t ? '\n\n' : ''}📎 ${images.length} image${images.length > 1 ? 's' : ''}` : t
+      set((s) => ({ items: [...s.items, { kind: 'user', text: label }], busy: true }))
+      send({ type: 'submit', text: t, images })
     },
     stop: () => {
       get().send({ type: 'abort' })
