@@ -18,12 +18,14 @@ import { DockerSandbox, dockerAvailable, sweepSandboxContainers } from './docker
 import { listTemplates } from './templates.js'
 import { readDiff, readFile, readTree } from './fileService.js'
 import { PreviewManager } from './previewManager.js'
+import { PreviewProxy } from './previewProxy.js'
 import { runCheck } from './checkProject.js'
 
 /** What a connection can receive: a core session message OR an app/builder command. */
 type Inbound = InboundMessage | BuilderCommand
 
 const PORT = Number(process.env.CASCADE_PORT ?? 4319)
+const PREVIEW_PORT = Number(process.env.CASCADE_PREVIEW_PORT ?? 4320) // M5.2: stable preview-proxy origin
 const MODEL = process.env.CASCADE_MODEL ?? 'qwen2.5-coder:latest'
 const BASE_URL = process.env.CASCADE_BASE_URL || undefined
 const PROJECTS_ROOT = process.env.CASCADE_PROJECTS_ROOT || join(process.cwd(), 'cascade-projects')
@@ -33,13 +35,30 @@ const PROJECTS_ROOT = process.env.CASCADE_PROJECTS_ROOT || join(process.cwd(), '
  * opened (its `active` session); the `project` control message switches that. The session itself lives in
  * the manager, not here.
  */
-export function handleConnection(ws: WebSocket, manager: ProjectManager, preview?: PreviewManager): void {
+export function handleConnection(
+  ws: WebSocket,
+  manager: ProjectManager,
+  preview?: PreviewManager,
+  previewProxy?: PreviewProxy,
+  previewPort?: number,
+): void {
   const send = (msg: unknown) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg))
   }
   let active: CascadeSession | undefined
   let activeId: string | undefined
   let stopTail: (() => void) | undefined // M5: stops the Console log stream (tail) for this connection
+
+  // Send a preview status to the client. When it's running, point the proxy at the container and hand the
+  // client the STABLE proxy origin instead of the container's random port (M5.2).
+  const emitPreview = (s: { status: string; url?: string }) => {
+    if (s.status === 'running' && s.url && previewProxy && previewPort) {
+      previewProxy.setTarget(Number(new URL(s.url).port))
+      send({ type: 'preview', status: 'running', url: `http://localhost:${previewPort}` })
+    } else {
+      send({ type: 'preview', status: s.status, url: s.url })
+    }
+  }
 
   // Start streaming the active project's dev-server log into the Console pane (`log` events). Replaces any
   // existing tail (e.g. when switching projects). No-op without Docker / a PreviewManager.
@@ -97,7 +116,7 @@ export function handleConnection(ws: WebSocket, manager: ProjectManager, preview
             sendTree() // populate the Code pane for the opened project
             const pv = activeId && preview?.state(activeId) // re-show a preview already running for this project
             if (pv) {
-              send({ type: 'preview', status: pv.status, url: pv.url })
+              emitPreview(pv)
               if (pv.status === 'running' && activeId) startTail(activeId) // resume its Console logs
             }
           }
@@ -134,6 +153,7 @@ export function handleConnection(ws: WebSocket, manager: ProjectManager, preview
           if (msg.action === 'stop') {
             stopTail?.()
             stopTail = undefined
+            previewProxy?.setTarget(null) // detach the proxy from the (now stopped) preview
             preview.stop(activeId)
             send({ type: 'preview', status: 'stopped' })
             break
@@ -142,7 +162,7 @@ export function handleConnection(ws: WebSocket, manager: ProjectManager, preview
           if (sandbox instanceof DockerSandbox) {
             const id = activeId
             void preview.start(id, sandbox, (s) => {
-              send({ type: 'preview', status: s.status, url: s.url })
+              emitPreview(s)
               if (s.status === 'running') startTail(id) // begin streaming dev-server logs to the Console pane
             })
           } else {
@@ -220,9 +240,13 @@ async function start() {
   const sandboxFor = hasDocker ? (dir: string) => new DockerSandbox(dir) : undefined
 
   const manager = new ProjectManager({ root: PROJECTS_ROOT, model: MODEL, baseUrl: BASE_URL, sandboxFor })
-  const preview = new PreviewManager()
+  // M5.2: a stable preview origin. The proxy forwards http://localhost:PREVIEW_PORT → the active container,
+  // and the dev server's HMR connects on PREVIEW_PORT too (same origin as the iframe).
+  const previewProxy = hasDocker ? new PreviewProxy(PREVIEW_PORT) : undefined
+  previewProxy?.listen()
+  const preview = new PreviewManager(previewProxy ? PREVIEW_PORT : undefined)
   const wss = new WebSocketServer({ port: PORT })
-  wss.on('connection', (ws) => handleConnection(ws, manager, preview))
+  wss.on('connection', (ws) => handleConnection(ws, manager, preview, previewProxy, PREVIEW_PORT))
   // Graceful exit (Ctrl-C / SIGTERM): dispose sessions + remove this run's sandbox containers. (A hard
   // SIGKILL skips this — the startup sweep above is the backstop.)
   const shutdown = () => void Promise.allSettled([manager.dispose(), sweepSandboxContainers()]).finally(() => process.exit(0))
