@@ -49,6 +49,9 @@ export interface SessionOptions {
   sandbox?: import('./sandbox/sandbox').Sandbox
   /** Phase 15: generic extra system-prompt context (e.g. a project template's AI rules). */
   extraInstructions?: string
+  /** Max model round-trips per submit before the loop stops (default 10). A builder doing a full app
+   *  needs far more than a chat turn — the server sets this high. */
+  maxTurns?: number
 }
 
 export interface CascadeSession {
@@ -161,6 +164,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
           recovery: opts.recovery,
           sandbox: opts.sandbox,
           extraInstructions: opts.extraInstructions,
+          maxTurns: opts.maxTurns,
         })
       } catch (err) {
         const e = err as { name?: string; message?: string; cause?: { message?: string } }
