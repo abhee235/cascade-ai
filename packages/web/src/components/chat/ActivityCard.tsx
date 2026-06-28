@@ -62,6 +62,25 @@ function FileEditCard({ display }: { display: ToolDisplay }) {
   )
 }
 
+/** Collapsed "Thought for Ns" summary that expands to the raw thinking. */
+function ThoughtBlock({ thinking, ms }: { thinking: string; ms?: number }) {
+  const [open, setOpen] = useState(false)
+  const label = ms != null ? `Thought for ${Math.max(1, Math.round(ms / 1000))}s` : 'Thought process'
+  return (
+    <div className="mb-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <ChevronRight className={cn('h-3 w-3 transition-transform', open && 'rotate-90')} />
+        {label}
+      </button>
+      {open && <div className="mt-1 whitespace-pre-wrap border-l-2 border-border pl-3 text-xs text-muted-foreground">{thinking}</div>}
+    </div>
+  )
+}
+
 const TOOL_ICONS: Record<string, LucideIcon> = {
   bash: Terminal,
   read: FileText,
@@ -92,7 +111,9 @@ function ToolCard({ item }: { item: Extract<Item, { kind: 'tool' }> }) {
       >
         <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <span className="font-mono font-semibold">{item.name}</span>
-        <span className="truncate text-muted-foreground">{item.summary}</span>
+        <span className="truncate text-muted-foreground">
+          {item.summary || (item.status === 'running' ? 'working…' : '')}
+        </span>
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           {hasOutput && <ChevronRight className={cn('h-3 w-3 text-muted-foreground transition-transform', open && 'rotate-90')} />}
           <StatusIcon
@@ -133,24 +154,16 @@ export function ActivityCard({ item }: { item: Item }) {
       return <ToolCard item={item} />
     }
     default: {
-      // user | assistant
-      const isUser = item.kind === 'user'
+      // User turns are a gray bubble; assistant turns flow as plain text (no repeated role labels).
+      if (item.kind === 'user') {
+        return <div className="my-3 whitespace-pre-wrap rounded-2xl bg-muted px-3.5 py-2.5">{item.text}</div>
+      }
       return (
-        <div className={cn('my-2 rounded-lg px-3 py-2', isUser ? 'bg-accent' : 'bg-card/50')}>
-          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{item.kind}</div>
-          {item.kind === 'assistant' && item.thinking && (
-            <details className="mb-1 text-xs text-muted-foreground">
-              <summary className="cursor-pointer select-none">💭 Thinking</summary>
-              <div className="mt-1 whitespace-pre-wrap border-l-2 border-border pl-2">{item.thinking}</div>
-            </details>
-          )}
-          {item.kind === 'assistant' ? (
-            <div className="prose prose-invert prose-sm max-w-none">
-              <Streamdown>{item.text}</Streamdown>
-            </div>
-          ) : (
-            <div className="whitespace-pre-wrap">{item.text}</div>
-          )}
+        <div className="my-3">
+          {item.thinking && <ThoughtBlock thinking={item.thinking} ms={item.thoughtMs} />}
+          <div className="prose prose-sm dark:prose-invert max-w-none">
+            <Streamdown>{item.text}</Streamdown>
+          </div>
         </div>
       )
     }

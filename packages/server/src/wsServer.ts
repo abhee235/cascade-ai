@@ -68,7 +68,10 @@ export function handleConnection(ws: WebSocket, manager: ProjectManager, preview
     try {
       switch (msg.type) {
         case 'project': {
-          if (msg.action === 'create' && msg.name) manager.create(msg.name, msg.templateId)
+          if (msg.action === 'create' && msg.name) {
+            const created = manager.create(msg.name, msg.templateId)
+            send({ type: 'projectCreated', project: created })
+          }
           else if (msg.action === 'delete' && msg.id) {
             await manager.delete(msg.id)
             if (activeId === msg.id) ((active = undefined), (activeId = undefined))

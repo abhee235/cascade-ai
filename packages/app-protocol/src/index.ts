@@ -30,6 +30,7 @@ export type FileNode = { name: string; path: string; type: 'file' | 'dir'; child
  */
 export type BuilderEvent =
   | { type: 'projects'; projects: ProjectInfo[]; activeId?: string } // project sidebar snapshot
+  | { type: 'projectCreated'; project: ProjectInfo } // a project was just created (so the Home flow can open it)
   | { type: 'templates'; templates: TemplateInfo[] } // available scaffolds for the create flow (Phase 15)
   | { type: 'files'; tree: FileNode[] } // the active project's file tree (M4)
   | { type: 'fileContent'; path: string; content: string; truncated?: boolean } // a single file's content (M4)
