@@ -7,7 +7,7 @@ import { create } from 'zustand'
 import type { WireEvent, WireMessage } from './wsClient'
 import { extractMessage, type BottomTab, type Item, type Page, type PreviewState, type Recovering, type RightTab, type RuntimeError, type Streaming } from './types'
 import { StreamingOptimizer } from './streamingOptimizer'
-import { applyTheme, getInitialTheme, type Theme } from './theme'
+import { applyAccent, applyTheme, getInitialAccent, getInitialTheme, type Theme } from './theme'
 import type { FileNode, Problem, ProjectInfo, TemplateInfo, Version } from '@cascade/app-protocol'
 
 interface UiState {
@@ -57,6 +57,8 @@ interface UiState {
   sidebarCollapsed: boolean
   rightTab: RightTab
   theme: Theme
+  accent: string | null // M11 custom theme: brand accent hex (overrides primary/ring), or null for neutral
+  customizeOpen: boolean // M11: the "Customize theme" dialog is open
   // transport (injected by App)
   send: (m: WireMessage) => void
   setSend: (send: (m: WireMessage) => void) => void
@@ -76,6 +78,8 @@ interface UiState {
   toggleSidebar: () => void
   setRightTab: (t: RightTab) => void
   toggleTheme: () => void
+  setAccent: (hex: string | null) => void // M11: apply + persist a brand accent
+  setCustomizeOpen: (open: boolean) => void // M11: open/close the theme dialog
   requestFile: (path: string) => void
   openFileInCode: (path: string, view?: 'code' | 'diff') => void
   setCodeView: (v: 'code' | 'diff') => void
@@ -207,6 +211,8 @@ export const useStore = create<UiState>((set, get) => {
     sidebarCollapsed: false,
     rightTab: 'preview',
     theme: getInitialTheme(),
+    accent: getInitialAccent(),
+    customizeOpen: false,
     send: () => {},
     setSend: (send) => set({ send }),
     setConnected: (connected) => set({ connected }),
@@ -519,5 +525,10 @@ export const useStore = create<UiState>((set, get) => {
       applyTheme(theme)
       set({ theme })
     },
+    setAccent: (accent) => {
+      applyAccent(accent)
+      set({ accent })
+    },
+    setCustomizeOpen: (customizeOpen) => set({ customizeOpen }),
   }
 })

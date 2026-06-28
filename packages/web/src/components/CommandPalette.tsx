@@ -2,13 +2,13 @@
 // action (preview, tabs, terminal, theme). Mounted once in AppLayout; toggled by the global shortcut.
 
 import { useEffect, useState } from 'react'
-import { Code2, FolderOpen, Home, LayoutGrid, MessageSquare, Moon, PlusCircle, Settings, SquareTerminal, Play, Square, Eye, History } from 'lucide-react'
+import { Code2, FolderOpen, Home, LayoutGrid, MessageSquare, Moon, Palette, PlusCircle, Settings, SquareTerminal, Play, Square, Eye, History } from 'lucide-react'
 import { useStore } from '@/lib/store'
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandShortcut } from '@/components/ui/command'
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false)
-  const { projects, activeId, page, openProjectPage, navigate, toggleTheme, startPreview, stopPreview, setRightTab, setBottomTab, toggleBottom, newTerminal } = useStore()
+  const { projects, activeId, page, openProjectPage, navigate, toggleTheme, startPreview, stopPreview, setRightTab, setBottomTab, toggleBottom, newTerminal, setCustomizeOpen } = useStore()
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -95,6 +95,9 @@ export function CommandPalette() {
           </CommandItem>
           <CommandItem value="toggle theme dark light" onSelect={() => run(toggleTheme)}>
             <Moon /> Toggle theme
+          </CommandItem>
+          <CommandItem value="customize theme accent color" onSelect={() => run(() => setCustomizeOpen(true))}>
+            <Palette /> Customize theme…
           </CommandItem>
         </CommandGroup>
       </CommandList>

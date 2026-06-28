@@ -3,6 +3,7 @@
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { useStore } from '@/lib/store'
 import { CommandPalette } from '@/components/CommandPalette'
+import { ThemeDialog } from '@/components/ThemeDialog'
 import { NavSidebar } from './NavSidebar'
 import { HomePage } from '@/pages/HomePage'
 import { ProjectPage } from '@/pages/ProjectPage'
@@ -17,6 +18,7 @@ export function AppLayout() {
     // and the builder pane each scroll internally instead of growing the whole page.
     <SidebarProvider className="h-svh overflow-hidden">
       <CommandPalette />
+      <ThemeDialog />
       <NavSidebar />
       <SidebarInset className="min-h-0 overflow-hidden">
         {page === 'home' ? (
