@@ -27,6 +27,13 @@ export type Problem = { file: string; line: number; col: number; message: string
 /** A git checkpoint of the project (M6). `id` is the commit hash. */
 export type Version = { id: string; summary: string; createdAt: string }
 
+/** One chat (conversation) in a project (M11). Stored server-side; the client only sees this metadata. */
+export type ChatMeta = { id: string; title: string; createdAt: string; updatedAt: string }
+
+/** A flattened transcript row sent when switching to a saved chat (M11) — the server derives these from the
+ *  chat's core messages so the protocol stays decoupled from core's Message shape. */
+export type ChatHistoryItem = { role: 'user' | 'assistant' | 'tool'; text: string; name?: string }
+
 /** Builder → client. App/workspace-level events, distinct from a session's ActivityEvents.
  *  Future variants (added in their phases) — keep the discriminated union open:
  *    | { type: 'preview';  projectId: string; url: string; status: 'installing' | 'running' | 'error' }
@@ -47,6 +54,8 @@ export type BuilderEvent =
   | { type: 'log'; line: string } // a dev-server stdout/stderr line for the Console pane (M5)
   | { type: 'problems'; problems: Problem[]; checking?: boolean } // type-check results for the Problems panel (M5.3)
   | { type: 'versions'; versions: Version[] } // checkpoint history for the Versions panel (M6)
+  | { type: 'chats'; chats: ChatMeta[]; activeId: string } // the active project's chat list (M11)
+  | { type: 'chatHistory'; items: ChatHistoryItem[] } // the switched-to chat's transcript to render (M11)
   | { type: 'terminalData'; id: string; data: string } // a chunk of a terminal session's PTY output (M7)
   | { type: 'terminalExit'; id: string } // a terminal session's shell ended (M7)
 
@@ -69,3 +78,4 @@ export type BuilderCommand =
   | { type: 'terminal'; action: 'start' | 'stop'; id: string; cols?: number; rows?: number } // open/close a session (M7)
   | { type: 'terminalInput'; id: string; data: string } // keystrokes → a session's PTY (M7)
   | { type: 'terminalResize'; id: string; cols: number; rows: number } // a session's xterm resized (M7)
+  | { type: 'chat'; action: 'list' | 'new' | 'switch' | 'delete' | 'rename'; id?: string; title?: string } // multi-chat (M11)

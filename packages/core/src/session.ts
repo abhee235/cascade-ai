@@ -60,6 +60,10 @@ export interface CascadeSession {
   abort(): void
   /** Clear conversation history ("New chat"). */
   reset(): void
+  /** Snapshot the conversation history (for persisting a chat). */
+  getHistory(): Message[]
+  /** Replace the conversation history (switching to a saved chat). Does NOT curate — it's a load, not a clear. */
+  loadHistory(msgs: Message[]): void
   /** Tear down MCP subprocesses etc. Call when discarding the session. */
   dispose(): Promise<void>
   /** MCP panel (/mcp): current server statuses, and manual connect/disconnect. */
@@ -207,6 +211,12 @@ export function createSession(opts: SessionOptions): CascadeSession {
       // "always allow X" grants are forgotten. (Mutate in place: the controller holds `state` by ref.)
       state.allow = new Set(opts.allow ?? [])
       state.deny = new Set(opts.deny ?? [])
+    },
+
+    getHistory: () => [...messages],
+    loadHistory(msgs) {
+      messages.length = 0
+      messages.push(...msgs)
     },
 
     async dispose() {

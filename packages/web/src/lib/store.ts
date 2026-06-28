@@ -8,7 +8,7 @@ import type { WireEvent, WireMessage } from './wsClient'
 import { extractMessage, type BottomTab, type Item, type Page, type PreviewState, type Recovering, type RightTab, type RuntimeError, type Streaming } from './types'
 import { StreamingOptimizer } from './streamingOptimizer'
 import { applyAccent, applyTheme, getInitialAccent, getInitialTheme, type Theme } from './theme'
-import type { FileNode, Problem, ProjectInfo, TemplateInfo, Version } from '@cascade/app-protocol'
+import type { ChatMeta, FileNode, Problem, ProjectInfo, TemplateInfo, Version } from '@cascade/app-protocol'
 
 interface UiState {
   // routing (lightweight in-store router)
@@ -26,6 +26,9 @@ interface UiState {
   status: string | null
   recovering: Recovering | null
   busy: boolean
+  // multiple chats per project (M11), server-persisted; the list + which is active
+  chats: ChatMeta[]
+  activeChatId: string | null
   // code pane (M4) + diff view (M2)
   fileTree: FileNode[]
   openFile: { path: string; content: string } | null
@@ -67,6 +70,10 @@ interface UiState {
   handleEvent: (e: WireEvent) => void
   submit: (text: string) => void
   stop: () => void
+  newChat: () => void // M11: start a fresh chat in the active project
+  switchChat: (id: string) => void // M11: switch to a saved chat (loads its history)
+  deleteChat: (id: string) => void // M11
+  renameChat: (id: string, title: string) => void // M11
   createProject: (name: string, templateId?: string) => void
   openProject: (id: string) => void
   deleteProject: (id: string) => void
@@ -190,6 +197,8 @@ export const useStore = create<UiState>((set, get) => {
     status: null,
     recovering: null,
     busy: false,
+    chats: [],
+    activeChatId: null,
     fileTree: [],
     openFile: null,
     fileError: null,
@@ -336,6 +345,24 @@ export const useStore = create<UiState>((set, get) => {
           setTimeout(() => set((s) => (s.fileError === e.message ? { fileError: null } : {})), 4000)
           break
         }
+        case 'chats':
+          set({ chats: e.chats, activeChatId: e.activeId })
+          break
+        case 'chatHistory':
+          // M11: render a switched-to chat's saved transcript (flattened rows → transcript items).
+          set({
+            items: e.items.map((it, i): Item =>
+              it.role === 'user'
+                ? { kind: 'user', text: it.text }
+                : it.role === 'assistant'
+                  ? { kind: 'assistant', text: it.text }
+                  : { kind: 'tool', id: `h${i}`, name: it.name ?? 'tool', summary: it.text || (it.name ?? 'tool'), status: 'ok' },
+            ),
+            streaming: null,
+            status: null,
+            busy: false,
+          })
+          break
         case 'fileDiff':
           set({ fileDiff: { path: e.path, original: e.original, modified: e.modified } })
           break
@@ -371,6 +398,13 @@ export const useStore = create<UiState>((set, get) => {
       get().send({ type: 'abort' })
       set({ busy: false, status: null })
     },
+    // ── multiple chats per project (M11) — the server owns the list + history; we just drive it ──
+    newChat: () => get().send({ type: 'chat', action: 'new' }),
+    switchChat: (id) => {
+      if (id !== get().activeChatId) get().send({ type: 'chat', action: 'switch', id })
+    },
+    deleteChat: (id) => get().send({ type: 'chat', action: 'delete', id }),
+    renameChat: (id, title) => get().send({ type: 'chat', action: 'rename', id, title }),
     createProject: (name, templateId) => {
       const n = name.trim()
       if (n) get().send({ type: 'project', action: 'create', name: n, templateId })
@@ -379,7 +413,7 @@ export const useStore = create<UiState>((set, get) => {
       if (id === get().activeId) return
       // Set activeId optimistically so submit() works before the server's `projects` snapshot round-trips.
       terminalSinks.clear() // the server kills the old project's shells on switch; drop their writers
-      set({ activeId: id, items: [], streaming: null, status: null, busy: false, fileTree: [], openFile: null, fileError: null, fileDiff: null, codeView: 'code', preview: null, logs: [], problems: [], checking: false, runtimeErrors: [], versions: [], terminals: [], activeTerminalId: null, selectMode: false })
+      set({ activeId: id, items: [], streaming: null, status: null, busy: false, chats: [], activeChatId: null, fileTree: [], openFile: null, fileError: null, fileDiff: null, codeView: 'code', preview: null, logs: [], problems: [], checking: false, runtimeErrors: [], versions: [], terminals: [], activeTerminalId: null, selectMode: false })
       get().send({ type: 'project', action: 'open', id })
     },
     deleteProject: (id) => {

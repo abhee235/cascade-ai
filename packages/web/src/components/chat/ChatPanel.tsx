@@ -3,6 +3,7 @@ import { Streamdown } from 'streamdown'
 import { ArrowUp, Loader2, Paperclip, RefreshCw, Square } from 'lucide-react'
 import { useStore } from '@/lib/store'
 import { ActivityCard } from './ActivityCard'
+import { ChatHeader } from './ChatHeader'
 import { cn } from '@/lib/utils'
 
 export function ChatPanel() {
@@ -48,6 +49,7 @@ export function ChatPanel() {
 
   return (
     <div className="flex h-full flex-col text-sm">
+      <ChatHeader />
       <div className="flex-1 overflow-y-auto px-4 py-3">
         {items.map((it, i) => (
           <ActivityCard key={i} item={it} />

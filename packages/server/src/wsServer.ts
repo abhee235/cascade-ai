@@ -18,6 +18,9 @@ import type { BuilderCommand } from '@cascade/app-protocol'
 import { ProjectManager } from './projectManager.js'
 import { DockerSandbox, dockerAvailable, sweepSandboxContainers } from './dockerSandbox.js'
 import { ensureVisualEditConfig, listTemplates } from './templates.js'
+import { ChatStore } from './chatStore.js'
+import type { ChatHistoryItem } from '@cascade/app-protocol'
+import type { Message } from '@cascade/core'
 import { createFile, deletePath, editJsxTextAtLoc, makeDir, readDiff, readFile, readTree, renamePath, setClassAtLoc, writeFile } from './fileService.js'
 import { PreviewManager } from './previewManager.js'
 import { PreviewProxy } from './previewProxy.js'
@@ -55,6 +58,30 @@ const WS_TOKEN = randomBytes(24).toString('hex')
  * opened (its `active` session); the `project` control message switches that. The session itself lives in
  * the manager, not here.
  */
+// M11: flatten a chat's core conversation into displayable transcript rows (user/assistant text + a compact
+// line per tool call). Thinking and tool_result blocks are dropped — this is for rendering history, not replay.
+function historyToItems(messages: Message[]): ChatHistoryItem[] {
+  const items: ChatHistoryItem[] = []
+  for (const m of messages) {
+    if (m.role === 'user') {
+      const text = typeof m.content === 'string' ? m.content : m.content.filter((b) => b.type === 'text').map((b) => (b as { text: string }).text).join('')
+      if (text.trim()) items.push({ role: 'user', text: text.trim() })
+    } else {
+      for (const b of m.content) {
+        if (b.type === 'text' && b.text.trim()) items.push({ role: 'assistant', text: b.text.trim() })
+        else if (b.type === 'tool_use') items.push({ role: 'tool', name: b.name, text: summarizeToolInput(b.input) })
+      }
+    }
+  }
+  return items
+}
+function summarizeToolInput(input: unknown): string {
+  if (!input || typeof input !== 'object') return ''
+  const o = input as Record<string, unknown>
+  const key = o.path ?? o.file_path ?? o.command ?? o.pattern ?? o.query ?? o.filePath
+  return typeof key === 'string' ? key.slice(0, 120) : ''
+}
+
 export function handleConnection(
   ws: WebSocket,
   manager: ProjectManager,
@@ -62,12 +89,14 @@ export function handleConnection(
   previewProxy?: PreviewProxy,
   previewPort?: number,
   versions?: VersionManager,
+  chatStore?: ChatStore,
 ): void {
   const send = (msg: unknown) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg))
   }
   let active: CascadeSession | undefined
   let activeId: string | undefined
+  let activeChatId: string | undefined // M11: which chat (conversation) the active session is currently on
   let stopTail: (() => void) | undefined // M5: stops the Console log stream (tail) for this connection
   const terms = new Map<string, TerminalHandle>() // M7: the connection's terminal sessions, keyed by id
   const killAllTerms = () => {
@@ -111,6 +140,26 @@ export function handleConnection(
     if (dir && versions) send({ type: 'versions', versions: versions.list(dir) })
   }
 
+  // M11: send the active project's chat list (the active chat highlighted).
+  const sendChats = () => {
+    const dir = activeId && manager.dirOf(activeId)
+    if (dir && chatStore && activeChatId) send({ type: 'chats', chats: chatStore.list(dir), activeId: activeChatId })
+  }
+  // M11: load a chat's saved conversation into the active session and send its transcript to render.
+  const loadChat = (id: string) => {
+    const dir = activeId && manager.dirOf(activeId)
+    if (!dir || !chatStore || !active) return
+    activeChatId = id
+    active.loadHistory(chatStore.messages(dir, id))
+    sendChats()
+    send({ type: 'chatHistory', items: historyToItems(active.getHistory()) })
+  }
+  // M11: persist the current chat's conversation (and derive its title from the first user message).
+  const saveChat = (firstUserText?: string) => {
+    const dir = activeId && manager.dirOf(activeId)
+    if (dir && chatStore && active && activeChatId) chatStore.save(dir, activeChatId, active.getHistory(), firstUserText)
+  }
+
   // Return the active session, or nudge the user to open one. Captured into a const at each call site so
   // TS narrowing survives the `await`s that follow (a `let` closure var would re-widen).
   const requireActive = (): CascadeSession | undefined => {
@@ -148,6 +197,9 @@ export function handleConnection(
           if (msg.action === 'open') {
             sendTree() // populate the Code pane for the opened project
             sendVersions() // populate the Versions panel (M6)
+            // M11: load the project's chats and restore the most-recent one's conversation into the session.
+            const dir = activeId && manager.dirOf(activeId)
+            if (dir && chatStore) loadChat(chatStore.list(dir)[0].id)
             const pv = activeId && preview?.state(activeId) // re-show a preview already running for this project
             if (pv) {
               emitPreview(pv)
@@ -161,6 +213,8 @@ export function handleConnection(
           if (!s) break
           for await (const ev of s.submit(msg.text)) send(ev)
           sendTree() // the agent may have created/edited files — refresh the tree
+          saveChat(msg.text) // M11: persist the turn to the active chat (+ title it from the first message)
+          sendChats() // the title may have changed
           // M6: checkpoint the turn's file changes (no-op if nothing changed), then refresh the history.
           const dir = activeId && manager.dirOf(activeId)
           if (dir && versions?.checkpoint(dir, msg.text)) sendVersions()
@@ -257,6 +311,27 @@ export function handleConnection(
             versions.restore(dir, msg.id)
             sendTree() // files changed on disk → refresh the Code pane (the preview hot-reloads on its own)
             sendVersions()
+          }
+          break
+        }
+        case 'chat': { // M11: multiple chats per project
+          const dir = activeId && manager.dirOf(activeId)
+          if (!dir || !chatStore || !active) break
+          if (msg.action === 'list') sendChats()
+          else if (msg.action === 'new') {
+            saveChat() // snapshot the current chat before starting a fresh one
+            active.reset()
+            loadChat(chatStore.create(dir).id)
+          } else if (msg.action === 'switch' && msg.id) {
+            saveChat()
+            loadChat(msg.id)
+          } else if (msg.action === 'rename' && msg.id && msg.title) {
+            chatStore.rename(dir, msg.id, msg.title)
+            sendChats()
+          } else if (msg.action === 'delete' && msg.id) {
+            chatStore.delete(dir, msg.id)
+            if (msg.id === activeChatId) loadChat(chatStore.list(dir)[0].id) // list() recreates one if none remain
+            else sendChats()
           }
           break
         }
@@ -384,11 +459,12 @@ async function start() {
   previewProxy?.listen()
   const preview = new PreviewManager(previewProxy ? PREVIEW_PORT : undefined)
   const versions = new VersionManager() // M6: git checkpoints/restore (stateless; runs git in each project dir)
+  const chatStore = new ChatStore() // M11: multiple chats per project, persisted under each project's .cascade/
   // M7 security: an explicit http.Server so we can bind localhost, serve the token over CORS, and validate the
   // WS upgrade's Origin + token (see handleHttp / verifyWsClient).
   const httpServer = createServer(handleHttp)
   const wss = new WebSocketServer({ server: httpServer, verifyClient: verifyWsClient })
-  wss.on('connection', (ws) => handleConnection(ws, manager, preview, previewProxy, PREVIEW_PORT, versions))
+  wss.on('connection', (ws) => handleConnection(ws, manager, preview, previewProxy, PREVIEW_PORT, versions, chatStore))
   httpServer.listen(PORT, HOST)
   // Graceful exit (Ctrl-C / SIGTERM): dispose sessions + remove this run's sandbox containers. (A hard
   // SIGKILL skips this — the startup sweep above is the backstop.)
