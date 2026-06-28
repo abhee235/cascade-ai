@@ -53,9 +53,16 @@ export class DockerSandbox implements Sandbox {
     if (this.containerId) return Promise.resolve(this.containerId)
     if (this.starting) return this.starting
     // Docker Desktop on Windows accepts forward-slash drive paths (C:/Users/…).
-    const mount = `${this.projectDir.replace(/\\/g, '/')}:/workspace`
+    const projectDir = this.projectDir.replace(/\\/g, '/')
+    const mount = `${projectDir}:/workspace`
+    // CRITICAL: keep node_modules OFF the bind mount. npm writes thousands of tiny files and does atomic
+    // renames, which are pathologically slow — and can outright HANG — on a Windows→Linux Docker bind mount.
+    // A named Docker volume shadows /workspace/node_modules with the fast container filesystem, so installs
+    // are quick and survive container restarts (install once per project). Source files stay bind-mounted so
+    // the agent's edits + Vite still see them.
+    const nmVolume = `cascade-nm-${(projectDir.split('/').pop() || 'project').replace(/[^a-zA-Z0-9_.-]/g, '-')}`
     this.starting = dockerRun([
-      'run', '-d', '--rm', '-w', '/workspace', '-v', mount, '-p', `0:${DEV_PORT}`, this.image, 'sh', '-c', 'tail -f /dev/null',
+      'run', '-d', '--rm', '-w', '/workspace', '-v', mount, '-v', `${nmVolume}:/workspace/node_modules`, '-p', `0:${DEV_PORT}`, this.image, 'sh', '-c', 'tail -f /dev/null',
     ]).then(async ({ output, exitCode }) => {
       if (exitCode !== 0) throw new Error(`docker run failed: ${output.trim() || 'unknown error'}`)
       const id = output.trim().split('\n').pop()!.trim()

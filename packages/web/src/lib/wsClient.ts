@@ -12,6 +12,8 @@ export type WireMessage = InboundMessage | BuilderCommand
 
 export class WsClient {
   private ws?: WebSocket
+  private queue: WireMessage[] = [] // messages enqueued while the socket isn't OPEN; flushed on (re)open
+  private closed = false // set by close() so an intentional teardown doesn't reconnect
   constructor(
     private readonly url: string,
     private readonly onEvent: (e: WireEvent) => void,
@@ -19,12 +21,20 @@ export class WsClient {
   ) {}
 
   connect() {
+    if (this.closed) return
     const ws = new WebSocket(this.url)
     this.ws = ws
-    ws.onopen = () => this.onConnected(true)
+    ws.onopen = () => {
+      // Flush anything queued while connecting (e.g. the project `open` sent during the initial load), so it
+      // isn't silently dropped.
+      const pending = this.queue
+      this.queue = []
+      for (const m of pending) ws.send(JSON.stringify(m))
+      this.onConnected(true)
+    }
     ws.onclose = () => {
       this.onConnected(false)
-      setTimeout(() => this.connect(), 1000) // reconnect
+      if (!this.closed) setTimeout(() => this.connect(), 1000) // reconnect unless we deliberately closed
     }
     ws.onmessage = (ev) => {
       try {
@@ -37,5 +47,13 @@ export class WsClient {
 
   send(msg: WireMessage) {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg))
+    else this.queue.push(msg) // not open yet → deliver on the next open
+  }
+
+  /** Tear down for good (React unmount / HMR): stop reconnecting and close the socket. Prevents a storm of
+   *  orphaned connections from StrictMode double-mounts and hot reloads. */
+  close() {
+    this.closed = true
+    this.ws?.close()
   }
 }
