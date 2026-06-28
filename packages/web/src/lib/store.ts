@@ -8,7 +8,7 @@ import type { WireEvent, WireMessage } from './wsClient'
 import { extractMessage, type Item, type Page, type PreviewState, type Recovering, type RightTab, type Streaming } from './types'
 import { StreamingOptimizer } from './streamingOptimizer'
 import { applyTheme, getInitialTheme, type Theme } from './theme'
-import type { FileNode, Problem, ProjectInfo, TemplateInfo } from '@cascade/app-protocol'
+import type { FileNode, Problem, ProjectInfo, TemplateInfo, Version } from '@cascade/app-protocol'
 
 interface UiState {
   // routing (lightweight in-store router)
@@ -38,6 +38,8 @@ interface UiState {
   // type-check problems (M5.3) + whether a check is currently running
   problems: Problem[]
   checking: boolean
+  // git checkpoint history (M6), newest first
+  versions: Version[]
   // shell
   sidebarCollapsed: boolean
   rightTab: RightTab
@@ -69,6 +71,7 @@ interface UiState {
   clearLogs: () => void
   runCheck: () => void // M5.3: ask the server to type-check the project
   fixProblems: () => void // M5.3: hand the current problems to the agent to fix
+  restoreVersion: (id: string) => void // M6: restore the project to a checkpoint
 }
 
 export const useStore = create<UiState>((set, get) => {
@@ -139,6 +142,7 @@ export const useStore = create<UiState>((set, get) => {
     logs: [],
     problems: [],
     checking: false,
+    versions: [],
     sidebarCollapsed: false,
     rightTab: 'preview',
     theme: getInitialTheme(),
@@ -266,6 +270,9 @@ export const useStore = create<UiState>((set, get) => {
         case 'problems':
           set({ problems: e.problems, checking: e.checking ?? false })
           break
+        case 'versions':
+          set({ versions: e.versions })
+          break
       }
     },
 
@@ -287,7 +294,7 @@ export const useStore = create<UiState>((set, get) => {
     openProject: (id) => {
       if (id === get().activeId) return
       // Set activeId optimistically so submit() works before the server's `projects` snapshot round-trips.
-      set({ activeId: id, items: [], streaming: null, status: null, busy: false, fileTree: [], openFile: null, fileDiff: null, codeView: 'code', preview: null, logs: [], problems: [], checking: false })
+      set({ activeId: id, items: [], streaming: null, status: null, busy: false, fileTree: [], openFile: null, fileDiff: null, codeView: 'code', preview: null, logs: [], problems: [], checking: false, versions: [] })
       get().send({ type: 'project', action: 'open', id })
     },
     deleteProject: (id) => {
@@ -356,6 +363,7 @@ export const useStore = create<UiState>((set, get) => {
       const list = problems.map((p) => `- ${p.file}(${p.line},${p.col}): ${p.message}`).join('\n')
       submit(`Fix these TypeScript errors so the project type-checks cleanly:\n${list}`)
     },
+    restoreVersion: (id) => get().send({ type: 'version', action: 'restore', id }),
     toggleTheme: () => {
       const theme: Theme = get().theme === 'dark' ? 'light' : 'dark'
       applyTheme(theme)

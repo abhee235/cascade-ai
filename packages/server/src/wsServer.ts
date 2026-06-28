@@ -20,6 +20,7 @@ import { readDiff, readFile, readTree } from './fileService.js'
 import { PreviewManager } from './previewManager.js'
 import { PreviewProxy } from './previewProxy.js'
 import { runCheck } from './checkProject.js'
+import { VersionManager } from './versionManager.js'
 
 /** What a connection can receive: a core session message OR an app/builder command. */
 type Inbound = InboundMessage | BuilderCommand
@@ -41,6 +42,7 @@ export function handleConnection(
   preview?: PreviewManager,
   previewProxy?: PreviewProxy,
   previewPort?: number,
+  versions?: VersionManager,
 ): void {
   const send = (msg: unknown) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg))
@@ -79,6 +81,12 @@ export function handleConnection(
     if (dir) send({ type: 'files', tree: readTree(dir) })
   }
 
+  // Send the active project's checkpoint history (M6).
+  const sendVersions = () => {
+    const dir = activeId && manager.dirOf(activeId)
+    if (dir && versions) send({ type: 'versions', versions: versions.list(dir) })
+  }
+
   // Return the active session, or nudge the user to open one. Captured into a const at each call site so
   // TS narrowing survives the `await`s that follow (a `let` closure var would re-widen).
   const requireActive = (): CascadeSession | undefined => {
@@ -114,6 +122,7 @@ export function handleConnection(
           send({ type: 'projects', projects: manager.list(), activeId })
           if (msg.action === 'open') {
             sendTree() // populate the Code pane for the opened project
+            sendVersions() // populate the Versions panel (M6)
             const pv = activeId && preview?.state(activeId) // re-show a preview already running for this project
             if (pv) {
               emitPreview(pv)
@@ -127,6 +136,9 @@ export function handleConnection(
           if (!s) break
           for await (const ev of s.submit(msg.text)) send(ev)
           sendTree() // the agent may have created/edited files — refresh the tree
+          // M6: checkpoint the turn's file changes (no-op if nothing changed), then refresh the history.
+          const dir = activeId && manager.dirOf(activeId)
+          if (dir && versions?.checkpoint(dir, msg.text)) sendVersions()
           break
         }
         case 'files': // request the active project's file tree
@@ -181,6 +193,18 @@ export function handleConnection(
           send({ type: 'problems', problems: [], checking: true })
           const problems = await runCheck(sandbox)
           send({ type: 'problems', problems, checking: false })
+          break
+        }
+        case 'versions': // M6: list checkpoints
+          sendVersions()
+          break
+        case 'version': { // M6: restore the project to a checkpoint
+          const dir = activeId && manager.dirOf(activeId)
+          if (dir && versions && msg.action === 'restore') {
+            versions.restore(dir, msg.id)
+            sendTree() // files changed on disk → refresh the Code pane (the preview hot-reloads on its own)
+            sendVersions()
+          }
           break
         }
         case 'permission':
@@ -245,8 +269,9 @@ async function start() {
   const previewProxy = hasDocker ? new PreviewProxy(PREVIEW_PORT) : undefined
   previewProxy?.listen()
   const preview = new PreviewManager(previewProxy ? PREVIEW_PORT : undefined)
+  const versions = new VersionManager() // M6: git checkpoints/restore (stateless; runs git in each project dir)
   const wss = new WebSocketServer({ port: PORT })
-  wss.on('connection', (ws) => handleConnection(ws, manager, preview, previewProxy, PREVIEW_PORT))
+  wss.on('connection', (ws) => handleConnection(ws, manager, preview, previewProxy, PREVIEW_PORT, versions))
   // Graceful exit (Ctrl-C / SIGTERM): dispose sessions + remove this run's sandbox containers. (A hard
   // SIGKILL skips this — the startup sweep above is the backstop.)
   const shutdown = () => void Promise.allSettled([manager.dispose(), sweepSandboxContainers()]).finally(() => process.exit(0))
