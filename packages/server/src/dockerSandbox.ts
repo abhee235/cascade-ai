@@ -37,6 +37,19 @@ export async function dockerAvailable(): Promise<boolean> {
 /** The dev-server port the container publishes (the scaffold runs `vite --host --port 5173`). */
 const DEV_PORT = Number(process.env.CASCADE_DEV_PORT ?? 5173)
 
+/** Label stamped on every sandbox container, so we can sweep our own (and only our own) leftovers. */
+const SANDBOX_LABEL = 'cascade.sandbox'
+
+/** Remove any leftover sandbox containers (filtered by our label). Sandbox containers are `--rm` but stay
+ *  alive via `tail -f`, so a previous server run — especially one hard-killed — leaves them orphaned. Run on
+ *  startup (clean slate; the project dirs are bind-mounted so nothing is lost) and on graceful shutdown. */
+export async function sweepSandboxContainers(): Promise<number> {
+  const { output } = await dockerRun(['ps', '-aq', '--filter', `label=${SANDBOX_LABEL}`])
+  const ids = output.trim().split('\n').map((s) => s.trim()).filter(Boolean)
+  if (ids.length) await dockerRun(['rm', '-f', ...ids])
+  return ids.length
+}
+
 export class DockerSandbox implements Sandbox {
   private containerId?: string
   private starting?: Promise<string>
@@ -62,7 +75,7 @@ export class DockerSandbox implements Sandbox {
     // the agent's edits + Vite still see them.
     const nmVolume = `cascade-nm-${(projectDir.split('/').pop() || 'project').replace(/[^a-zA-Z0-9_.-]/g, '-')}`
     this.starting = dockerRun([
-      'run', '-d', '--rm', '-w', '/workspace', '-v', mount, '-v', `${nmVolume}:/workspace/node_modules`, '-p', `0:${DEV_PORT}`, this.image, 'sh', '-c', 'tail -f /dev/null',
+      'run', '-d', '--rm', '--label', `${SANDBOX_LABEL}=1`, '-w', '/workspace', '-v', mount, '-v', `${nmVolume}:/workspace/node_modules`, '-p', `0:${DEV_PORT}`, this.image, 'sh', '-c', 'tail -f /dev/null',
     ]).then(async ({ output, exitCode }) => {
       if (exitCode !== 0) throw new Error(`docker run failed: ${output.trim() || 'unknown error'}`)
       const id = output.trim().split('\n').pop()!.trim()

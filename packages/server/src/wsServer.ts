@@ -14,7 +14,7 @@ import { WebSocketServer, type WebSocket } from 'ws'
 import type { CascadeSession, InboundMessage } from '@cascade/core'
 import type { BuilderCommand } from '@cascade/app-protocol'
 import { ProjectManager } from './projectManager.js'
-import { DockerSandbox, dockerAvailable } from './dockerSandbox.js'
+import { DockerSandbox, dockerAvailable, sweepSandboxContainers } from './dockerSandbox.js'
 import { listTemplates } from './templates.js'
 import { readDiff, readFile, readTree } from './fileService.js'
 import { PreviewManager } from './previewManager.js'
@@ -198,13 +198,21 @@ async function start() {
   // Opt out with CASCADE_SANDBOX=off. Without Docker we fall back to HOST exec (usable, but not isolated).
   const sandboxEnabled = process.env.CASCADE_SANDBOX !== 'off'
   const hasDocker = sandboxEnabled && (await dockerAvailable())
+  // Sweep sandbox containers orphaned by a previous run (a `--rm` sandbox stays alive via `tail -f`, so a
+  // hard-killed server leaves them behind). Safe: project dirs are bind-mounted; the next exec recreates one.
+  if (hasDocker) {
+    const swept = await sweepSandboxContainers().catch(() => 0)
+    if (swept) console.log(`Swept ${swept} orphaned sandbox container(s) from a previous run.`)
+  }
   const sandboxFor = hasDocker ? (dir: string) => new DockerSandbox(dir) : undefined
 
   const manager = new ProjectManager({ root: PROJECTS_ROOT, model: MODEL, baseUrl: BASE_URL, sandboxFor })
   const preview = new PreviewManager()
   const wss = new WebSocketServer({ port: PORT })
   wss.on('connection', (ws) => handleConnection(ws, manager, preview))
-  const shutdown = () => void manager.dispose().finally(() => process.exit(0))
+  // Graceful exit (Ctrl-C / SIGTERM): dispose sessions + remove this run's sandbox containers. (A hard
+  // SIGKILL skips this — the startup sweep above is the backstop.)
+  const shutdown = () => void Promise.allSettled([manager.dispose(), sweepSandboxContainers()]).finally(() => process.exit(0))
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
   console.log(
