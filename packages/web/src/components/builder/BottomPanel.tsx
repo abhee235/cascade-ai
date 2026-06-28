@@ -92,7 +92,8 @@ function TerminalSessions() {
 }
 
 export function BottomPanel() {
-  const { bottomTab, setBottomTab, toggleBottom, toggleBottomMax, bottomMaximized, problems, activeTerminalId, newTerminal, closeTerminal } = useStore()
+  const { bottomTab, setBottomTab, toggleBottom, toggleBottomMax, bottomMaximized, problems, runtimeErrors, activeTerminalId, newTerminal, closeTerminal } = useStore()
+  const problemCount = problems.length + runtimeErrors.length
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-card">
@@ -108,8 +109,8 @@ export function BottomPanel() {
             )}
           >
             {t.label}
-            {t.id === 'problems' && problems.length > 0 && (
-              <span className="ml-1 rounded-full bg-red-500/15 px-1 py-0.5 text-[10px] text-red-500">{problems.length}</span>
+            {t.id === 'problems' && problemCount > 0 && (
+              <span className="ml-1 rounded-full bg-red-500/15 px-1 py-0.5 text-[10px] text-red-500">{problemCount}</span>
             )}
             {bottomTab === t.id && <span className="absolute inset-x-1 -bottom-px h-0.5 bg-foreground" />}
           </button>

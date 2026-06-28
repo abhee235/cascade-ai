@@ -5,7 +5,7 @@
 
 import { create } from 'zustand'
 import type { WireEvent, WireMessage } from './wsClient'
-import { extractMessage, type BottomTab, type Item, type Page, type PreviewState, type Recovering, type RightTab, type Streaming } from './types'
+import { extractMessage, type BottomTab, type Item, type Page, type PreviewState, type Recovering, type RightTab, type RuntimeError, type Streaming } from './types'
 import { StreamingOptimizer } from './streamingOptimizer'
 import { applyTheme, getInitialTheme, type Theme } from './theme'
 import type { FileNode, Problem, ProjectInfo, TemplateInfo, Version } from '@cascade/app-protocol'
@@ -38,6 +38,8 @@ interface UiState {
   // type-check problems (M5.3) + whether a check is currently running
   problems: Problem[]
   checking: boolean
+  // build/runtime errors captured from the running preview (Vite overlay + window.onerror)
+  runtimeErrors: RuntimeError[]
   // git checkpoint history (M6), newest first
   versions: Version[]
   // VS Code-style bottom panel + integrated terminal (M7)
@@ -76,7 +78,8 @@ interface UiState {
   stopPreview: () => void
   clearLogs: () => void
   runCheck: () => void // M5.3: ask the server to type-check the project
-  fixProblems: () => void // M5.3: hand the current problems to the agent to fix
+  fixProblems: () => void // M5.3: hand the current problems (type + build/runtime) to the agent to fix
+  onPreviewError: (p: RuntimeError | { kind: 'build-cleared' }) => void // a preview error (or its recovery)
   restoreVersion: (id: string) => void // M6: restore the project to a checkpoint
   // bottom panel + terminal (M7)
   setBottomTab: (t: BottomTab) => void
@@ -165,6 +168,7 @@ export const useStore = create<UiState>((set, get) => {
     logs: [],
     problems: [],
     checking: false,
+    runtimeErrors: [],
     versions: [],
     bottomTab: 'terminal',
     bottomOpen: true,
@@ -329,7 +333,7 @@ export const useStore = create<UiState>((set, get) => {
       if (id === get().activeId) return
       // Set activeId optimistically so submit() works before the server's `projects` snapshot round-trips.
       terminalSinks.clear() // the server kills the old project's shells on switch; drop their writers
-      set({ activeId: id, items: [], streaming: null, status: null, busy: false, fileTree: [], openFile: null, fileDiff: null, codeView: 'code', preview: null, logs: [], problems: [], checking: false, versions: [], terminals: [], activeTerminalId: null })
+      set({ activeId: id, items: [], streaming: null, status: null, busy: false, fileTree: [], openFile: null, fileDiff: null, codeView: 'code', preview: null, logs: [], problems: [], checking: false, runtimeErrors: [], versions: [], terminals: [], activeTerminalId: null })
       get().send({ type: 'project', action: 'open', id })
     },
     deleteProject: (id) => {
@@ -393,11 +397,20 @@ export const useStore = create<UiState>((set, get) => {
       get().send({ type: 'check' })
     },
     fixProblems: () => {
-      const { problems, submit } = get()
-      if (!problems.length) return
-      const list = problems.map((p) => `- ${p.file}(${p.line},${p.col}): ${p.message}`).join('\n')
-      submit(`Fix these TypeScript errors so the project type-checks cleanly:\n${list}`)
+      const { problems, runtimeErrors, submit } = get()
+      if (!problems.length && !runtimeErrors.length) return
+      const parts: string[] = []
+      if (problems.length) parts.push('TypeScript errors:\n' + problems.map((p) => `- ${p.file}(${p.line},${p.col}): ${p.message}`).join('\n'))
+      if (runtimeErrors.length) parts.push('Build/runtime errors from the preview:\n' + runtimeErrors.map((e) => `- ${e.file ? `${e.file}: ` : ''}${e.message}`).join('\n'))
+      submit(`Fix these errors so the project type-checks, builds, and runs cleanly:\n\n${parts.join('\n\n')}`)
     },
+    onPreviewError: (p) =>
+      set((s) => {
+        if (p.kind === 'build-cleared') return { runtimeErrors: s.runtimeErrors.filter((e) => e.kind !== 'build') }
+        if (p.kind === 'build') return { runtimeErrors: [p, ...s.runtimeErrors.filter((e) => e.kind !== 'build')] } // keep only the latest build error
+        if (s.runtimeErrors.some((e) => e.kind === 'runtime' && e.message === p.message)) return {} // dedupe runtime
+        return { runtimeErrors: [...s.runtimeErrors, p].slice(-30) }
+      }),
     restoreVersion: (id) => get().send({ type: 'version', action: 'restore', id }),
     setBottomTab: (bottomTab) => set({ bottomTab, bottomOpen: true }),
     toggleBottom: () => set((s) => ({ bottomOpen: !s.bottomOpen, bottomMaximized: false })),

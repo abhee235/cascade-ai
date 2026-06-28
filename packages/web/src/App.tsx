@@ -30,7 +30,17 @@ export function App() {
     setSend((m) => client.send(m))
     client.connect()
     initRouter() // sync the address bar ↔ in-store router (deep-link /project/<slug>, back/forward)
-    return () => client.close() // StrictMode/HMR: tear down so we don't leak reconnecting sockets
+
+    // Build/runtime errors from the preview iframe (the proxy injects a capture script that postMessages here).
+    const onMsg = (e: MessageEvent) => {
+      if (e.data && e.data.__cascade === 'preview-error') useStore.getState().onPreviewError(e.data.payload)
+    }
+    window.addEventListener('message', onMsg)
+
+    return () => {
+      window.removeEventListener('message', onMsg)
+      client.close() // StrictMode/HMR: tear down so we don't leak reconnecting sockets
+    }
   }, [])
 
   return (
