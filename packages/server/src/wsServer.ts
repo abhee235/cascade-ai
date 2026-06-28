@@ -17,8 +17,8 @@ import type { CascadeSession, InboundMessage } from '@cascade/core'
 import type { BuilderCommand } from '@cascade/app-protocol'
 import { ProjectManager } from './projectManager.js'
 import { DockerSandbox, dockerAvailable, sweepSandboxContainers } from './dockerSandbox.js'
-import { listTemplates } from './templates.js'
-import { readDiff, readFile, readTree } from './fileService.js'
+import { ensureVisualEditConfig, listTemplates } from './templates.js'
+import { createFile, deletePath, editJsxTextAtLoc, makeDir, readDiff, readFile, readTree, renamePath, writeFile } from './fileService.js'
 import { PreviewManager } from './previewManager.js'
 import { PreviewProxy } from './previewProxy.js'
 import { runCheck } from './checkProject.js'
@@ -176,6 +176,28 @@ export function handleConnection(
             if (msg.action === 'diff') {
               const { original, modified } = readDiff(dir, msg.path)
               send({ type: 'fileDiff', path: msg.path, original, modified })
+            } else if (msg.action === 'write') {
+              writeFile(dir, msg.path, msg.content) // M9/Code-pane save; Vite HMR reloads the preview
+              send({ type: 'fileEdited', path: msg.path, ok: true })
+              sendTree()
+            } else if (msg.action === 'editText') {
+              const ok = editJsxTextAtLoc(dir, msg.path, msg.line, msg.col, msg.text) // M9 inline text edit
+              send({ type: 'fileEdited', path: msg.path, ok }) // ok:false ⇒ client falls back to an AI edit
+            } else if (msg.action === 'create' || msg.action === 'mkdir' || msg.action === 'rename' || msg.action === 'delete') {
+              // M9 file-tree ops. On failure (e.g. name collision, traversal) surface a toast and keep the tree intact.
+              try {
+                if (msg.action === 'create') createFile(dir, msg.path)
+                else if (msg.action === 'mkdir') makeDir(dir, msg.path)
+                else if (msg.action === 'rename') renamePath(dir, msg.path, msg.to)
+                else deletePath(dir, msg.path)
+                sendTree() // a path appeared/moved/vanished → refresh the Code pane's tree
+                if (msg.action === 'create') {
+                  const { content, truncated } = readFile(dir, msg.path)
+                  send({ type: 'fileContent', path: msg.path, content, truncated }) // open the new file
+                }
+              } catch (err) {
+                send({ type: 'fileOpError', action: msg.action, message: (err as Error).message })
+              }
             } else {
               const { content, truncated } = readFile(dir, msg.path)
               send({ type: 'fileContent', path: msg.path, content, truncated })
@@ -198,6 +220,8 @@ export function handleConnection(
           const sandbox = manager.sandboxOf(activeId)
           if (sandbox instanceof DockerSandbox) {
             const id = activeId
+            const dir = manager.dirOf(id)
+            if (dir) ensureVisualEditConfig(dir) // M9: backfill the loc-stamp on projects scaffolded before it
             void preview.start(id, sandbox, (s) => {
               emitPreview(s)
               if (s.status === 'running') startTail(id) // begin streaming dev-server logs to the Console pane

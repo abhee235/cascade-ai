@@ -3,10 +3,15 @@
 // the client are RELATIVE to the project root (host paths never cross the wire). Guards: skip heavy dirs,
 // cap file size, block path traversal, flag binaries.
 
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import { join, relative, resolve, sep } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
+import { parse } from '@babel/parser'
+import _traverse from '@babel/traverse'
 import type { FileNode } from '@cascade/app-protocol'
+
+// @babel/traverse ships as CJS; under ESM the callable hides behind `.default`.
+const traverse = ((_traverse as any).default ?? _traverse) as typeof _traverse
 
 const SKIP = new Set(['node_modules', '.git', 'dist', '.vite', '.next'])
 const MAX_DEPTH = 10
@@ -45,6 +50,86 @@ export function readFile(root: string, relPath: string): { content: string; trun
   if (buf.subarray(0, 8000).includes(0)) return { content: '⟨binary file⟩', truncated: false }
   const truncated = buf.length > MAX_FILE_BYTES
   return { content: buf.subarray(0, MAX_FILE_BYTES).toString('utf8'), truncated }
+}
+
+/** Write one file's content (relative to `root`). Same traversal guard as readFile. Used by the Code pane's
+ *  save path and visual editing (M9); the bind-mounted dir means Vite's watcher hot-reloads the change. */
+export function writeFile(root: string, relPath: string, content: string): void {
+  const abs = resolve(root, relPath)
+  if (abs !== root && !abs.startsWith(root + sep)) throw new Error('Path is outside the project')
+  if (statSync(abs).isDirectory()) throw new Error('Path is a directory')
+  writeFileSync(abs, content, 'utf8')
+}
+
+/** Resolve a project-relative path to an absolute one, rejecting anything that escapes the project root. */
+function safeResolve(root: string, relPath: string): string {
+  const abs = resolve(root, relPath)
+  if (abs !== root && !abs.startsWith(root + sep)) throw new Error('Path is outside the project')
+  return abs
+}
+
+/** Create an empty file at `relPath` (creating parent dirs). Throws if it already exists. (M9 file tree) */
+export function createFile(root: string, relPath: string): void {
+  const abs = safeResolve(root, relPath)
+  if (existsSync(abs)) throw new Error('A file or folder with that name already exists')
+  mkdirSync(dirname(abs), { recursive: true })
+  writeFileSync(abs, '', { flag: 'wx' })
+}
+
+/** Create a directory at `relPath` (recursive). (M9 file tree) */
+export function makeDir(root: string, relPath: string): void {
+  const abs = safeResolve(root, relPath)
+  if (existsSync(abs)) throw new Error('A file or folder with that name already exists')
+  mkdirSync(abs, { recursive: true })
+}
+
+/** Rename/move `from` → `to` (both project-relative). Creates the destination's parent dirs. (M9 file tree) */
+export function renamePath(root: string, from: string, to: string): void {
+  const absFrom = safeResolve(root, from)
+  const absTo = safeResolve(root, to)
+  if (!existsSync(absFrom)) throw new Error('Source no longer exists')
+  if (existsSync(absTo)) throw new Error('A file or folder with that name already exists')
+  mkdirSync(dirname(absTo), { recursive: true })
+  renameSync(absFrom, absTo)
+}
+
+/** Delete a file or folder (recursive) at `relPath`. Refuses to delete the project root. (M9 file tree) */
+export function deletePath(root: string, relPath: string): void {
+  const abs = safeResolve(root, relPath)
+  if (abs === root) throw new Error('Cannot delete the project root')
+  rmSync(abs, { recursive: true, force: true })
+}
+
+// JSX text can't contain raw `< > { }` — they'd start a tag/expression. Escape so typed text lands literally.
+const escapeJsxText = (s: string) => s.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/{/g, '&#123;').replace(/}/g, '&#125;')
+
+/** Visual editing (M9): replace the text of the JSX element whose opening tag starts at `line:col` (1-based
+ *  line, 0-based col — matching Babel/`data-cascade-loc`) with `newText`, and write the file. We PARSE only to
+ *  locate the children's character range, then splice the original source string — so every other byte of the
+ *  file (formatting, quotes, neighbouring code) is preserved. Returns true on success; false when the target
+ *  isn't a plain-text container (self-closing, or it holds nested elements/expressions) — the caller then
+ *  falls back to an AI edit instead of corrupting the JSX. */
+export function editJsxTextAtLoc(root: string, relPath: string, line: number, col: number, newText: string): boolean {
+  const { content } = readFile(root, relPath)
+  const ast = parse(content, { sourceType: 'module', plugins: ['jsx', 'typescript'] })
+  let start = -1
+  let end = -1
+  traverse(ast, {
+    JSXElement(path) {
+      const o = path.node.openingElement
+      if (o.loc?.start.line !== line || o.loc?.start.column !== col) return
+      const close = path.node.closingElement
+      if (!close || close.start == null || o.end == null) return // self-closing → no text region
+      if (path.node.children.some((k) => k.type !== 'JSXText')) return // holds elements/expressions → not inline-editable
+      start = o.end
+      end = close.start
+      path.stop()
+    },
+  })
+  if (start < 0) return false
+  const next = content.slice(0, start) + escapeJsxText(newText) + content.slice(end)
+  writeFile(root, relPath, next)
+  return true
 }
 
 /** A file's diff inputs: its content at the last git commit (`original`) vs now (`modified`). For the

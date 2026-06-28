@@ -6,7 +6,7 @@ import { ActivityCard } from './ActivityCard'
 import { cn } from '@/lib/utils'
 
 export function ChatPanel() {
-  const { items, streaming, status, recovering, busy, connected, activeId, submit, stop } = useStore()
+  const { items, streaming, status, recovering, busy, connected, activeId, submit, stop, composerDraft, setComposerDraft } = useStore()
   const [input, setInput] = useState('')
   const endRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
@@ -14,6 +14,23 @@ export function ChatPanel() {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [items, streaming, status, recovering])
+
+  // M9: "Edit with AI" (and similar) prefill the composer through the store. Adopt the draft, focus, and
+  // place the caret at the end so the user just types the change.
+  useEffect(() => {
+    if (!composerDraft) return
+    setInput(composerDraft)
+    setComposerDraft('')
+    const ta = taRef.current
+    if (ta) {
+      ta.focus()
+      requestAnimationFrame(() => {
+        ta.style.height = 'auto'
+        ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`
+        ta.setSelectionRange(ta.value.length, ta.value.length)
+      })
+    }
+  }, [composerDraft, setComposerDraft])
 
   // Auto-grow the textarea up to a max height, then scroll.
   const autosize = (el: HTMLTextAreaElement) => {

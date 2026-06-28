@@ -9,12 +9,15 @@
     "start": "tsx src/wsServer.ts"
   },
   "dependencies": {
+    "@babel/parser": "^7.25.0",
+    "@babel/traverse": "^7.25.0",
     "@cascade/app-protocol": "*",
     "@cascade/core": "*",
     "dockerode": "^5.0.1",
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@types/babel__traverse": "^7.20.0",
     "@types/dockerode": "^4.0.1",
     "@types/node": "^20.14.0",
     "@types/ws": "^8.5.10",

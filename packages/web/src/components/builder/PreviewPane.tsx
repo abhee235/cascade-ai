@@ -1,8 +1,10 @@
 // PreviewPane.tsx — the Preview tab (M3). Runs the project's dev server in its Docker sandbox and shows it
 // in an iframe. States: not-started (Run button) → installing/starting (spinner) → running (iframe) → error.
+// Visual editing (M9): a "Select" toggle arms pick-mode in the iframe (via postMessage to the proxy-injected
+// overlay script); a click there reports the element back and we float an inspector to edit it.
 
-import { useState, type ReactNode } from 'react'
-import { AlertTriangle, Loader2, Play, RotateCw, Square } from 'lucide-react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { AlertTriangle, Loader2, MousePointerSquareDashed, Play, RotateCw, Square } from 'lucide-react'
 import { useStore } from '@/lib/store'
 import { Button } from '@/components/ui/button'
 
@@ -11,8 +13,15 @@ function Center({ children }: { children: ReactNode }) {
 }
 
 export function PreviewPane() {
-  const { activeId, preview, startPreview, stopPreview } = useStore()
+  const { activeId, preview, startPreview, stopPreview, selectMode, toggleSelectMode } = useStore()
   const [reloadKey, setReloadKey] = useState(0)
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+
+  // Drive the proxy-injected overlay's pick-mode. Re-assert on every (re)load — the injected script restarts
+  // fresh after HMR, so it would otherwise lose the armed state.
+  const postMode = () => iframeRef.current?.contentWindow?.postMessage({ __cascade: 'select-mode', on: selectMode }, '*')
+  // biome-ignore lint/correctness/useExhaustiveDependencies: also re-post when the iframe reloads
+  useEffect(postMode, [selectMode, reloadKey])
 
   if (!activeId) return <Center>Open a project to start.</Center>
 
@@ -24,11 +33,36 @@ export function PreviewPane() {
             <RotateCw className="h-3.5 w-3.5" />
           </Button>
           <span className="truncate font-mono text-xs text-muted-foreground">{preview.url}</span>
-          <Button variant="ghost" size="icon-sm" className="ml-auto" title="Stop" onClick={stopPreview}>
+          <Button
+            variant={selectMode ? 'default' : 'ghost'}
+            size="icon-sm"
+            className="ml-auto"
+            title={selectMode ? 'Cancel select' : 'Select an element to edit'}
+            onClick={toggleSelectMode}
+          >
+            <MousePointerSquareDashed className="h-3.5 w-3.5" />
+          </Button>
+          <Button variant="ghost" size="icon-sm" title="Stop" onClick={stopPreview}>
             <Square className="h-3.5 w-3.5" />
           </Button>
         </div>
-        <iframe key={reloadKey} src={preview.url} title="Preview" className="min-h-0 flex-1 border-0 bg-white" />
+        <div className="relative min-h-0 flex-1">
+          <iframe
+            ref={iframeRef}
+            key={reloadKey}
+            src={preview.url}
+            title="Preview"
+            onLoad={postMode}
+            className="h-full w-full border-0 bg-white"
+          />
+          {selectMode && (
+            <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center">
+              <span className="mt-2 rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground shadow">
+                Click any text to edit it in place
+              </span>
+            </div>
+          )}
+        </div>
       </div>
     )
   }
@@ -71,3 +105,4 @@ export function PreviewPane() {
     </Center>
   )
 }
+

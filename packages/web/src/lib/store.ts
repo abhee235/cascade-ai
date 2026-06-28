@@ -31,6 +31,7 @@ interface UiState {
   openFile: { path: string; content: string } | null
   fileDiff: { path: string; original: string; modified: string } | null
   codeView: 'code' | 'diff'
+  fileError: string | null // a transient file-operation error to surface in the Code pane (M9), auto-clears
   // live preview (M3)
   preview: PreviewState | null
   // dev-server console logs (M5), newest last; capped to keep memory bounded
@@ -48,6 +49,10 @@ interface UiState {
   bottomMaximized: boolean
   terminals: string[] // open terminal session ids (order = tab order)
   activeTerminalId: string | null
+  // visual editing (M9): in-place edit of an element clicked in the preview (the editing UI lives inside the
+  // iframe; the store just arms select mode, persists committed text, and feeds the "AI edit" prefill)
+  selectMode: boolean // the preview's "select an element" mode is armed
+  composerDraft: string // text to push into the chat composer (e.g. an "AI edit" prefill); '' = none
   // shell
   sidebarCollapsed: boolean
   rightTab: RightTab
@@ -74,6 +79,11 @@ interface UiState {
   requestFile: (path: string) => void
   openFileInCode: (path: string, view?: 'code' | 'diff') => void
   setCodeView: (v: 'code' | 'diff') => void
+  saveFile: (path: string, content: string) => void // M9: persist a Code-pane edit (→ file:write → HMR)
+  createFile: (path: string) => void // M9 file tree: new empty file (and open it)
+  createFolder: (path: string) => void // M9 file tree: new folder
+  renameEntry: (path: string, to: string) => void // M9 file tree: rename/move
+  deleteEntry: (path: string) => void // M9 file tree: delete file/folder
   startPreview: () => void
   stopPreview: () => void
   clearLogs: () => void
@@ -93,6 +103,12 @@ interface UiState {
   stopTerminal: (id: string) => void
   terminalInput: (id: string, data: string) => void
   terminalResize: (id: string, cols: number, rows: number) => void
+  // visual editing (M9)
+  toggleSelectMode: () => void // arm/disarm "select an element" mode
+  setSelectMode: (on: boolean) => void
+  editPreviewText: (loc: string, tag: string, text: string) => void // commit an in-place edit → write source (splice the JSX)
+  aiEditPreview: (loc: string, tag: string, text: string) => void // hand the element to the chat composer for an AI edit
+  setComposerDraft: (text: string) => void // composer reads + clears this (prefill channel)
 }
 
 export const useStore = create<UiState>((set, get) => {
@@ -112,6 +128,15 @@ export const useStore = create<UiState>((set, get) => {
   // its writer here on mount; `terminalData` events route to the matching session.
   const terminalSinks = new Map<string, (chunk: string) => void>()
   let termSeq = 0 // monotonic id source for new terminal sessions
+
+  // M9: the last in-place edit's context, so if the server refuses the splice (non-plain-text element) we can
+  // fall back to an AI edit with the right file/line. data-cascade-loc is "file:line:col" (1-based line, 0-based
+  // col, from Babel); parse from the right so a relative path's own characters don't confuse the split.
+  let lastEditCtx: { file: string; line: number; tag: string; text: string } | null = null
+  const parseLoc = (loc: string) => {
+    const m = loc.match(/^(.*):(\d+):(\d+)$/)
+    return m ? { file: m[1], line: Number(m[2]), col: Number(m[3]) } : null
+  }
 
   // ── URL routing (History API; no react-router). The in-store `page`/`activeId` is the source of truth;
   // these keep the address bar in sync so a project shows /project/<slug>, and reload/back/forward work. ──
@@ -162,6 +187,7 @@ export const useStore = create<UiState>((set, get) => {
     busy: false,
     fileTree: [],
     openFile: null,
+    fileError: null,
     fileDiff: null,
     codeView: 'code',
     preview: null,
@@ -175,6 +201,8 @@ export const useStore = create<UiState>((set, get) => {
     bottomMaximized: false,
     terminals: [],
     activeTerminalId: null,
+    selectMode: false,
+    composerDraft: '',
     sidebarCollapsed: false,
     rightTab: 'preview',
     theme: getInitialTheme(),
@@ -290,6 +318,17 @@ export const useStore = create<UiState>((set, get) => {
         case 'fileContent':
           set({ openFile: { path: e.path, content: e.content } })
           break
+        case 'fileEdited':
+          // M9: a visual edit landed. ok:false ⇒ the element wasn't a plain-text container (nested
+          // elements/expressions), so fall back to an AI edit by prefilling the composer with its context.
+          if (!e.ok && lastEditCtx) get().aiEditPreview(`${lastEditCtx.file}:${lastEditCtx.line}:0`, lastEditCtx.tag, lastEditCtx.text)
+          break
+        case 'fileOpError': {
+          // M9 file-tree op failed (name collision, etc). Surface it briefly in the Code pane.
+          set({ fileError: e.message })
+          setTimeout(() => set((s) => (s.fileError === e.message ? { fileError: null } : {})), 4000)
+          break
+        }
         case 'fileDiff':
           set({ fileDiff: { path: e.path, original: e.original, modified: e.modified } })
           break
@@ -333,7 +372,7 @@ export const useStore = create<UiState>((set, get) => {
       if (id === get().activeId) return
       // Set activeId optimistically so submit() works before the server's `projects` snapshot round-trips.
       terminalSinks.clear() // the server kills the old project's shells on switch; drop their writers
-      set({ activeId: id, items: [], streaming: null, status: null, busy: false, fileTree: [], openFile: null, fileDiff: null, codeView: 'code', preview: null, logs: [], problems: [], checking: false, runtimeErrors: [], versions: [], terminals: [], activeTerminalId: null })
+      set({ activeId: id, items: [], streaming: null, status: null, busy: false, fileTree: [], openFile: null, fileError: null, fileDiff: null, codeView: 'code', preview: null, logs: [], problems: [], checking: false, runtimeErrors: [], versions: [], terminals: [], activeTerminalId: null, selectMode: false })
       get().send({ type: 'project', action: 'open', id })
     },
     deleteProject: (id) => {
@@ -381,6 +420,21 @@ export const useStore = create<UiState>((set, get) => {
       set({ codeView })
       const f = get().openFile
       if (codeView === 'diff' && f && get().fileDiff?.path !== f.path) get().send({ type: 'file', action: 'diff', path: f.path })
+    },
+    saveFile: (path, content) => {
+      set((s) => (s.openFile?.path === path ? { openFile: { path, content } } : {})) // keep local buffer authoritative
+      get().send({ type: 'file', action: 'write', path, content })
+    },
+    createFile: (path) => get().send({ type: 'file', action: 'create', path }), // server replies with fileContent → opens it
+    createFolder: (path) => get().send({ type: 'file', action: 'mkdir', path }),
+    renameEntry: (path, to) => {
+      get().send({ type: 'file', action: 'rename', path, to })
+      if (get().openFile?.path === path) get().openFileInCode(to) // follow the open file to its new path
+    },
+    deleteEntry: (path) => {
+      get().send({ type: 'file', action: 'delete', path })
+      const open = get().openFile?.path
+      if (open && (open === path || open.startsWith(`${path}/`))) set({ openFile: null }) // it (or its dir) is gone
     },
     startPreview: () => {
       set({ preview: { status: 'installing' } }) // optimistic; server confirms via `preview` events
@@ -439,6 +493,22 @@ export const useStore = create<UiState>((set, get) => {
     stopTerminal: (id) => get().send({ type: 'terminal', action: 'stop', id }),
     terminalInput: (id, data) => get().send({ type: 'terminalInput', id, data }),
     terminalResize: (id, cols, rows) => get().send({ type: 'terminalResize', id, cols, rows }),
+    // ── visual editing (M9) ───────────────────────────────────────────────────────────────────────────
+    toggleSelectMode: () => set((s) => ({ selectMode: !s.selectMode })),
+    setSelectMode: (selectMode) => set({ selectMode }),
+    editPreviewText: (loc, tag, text) => {
+      const p = parseLoc(loc)
+      if (!p) return
+      lastEditCtx = { file: p.file, line: p.line, tag, text } // remembered for the AI fallback if the splice is refused
+      get().send({ type: 'file', action: 'editText', path: p.file, line: p.line, col: p.col, text })
+    },
+    aiEditPreview: (loc, tag, text) => {
+      const p = parseLoc(loc)
+      if (!p) return
+      const quoted = text ? ` ("${text.slice(0, 80)}")` : ''
+      set({ composerDraft: `In ${p.file}:${p.line}, the <${tag}> element${quoted}: ` })
+    },
+    setComposerDraft: (composerDraft) => set({ composerDraft }),
     toggleTheme: () => {
       const theme: Theme = get().theme === 'dark' ? 'light' : 'dark'
       applyTheme(theme)

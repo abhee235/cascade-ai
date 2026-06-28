@@ -38,6 +38,16 @@ export function applyTemplate(templateId: string, dest: string): void {
   if (existsSync(underscored)) renameSync(underscored, join(dest, '.gitignore'))
 }
 
+/** Ensure a project's vite.config carries the M9 visual-edit loc-stamp; if not (older projects predate it),
+ *  copy in the current template's config. Safe because every Cascade project uses the same React template. */
+export function ensureVisualEditConfig(projectDir: string): void {
+  const cfg = join(projectDir, 'vite.config.ts')
+  if (!existsSync(cfg)) return
+  if (readFileSync(cfg, 'utf8').includes('data-cascade-loc')) return
+  const tmpl = join(TEMPLATES_DIR, 'react', 'vite.config.ts')
+  if (existsSync(tmpl)) cpSync(tmpl, cfg)
+}
+
 /** A project's AI rules (its template's AI_RULES.md), read FRESH so the agent can edit them. '' if none. */
 export function readAiRules(projectDir: string): string {
   const path = join(projectDir, AI_RULES_FILE)

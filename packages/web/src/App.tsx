@@ -33,7 +33,10 @@ export function App() {
 
     // Build/runtime errors from the preview iframe (the proxy injects a capture script that postMessages here).
     const onMsg = (e: MessageEvent) => {
-      if (e.data && e.data.__cascade === 'preview-error') useStore.getState().onPreviewError(e.data.payload)
+      if (!e.data || typeof e.data !== 'object') return
+      if (e.data.__cascade === 'preview-error') useStore.getState().onPreviewError(e.data.payload)
+      else if (e.data.__cascade === 'preview-edit') useStore.getState().editPreviewText(e.data.loc, e.data.tag, e.data.text) // M9: committed in-place edit
+      else if (e.data.__cascade === 'preview-ai') useStore.getState().aiEditPreview(e.data.loc, e.data.tag, e.data.text) // M9: ✦ AI button
     }
     window.addEventListener('message', onMsg)
 
