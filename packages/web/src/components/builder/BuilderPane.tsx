@@ -8,6 +8,7 @@ import { useStore } from '@/lib/store'
 import type { RightTab } from '@/lib/types'
 import { CodePane } from './CodePane'
 import { PreviewPane } from './PreviewPane'
+import { ConsolePane } from './ConsolePane'
 
 const TABS: { id: RightTab; label: string; icon: LucideIcon; title: string; sub: string }[] = [
   { id: 'preview', label: 'Preview', icon: Eye, title: 'Live preview', sub: 'Runs the project in a sandbox and shows it here (coming soon).' },
@@ -43,6 +44,10 @@ export function BuilderPane() {
         ) : t.id === 'preview' ? (
           <TabsContent key={t.id} value={t.id} className="min-h-0">
             <PreviewPane />
+          </TabsContent>
+        ) : t.id === 'console' ? (
+          <TabsContent key={t.id} value={t.id} className="min-h-0">
+            <ConsolePane />
           </TabsContent>
         ) : (
           <TabsContent key={t.id} value={t.id} className="flex items-center justify-center p-6 text-center">

@@ -33,6 +33,8 @@ interface UiState {
   codeView: 'code' | 'diff'
   // live preview (M3)
   preview: PreviewState | null
+  // dev-server console logs (M5), newest last; capped to keep memory bounded
+  logs: string[]
   // shell
   sidebarCollapsed: boolean
   rightTab: RightTab
@@ -51,6 +53,7 @@ interface UiState {
   navigate: (page: Page) => void
   openProjectPage: (id: string) => void
   initRouter: () => void // wire the address bar ↔ store (called once by App)
+  reopenActive: () => void // re-send `open` for the active project after a (re)connect
   startBuild: (prompt: string, templateId?: string) => void
   toggleSidebar: () => void
   setRightTab: (t: RightTab) => void
@@ -60,6 +63,7 @@ interface UiState {
   setCodeView: (v: 'code' | 'diff') => void
   startPreview: () => void
   stopPreview: () => void
+  clearLogs: () => void
 }
 
 export const useStore = create<UiState>((set, get) => {
@@ -127,6 +131,7 @@ export const useStore = create<UiState>((set, get) => {
     fileDiff: null,
     codeView: 'code',
     preview: null,
+    logs: [],
     sidebarCollapsed: false,
     rightTab: 'preview',
     theme: getInitialTheme(),
@@ -248,6 +253,9 @@ export const useStore = create<UiState>((set, get) => {
         case 'preview':
           set({ preview: { status: e.status, url: e.url } })
           break
+        case 'log':
+          set((s) => ({ logs: [...s.logs, e.line].slice(-2000) }))
+          break
       }
     },
 
@@ -269,7 +277,7 @@ export const useStore = create<UiState>((set, get) => {
     openProject: (id) => {
       if (id === get().activeId) return
       // Set activeId optimistically so submit() works before the server's `projects` snapshot round-trips.
-      set({ activeId: id, items: [], streaming: null, status: null, busy: false, fileTree: [], openFile: null, fileDiff: null, codeView: 'code', preview: null })
+      set({ activeId: id, items: [], streaming: null, status: null, busy: false, fileTree: [], openFile: null, fileDiff: null, codeView: 'code', preview: null, logs: [] })
       get().send({ type: 'project', action: 'open', id })
     },
     deleteProject: (id) => {
@@ -292,6 +300,10 @@ export const useStore = create<UiState>((set, get) => {
     initRouter: () => {
       applyPath(location.pathname)
       window.addEventListener('popstate', () => applyPath(location.pathname))
+    },
+    reopenActive: () => {
+      const id = get().activeId
+      if (id) get().send({ type: 'project', action: 'open', id })
     },
     startBuild: (prompt, templateId) => {
       const p = prompt.trim()
@@ -322,6 +334,7 @@ export const useStore = create<UiState>((set, get) => {
       get().send({ type: 'preview', action: 'stop' })
       set({ preview: null })
     },
+    clearLogs: () => set({ logs: [] }),
     toggleTheme: () => {
       const theme: Theme = get().theme === 'dark' ? 'light' : 'dark'
       applyTheme(theme)

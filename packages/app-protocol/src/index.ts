@@ -36,6 +36,7 @@ export type BuilderEvent =
   | { type: 'fileContent'; path: string; content: string; truncated?: boolean } // a single file's content (M4)
   | { type: 'fileDiff'; path: string; original: string; modified: string } // a file's diff vs last commit (M2; Monaco DiffEditor)
   | { type: 'preview'; status: 'installing' | 'starting' | 'running' | 'error' | 'stopped'; url?: string } // live preview (M3)
+  | { type: 'log'; line: string } // a dev-server stdout/stderr line for the Console pane (M5)
 
 /** Client → builder. App/workspace-level commands, distinct from a session's InboundMessages.
  *  Future variants (added in their phases): preview start/stop/refresh, terminal input/resize,

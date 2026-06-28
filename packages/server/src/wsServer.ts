@@ -38,6 +38,16 @@ export function handleConnection(ws: WebSocket, manager: ProjectManager, preview
   }
   let active: CascadeSession | undefined
   let activeId: string | undefined
+  let stopTail: (() => void) | undefined // M5: stops the Console log stream (tail) for this connection
+
+  // Start streaming the active project's dev-server log into the Console pane (`log` events). Replaces any
+  // existing tail (e.g. when switching projects). No-op without Docker / a PreviewManager.
+  const startTail = (id: string) => {
+    const sandbox = manager.sandboxOf(id)
+    if (!preview || !(sandbox instanceof DockerSandbox)) return
+    stopTail?.()
+    stopTail = preview.tail(id, sandbox, (line) => send({ type: 'log', line }))
+  }
 
   // Greet the new connection with the project list + available templates so the UI can render immediately.
   send({ type: 'projects', projects: manager.list(), activeId })
@@ -76,6 +86,8 @@ export function handleConnection(ws: WebSocket, manager: ProjectManager, preview
             await manager.delete(msg.id)
             if (activeId === msg.id) ((active = undefined), (activeId = undefined))
           } else if (msg.action === 'open' && msg.id) {
+            stopTail?.() // detach the previous project's log stream before switching
+            stopTail = undefined
             active = manager.open(msg.id)
             activeId = msg.id
           }
@@ -83,7 +95,10 @@ export function handleConnection(ws: WebSocket, manager: ProjectManager, preview
           if (msg.action === 'open') {
             sendTree() // populate the Code pane for the opened project
             const pv = activeId && preview?.state(activeId) // re-show a preview already running for this project
-            if (pv) send({ type: 'preview', status: pv.status, url: pv.url })
+            if (pv) {
+              send({ type: 'preview', status: pv.status, url: pv.url })
+              if (pv.status === 'running' && activeId) startTail(activeId) // resume its Console logs
+            }
           }
           break
         }
@@ -116,6 +131,8 @@ export function handleConnection(ws: WebSocket, manager: ProjectManager, preview
         case 'preview': { // start/stop the active project's live preview (M3)
           if (!activeId || !preview) break
           if (msg.action === 'stop') {
+            stopTail?.()
+            stopTail = undefined
             preview.stop(activeId)
             send({ type: 'preview', status: 'stopped' })
             break
@@ -123,7 +140,10 @@ export function handleConnection(ws: WebSocket, manager: ProjectManager, preview
           const sandbox = manager.sandboxOf(activeId)
           if (sandbox instanceof DockerSandbox) {
             const id = activeId
-            void preview.start(id, sandbox, (s) => send({ type: 'preview', status: s.status, url: s.url }))
+            void preview.start(id, sandbox, (s) => {
+              send({ type: 'preview', status: s.status, url: s.url })
+              if (s.status === 'running') startTail(id) // begin streaming dev-server logs to the Console pane
+            })
           } else {
             // No Docker ⇒ no isolated dev server. (Running on the host is out of scope for v1.)
             send({ type: 'preview', status: 'error' })
@@ -166,6 +186,8 @@ export function handleConnection(ws: WebSocket, manager: ProjectManager, preview
 
   // Detach only — the session stays alive in the manager for the next connection.
   ws.on('close', () => {
+    stopTail?.() // end the Console log stream (the dev server itself stays up in the container)
+    stopTail = undefined
     active = undefined
     activeId = undefined
   })
