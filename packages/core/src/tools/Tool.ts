@@ -10,6 +10,7 @@ import type { Tracer } from '../observability/tracer'
 import type { ToolRegistry } from './toolRegistry'
 import type { ArchivalMemory } from '../memory/archival'
 import type { Sandbox } from '../sandbox/sandbox'
+import type { FileStateCache } from './fileState'
 
 export interface ToolContext {
   cwd: string
@@ -29,6 +30,9 @@ export interface ToolContext {
   /** Phase 13.3: generic execution capability. When present, command-running tools (Bash) execute HERE
    *  (the server injects a per-project Docker sandbox); when absent, they run on the host. Core is agnostic. */
   sandbox?: Sandbox
+  /** ADR-032: read-before-edit freshness. Read records {content, mtime} here; Edit/Write require an entry
+   *  (the file was read) that hasn't gone stale. Session-scoped. Omit ⇒ no freshness enforcement. */
+  readFileState?: FileStateCache
   /** Phase 12: delegate a subtask to a nested agent loop (own context + tool subset) → returns its final
    *  text. Injected by the loop (avoids an import cycle); absent at/over the depth cap. */
   spawnSubagent?(opts: { prompt: string; readOnly?: boolean }): Promise<string>

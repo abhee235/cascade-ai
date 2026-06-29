@@ -2,10 +2,11 @@
 // Requires old_string to match uniquely.
 
 import { z } from 'zod'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, stat, writeFile } from 'node:fs/promises'
 import { isAbsolute, resolve } from 'node:path'
 import type { Tool } from '../Tool'
 import { lineDiff } from '../../utils/diff'
+import { normalizeText } from '../fileState'
 
 const inputSchema = z.object({
   file_path: z.string().describe('Path to the file to edit, relative to the workspace or absolute.'),
@@ -23,7 +24,26 @@ export const EditTool: Tool<z.infer<typeof inputSchema>> = {
   async call(input, ctx) {
     const path = isAbsolute(input.file_path) ? input.file_path : resolve(ctx.cwd, input.file_path)
     try {
-      const content = await readFile(path, 'utf8')
+      const content = normalizeText(await readFile(path, 'utf8')) // CRLF→LF so a Windows file matches the model's \n old_string
+
+      // ── ADR-032: read-before-edit freshness (skipped when no cache is wired, e.g. headless smoke tests) ──
+      const fs = ctx.readFileState
+      if (fs) {
+        const seen = fs.get(path)
+        if (!seen) {
+          // The model is editing from memory it never actually obtained → make it Read first, then retry.
+          return { content: `File ${input.file_path} has not been read yet. Read it first before editing it.`, isError: true }
+        }
+        // mtime is the cheap "did it change?" signal; it's noisy on Windows (cloud-sync/antivirus touch it
+        // without real changes), so for a FULL read we only block when the content actually differs. For a
+        // PARTIAL (windowed) read we can't verify by content — the model only saw a slice — so any mtime
+        // advance forces a re-read (a full-read gate).
+        const mtime = await stat(path).then((s) => s.mtimeMs, () => 0)
+        if (mtime > seen.timestamp && (seen.partial || content !== seen.content)) {
+          return { content: `File ${input.file_path} has been modified since you read it (by the user or a linter). Read it again before editing.`, isError: true }
+        }
+      }
+
       const count = content.split(input.old_string).length - 1
       // Uniqueness check → self-correction: tell the model to fix its old_string.
       if (count === 0) return { content: `old_string not found in ${input.file_path}.`, isError: true }
@@ -34,6 +54,9 @@ export const EditTool: Tool<z.infer<typeof inputSchema>> = {
         }
       const after = content.replace(input.old_string, input.new_string)
       await writeFile(path, after, 'utf8')
+      // Refresh the cache to the just-written state, so a SECOND edit to this file in the same turn isn't
+      // wrongly rejected as "modified since read" (we are the modifier).
+      if (fs) await stat(path).then((s) => fs.set(path, { content: after, timestamp: s.mtimeMs }), () => fs.set(path, { content: after, timestamp: Date.now() }))
       return {
         content: `Edited ${input.file_path} (1 replacement).`,
         display: { kind: 'fileEdit', path: input.file_path, op: 'edit', diff: lineDiff(content, after) },

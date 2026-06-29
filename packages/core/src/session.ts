@@ -11,6 +11,7 @@ import { runAgentLoop } from './agent/agentLoop'
 import type { PermissionController, PermissionMode, PermissionState } from './permissions/gate'
 import { NoopTracer, type Tracer } from './observability/tracer'
 import { createRegistry } from './tools/toolRegistry'
+import { FileStateCache } from './tools/fileState'
 import { McpHub, type McpServerConfig, type McpConnect, type McpServerStatus } from './mcp/mcpHub'
 import { createArchival, type ArchivalHit } from './memory/archival'
 import { loadMemory } from './memory/memoryStore'
@@ -93,6 +94,9 @@ export function createSession(opts: SessionOptions): CascadeSession {
     request: (id) => new Promise((resolve) => pending.set(id, resolve)),
   }
   const tracer = opts.tracer ?? NoopTracer
+  // ADR-032: read-before-edit freshness, session-scoped — a file Read in one turn stays editable in a later
+  // one. Read records {content, mtime}; Edit/Write refuse a file with no entry or one that's gone stale.
+  const readFileState = new FileStateCache()
 
   // MCP (Phase 9): build the hub from config and start connecting in the BACKGROUND (non-blocking) so
   // tools are discovered without freezing startup. The registry is builtins + whatever is `ready` now —
@@ -170,6 +174,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
           },
           recovery: opts.recovery,
           sandbox: opts.sandbox,
+          readFileState,
           extraInstructions: opts.extraInstructions,
           maxTurns: opts.maxTurns,
         })

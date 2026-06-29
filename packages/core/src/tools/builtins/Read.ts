@@ -1,23 +1,36 @@
-// tools/builtins/Read.ts — the first tool: read a file from the workspace.
-// Read-only and simple on purpose — it's the tool that turns Cascade from a chatbot into an agent.
+// tools/builtins/Read.ts — read a file from the workspace, with line numbers and offset/limit windowing,
+// and a "too large → use offset" error. It also records read-freshness (ADR-032) so Edit/Write can require a fresh Read.
 
 import { z } from 'zod'
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { isAbsolute, resolve } from 'node:path'
 import type { Tool } from '../Tool'
+import { normalizeText } from '../fileState'
 
 const inputSchema = z.object({
-  file_path: z
-    .string()
-    .describe('Path to the file to read — relative to the workspace, or absolute.'),
+  file_path: z.string().describe('Path to the file to read — relative to the workspace, or absolute.'),
+  offset: z.number().int().nonnegative().optional().describe('First line to read, 1-based. Leave it out unless the file is too big to read in one go.'),
+  limit: z.number().int().positive().optional().describe('How many lines to return. Leave it out unless the file is too big to read in one go.'),
 })
 
-const MAX_CHARS = 50_000 // keep the context sane; Phase 5 formalizes result limits
+const MAX_CHARS = 50_000 // a whole-file read above this errors → the model must use offset/limit instead
+
+// cat -n style: right-pad the line number to 6, then "→", then the line.
+// Display only — the model strips the "N→" prefix when forming an Edit old_string (Edit matches the raw file).
+function addLineNumbers(text: string, startLine: number): string {
+  return text
+    .split('\n')
+    .map((line, i) => {
+      const n = String(startLine + i)
+      return `${n.length >= 6 ? n : n.padStart(6, ' ')}→${line}`
+    })
+    .join('\n')
+}
 
 export const ReadTool: Tool<z.infer<typeof inputSchema>> = {
   name: 'Read',
   description:
-    'Read a UTF-8 text file from the workspace and return its contents. Use it to inspect files before answering.',
+    'Read a UTF-8 text file from the workspace and return its contents with line numbers. For very large files, read a window with the offset (1-based start line) and limit (line count) parameters.',
   inputSchema,
   activitySummary: (input) => `Reading ${input.file_path}`,
   isReadOnly: () => true,
@@ -25,13 +38,34 @@ export const ReadTool: Tool<z.infer<typeof inputSchema>> = {
   async call(input, ctx) {
     const path = isAbsolute(input.file_path) ? input.file_path : resolve(ctx.cwd, input.file_path)
     try {
-      const content = await readFile(path, 'utf8')
-      return {
-        content:
-          content.length > MAX_CHARS ? `${content.slice(0, MAX_CHARS)}\n…[truncated]` : content,
+      const raw = normalizeText(await readFile(path, 'utf8')) // CRLF→LF so the model's view matches Edit's matching
+      const lines = raw.split('\n')
+      const ranged = input.offset !== undefined || input.limit !== undefined
+      const start = input.offset && input.offset > 0 ? input.offset - 1 : 0 // 1-based → 0-based
+      const end = input.limit !== undefined ? start + input.limit : lines.length
+      const body = lines.slice(start, end).join('\n')
+
+      // Whole-file read that's too big → don't silently truncate (hides everything past the cut); make the
+      // model read in windows. With offset/limit set, the slice is the model's explicit choice — allow it.
+      if (!ranged && raw.length > MAX_CHARS) {
+        return {
+          content: `File ${input.file_path} is large (${lines.length} lines, ~${Math.round(raw.length / 1000)}k chars). Read it in parts with the offset and limit parameters (e.g. offset: 1, limit: 400).`,
+          isError: true,
+        }
       }
+
+      // ADR-032: record what the model saw (raw, no line numbers) + the file's mtime, so Edit/Write can require
+      // a fresh Read. `partial` for a windowed read — the model only saw a slice, so Edit must re-read on ANY
+      // later change (it can't verify a slice by content).
+      if (ctx.readFileState) {
+        const mtime = await stat(path).then((s) => s.mtimeMs, () => Date.now())
+        ctx.readFileState.set(path, { content: ranged ? body : raw, timestamp: mtime, partial: ranged })
+      }
+
+      const numbered = addLineNumbers(body, start + 1)
+      return { content: numbered.length > MAX_CHARS ? `${numbered.slice(0, MAX_CHARS)}\n…[truncated — use a smaller limit]` : numbered }
     } catch (err) {
-      // Return the error AS the result (not a throw) so the model can self-correct (Phase 5 idea).
+      // Return the error AS the result (not a throw) so the model can self-correct.
       return {
         content: `Error reading ${input.file_path}: ${err instanceof Error ? err.message : String(err)}`,
         isError: true,
