@@ -4,8 +4,9 @@
 import { z } from 'zod'
 import fg from 'fast-glob'
 import { readFile } from 'node:fs/promises'
-import { relative, resolve } from 'node:path'
+import { relative } from 'node:path'
 import type { Tool } from '../Tool'
+import { ProjectPathError, resolveInProject } from '../projectPath'
 
 const inputSchema = z.object({
   pattern: z.string().describe('Regular expression to search for.'),
@@ -32,7 +33,13 @@ export const GrepTool: Tool<z.infer<typeof inputSchema>> = {
       return { content: `Invalid regex: ${e instanceof Error ? e.message : String(e)}`, isError: true }
     }
 
-    const cwd = input.path ? resolve(ctx.cwd, input.path) : ctx.cwd
+    let cwd: string
+    try {
+      cwd = input.path ? resolveInProject(ctx.cwd, input.path, ctx.sandbox?.root) : ctx.cwd // ADR-033: jail to project
+    } catch (e) {
+      if (e instanceof ProjectPathError) return { content: e.message, isError: true }
+      throw e
+    }
     const files = await fg(input.glob ?? '**/*', { cwd, onlyFiles: true, dot: false, ignore: IGNORE, absolute: true })
 
     const out: string[] = []

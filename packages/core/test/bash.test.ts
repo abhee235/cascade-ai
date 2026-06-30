@@ -57,6 +57,7 @@ describe('BashTool', () => {
     const seen: string[] = []
     const chunks: string[] = []
     const sandbox: Sandbox = {
+      root: '/workspace',
       async exec(command, opts) {
         seen.push(command)
         opts?.onData?.('sandboxed: ')
@@ -74,14 +75,14 @@ describe('BashTool', () => {
   })
 
   it('sandbox nonzero exit ⇒ isError + [exit N]', async () => {
-    const sandbox: Sandbox = { async exec() { return { output: 'boom', exitCode: 2 } }, async dispose() {} }
+    const sandbox: Sandbox = { root: '/workspace', async exec() { return { output: 'boom', exitCode: 2 } }, async dispose() {} }
     const result = await BashTool.call({ command: 'false' }, { ...ctx(), sandbox })
     expect(result.isError).toBe(true)
     expect(result.content).toContain('[exit 2]')
   })
 
   it('sandbox exec throwing ⇒ a graceful error result (not a crash)', async () => {
-    const sandbox: Sandbox = { async exec() { throw new Error('docker down') }, async dispose() {} }
+    const sandbox: Sandbox = { root: '/workspace', async exec() { throw new Error('docker down') }, async dispose() {} }
     const result = await BashTool.call({ command: 'ls' }, { ...ctx(), sandbox })
     expect(result.isError).toBe(true)
     expect(result.content).toContain('docker down')

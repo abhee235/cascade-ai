@@ -3,8 +3,8 @@
 
 import { z } from 'zod'
 import fg from 'fast-glob'
-import { resolve } from 'node:path'
 import type { Tool } from '../Tool'
+import { ProjectPathError, resolveInProject } from '../projectPath'
 
 const inputSchema = z.object({
   pattern: z.string().describe('Glob pattern, e.g. "**/*.ts" or "src/**/*.tsx".'),
@@ -25,7 +25,13 @@ export const GlobTool: Tool<z.infer<typeof inputSchema>> = {
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
   async call(input, ctx) {
-    const cwd = input.path ? resolve(ctx.cwd, input.path) : ctx.cwd
+    let cwd: string
+    try {
+      cwd = input.path ? resolveInProject(ctx.cwd, input.path, ctx.sandbox?.root) : ctx.cwd // ADR-033: jail to project
+    } catch (e) {
+      if (e instanceof ProjectPathError) return { content: e.message, isError: true }
+      throw e
+    }
     const files = await fg(input.pattern, { cwd, onlyFiles: true, dot: false, ignore: IGNORE })
     if (files.length === 0) return { content: 'No files matched.' }
     const shown = files.slice(0, MAX)

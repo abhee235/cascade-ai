@@ -10,6 +10,10 @@ import { loadMemory } from '../memory/memoryStore'
 
 export interface SystemPromptInput {
   cwd: string
+  /** When the session runs in a sandbox, the path the project is mounted at inside it (e.g. '/workspace').
+   *  Shown to the model as the working directory so its view matches where Bash actually runs; the file tools
+   *  reconcile it back to the host project dir (ADR-033). Absent ⇒ host mode, the real cwd is shown. */
+  sandboxRoot?: string
   /** Archival memories auto-retrieved for THIS user message (proactive retrieval, ADR-015) — injected so
    *  the model sees relevant past facts without having to call MemorySearch. */
   recalled?: string
@@ -18,16 +22,20 @@ export interface SystemPromptInput {
   extraInstructions?: string
 }
 
-export function buildSystemPrompt({ cwd, recalled, extraInstructions }: SystemPromptInput): string {
+export function buildSystemPrompt({ cwd, sandboxRoot, recalled, extraInstructions }: SystemPromptInput): string {
   const today = new Date().toISOString().slice(0, 10)
+  // Show ONE coherent root: the in-sandbox mount when sandboxed (so Bash + the model + file tools all agree),
+  // otherwise the host cwd. Either way, instruct relative paths — they always land in the project (ADR-033).
+  const workdir = sandboxRoot ?? cwd
   const base = [
     'You are Cascade, a concise, helpful coding assistant running inside VS Code.',
     'Answer clearly and use Markdown. Prefer short, direct responses; show code in fenced blocks.',
     '',
     'Environment:',
-    `- Working directory: ${cwd}`,
+    `- Working directory: ${workdir}`,
     `- OS: ${platform()}`,
     `- Date: ${today}`,
+    `- Address files by paths relative to the working directory (e.g. "src/App.tsx"). Paths outside the project are rejected.`,
   ].join('\n')
   // Durable memory is read FRESH each call (cheap, local files), so Memory-tool writes show up immediately.
   // It's appended to the system prompt — outside the conversation history, so compaction never drops it.

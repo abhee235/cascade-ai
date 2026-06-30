@@ -3,9 +3,9 @@
 
 import { z } from 'zod'
 import { readFile, stat } from 'node:fs/promises'
-import { isAbsolute, resolve } from 'node:path'
 import type { Tool } from '../Tool'
 import { normalizeText } from '../fileState'
+import { ProjectPathError, resolveInProject } from '../projectPath'
 
 const inputSchema = z.object({
   file_path: z.string().describe('Path to the file to read — relative to the workspace, or absolute.'),
@@ -36,7 +36,13 @@ export const ReadTool: Tool<z.infer<typeof inputSchema>> = {
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
   async call(input, ctx) {
-    const path = isAbsolute(input.file_path) ? input.file_path : resolve(ctx.cwd, input.file_path)
+    let path: string
+    try {
+      path = resolveInProject(ctx.cwd, input.file_path, ctx.sandbox?.root) // ADR-033: jail to the project root
+    } catch (e) {
+      if (e instanceof ProjectPathError) return { content: e.message, isError: true }
+      throw e
+    }
     try {
       const raw = normalizeText(await readFile(path, 'utf8')) // CRLF→LF so the model's view matches Edit's matching
       const lines = raw.split('\n')

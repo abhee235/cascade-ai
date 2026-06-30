@@ -26,7 +26,7 @@ describe('executeTool pipeline', () => {
       await writeFile(join(dir, 'hi.txt'), 'hello world')
       const r: any = await executeTool({ id: '1', name: 'Read', input: { file_path: 'hi.txt' } }, ctx(dir))
       expect(r.isError).toBeFalsy()
-      expect(r.content).toBe('hello world')
+      expect(r.content).toBe('     1→hello world') // Read adds cat -n line numbers (ADR-032 addLineNumbers)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

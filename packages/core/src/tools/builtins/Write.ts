@@ -3,9 +3,10 @@
 
 import { z } from 'zod'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, resolve } from 'node:path'
+import { dirname } from 'node:path'
 import type { Tool } from '../Tool'
 import { lineDiff } from '../../utils/diff'
+import { displayPath, ProjectPathError, resolveInProject } from '../projectPath'
 
 const inputSchema = z.object({
   file_path: z.string().describe('Path to the file to write, relative to the workspace or absolute.'),
@@ -21,7 +22,13 @@ export const WriteTool: Tool<z.infer<typeof inputSchema>> = {
   isConcurrencySafe: () => false, // writes can race — never parallelize
 
   async call(input, ctx) {
-    const path = isAbsolute(input.file_path) ? input.file_path : resolve(ctx.cwd, input.file_path)
+    let path: string
+    try {
+      path = resolveInProject(ctx.cwd, input.file_path, ctx.sandbox?.root) // ADR-033: jail to the project root
+    } catch (e) {
+      if (e instanceof ProjectPathError) return { content: e.message, isError: true }
+      throw e
+    }
     try {
       const before = await readFile(path, 'utf8').catch(() => undefined) // undefined ⇒ new file
       await mkdir(dirname(path), { recursive: true }) // create parent dirs
@@ -30,7 +37,7 @@ export const WriteTool: Tool<z.infer<typeof inputSchema>> = {
         content: `Wrote ${input.content.length} chars to ${input.file_path}`,
         display: {
           kind: 'fileEdit',
-          path: input.file_path,
+          path: displayPath(ctx.cwd, path), // ADR-033: show where it actually lives in the project, not the model's alias
           op: before === undefined ? 'create' : 'overwrite',
           diff: lineDiff(before ?? '', input.content),
         },

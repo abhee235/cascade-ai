@@ -3,10 +3,10 @@
 
 import { z } from 'zod'
 import { readFile, stat, writeFile } from 'node:fs/promises'
-import { isAbsolute, resolve } from 'node:path'
 import type { Tool } from '../Tool'
 import { lineDiff } from '../../utils/diff'
 import { normalizeText } from '../fileState'
+import { displayPath, ProjectPathError, resolveInProject } from '../projectPath'
 
 const inputSchema = z.object({
   file_path: z.string().describe('Path to the file to edit, relative to the workspace or absolute.'),
@@ -22,7 +22,13 @@ export const EditTool: Tool<z.infer<typeof inputSchema>> = {
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
   async call(input, ctx) {
-    const path = isAbsolute(input.file_path) ? input.file_path : resolve(ctx.cwd, input.file_path)
+    let path: string
+    try {
+      path = resolveInProject(ctx.cwd, input.file_path, ctx.sandbox?.root) // ADR-033: jail to the project root
+    } catch (e) {
+      if (e instanceof ProjectPathError) return { content: e.message, isError: true }
+      throw e
+    }
     try {
       const content = normalizeText(await readFile(path, 'utf8')) // CRLF→LF so a Windows file matches the model's \n old_string
 
@@ -59,7 +65,7 @@ export const EditTool: Tool<z.infer<typeof inputSchema>> = {
       if (fs) await stat(path).then((s) => fs.set(path, { content: after, timestamp: s.mtimeMs }), () => fs.set(path, { content: after, timestamp: Date.now() }))
       return {
         content: `Edited ${input.file_path} (1 replacement).`,
-        display: { kind: 'fileEdit', path: input.file_path, op: 'edit', diff: lineDiff(content, after) },
+        display: { kind: 'fileEdit', path: displayPath(ctx.cwd, path), op: 'edit', diff: lineDiff(content, after) }, // ADR-033: project-relative
       }
     } catch (e) {
       return { content: `Error editing ${input.file_path}: ${e instanceof Error ? e.message : String(e)}`, isError: true }

@@ -63,6 +63,9 @@ export async function sweepSandboxContainers(): Promise<number> {
 }
 
 export class DockerSandbox implements Sandbox {
+  /** In-sandbox mount point of the project (the `-w` / `-v …:/workspace` below). The host file tools treat
+   *  this as a synonym for the project root so the model's in-container paths resolve into the project. */
+  readonly root = '/workspace'
   private containerId?: string
   private starting?: Promise<string>
   private hostPort?: number

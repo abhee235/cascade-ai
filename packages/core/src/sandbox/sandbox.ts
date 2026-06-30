@@ -24,6 +24,10 @@ export interface ExecResult {
 }
 
 export interface Sandbox {
+  /** The path the project is mounted at INSIDE the sandbox (e.g. '/workspace'). The host-side file tools
+   *  treat this (and a couple of common aliases) as a synonym for the project root, so a model that addresses
+   *  files by the in-sandbox path lands in the project instead of escaping to the host. — ADR-033. */
+  readonly root: string
   /** Run a shell command inside the isolated environment, streaming output via opts.onData. */
   exec(command: string, opts?: ExecOptions): Promise<ExecResult>
   /** Tear down the environment (e.g. stop/remove the container). Safe to call more than once. */
