@@ -8,10 +8,14 @@ import { ChatHeader } from './ChatHeader'
 import { cn } from '@/lib/utils'
 
 const isFileEdit = (it: Item): it is Extract<Item, { kind: 'tool' }> => it.kind === 'tool' && it.display?.kind === 'fileEdit'
+const isTodos = (it: Item) => it.kind === 'tool' && it.display?.kind === 'todos'
 
-// Render the transcript, collapsing a run of consecutive file edits into one "change set" card (a single edit
-// renders on its own). Everything else renders as an individual activity card.
+// Render the transcript, collapsing a run of consecutive file edits into one "change set" card. TodoWrite
+// updates the SAME checklist, so only the latest todos card renders (earlier ones are superseded) — one live
+// list instead of a 0/3 → 1/3 → 2/3 stack. Everything else is its own card.
 function renderTranscript(items: Item[]) {
+  let lastTodo = -1
+  for (let i = 0; i < items.length; i++) if (isTodos(items[i])) lastTodo = i
   const out: React.ReactNode[] = []
   for (let i = 0; i < items.length; ) {
     if (isFileEdit(items[i])) {
@@ -20,6 +24,8 @@ function renderTranscript(items: Item[]) {
       const run = items.slice(i, j) as Extract<Item, { kind: 'tool' }>[]
       out.push(run.length > 1 ? <ChangeSet key={i} items={run} /> : <ActivityCard key={i} item={run[0]} />)
       i = j
+    } else if (isTodos(items[i]) && i !== lastTodo) {
+      i++ // a superseded checklist update — skip it; only the latest todos card renders
     } else {
       out.push(<ActivityCard key={i} item={items[i]} />)
       i++

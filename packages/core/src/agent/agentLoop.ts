@@ -17,6 +17,7 @@ import { compactIfNeeded, type CompactDeps } from '../context/compactor'
 import { streamWithRecovery, type RecoveryOptions } from '../llm/resilience'
 import type { ToolUse } from '../tools/runTool'
 import { scheduleTools } from '../tools/scheduler'
+import { buildTodoReminder, shouldRemindTodos, type TodoReminderConfig } from './todoReminder'
 
 export interface LoopDeps {
   provider: ModelProvider
@@ -35,6 +36,8 @@ export interface LoopDeps {
   recovery?: Pick<RecoveryOptions, 'maxRetries' | 'baseDelayMs' | 'maxDelayMs' | 'sleep'> // Phase 12: tune/inject for tests
   sandbox?: import('../sandbox/sandbox').Sandbox // Phase 13.3: redirect command tools here (injected by the server)
   readFileState?: import('../tools/fileState').FileStateCache // ADR-032: read-before-edit freshness cache (session-scoped)
+  todoStore?: import('../tools/todoStore').TodoStore // ADR-034: authoritative todo checklist (drives the reminder)
+  todoReminder?: TodoReminderConfig // ADR-034: tune/inject the reminder turn thresholds (default 6/6)
 }
 
 const MAX_SUBAGENT_DEPTH = 2
@@ -45,13 +48,28 @@ function messageText(m: Message): string {
   return m.content.filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text').map((b) => b.text).join('')
 }
 
+// ADR-034: append a reminder as a text block on the trailing user message. The leading blank line separates it
+// from any preceding text (e.g. the initial user input); when the trailing message is a tool_results message,
+// the reminder is its only text block, which the OpenAI converter emits as a clean user turn after the tools.
+function appendTodoReminder(messages: Message[], reminder: string): void {
+  const last = messages[messages.length - 1]
+  const text = `\n\n${reminder}`
+  if (!last || last.role !== 'user') {
+    messages.push({ role: 'user', content: text })
+    return
+  }
+  const blocks: ContentBlock[] = typeof last.content === 'string' ? [{ type: 'text', text: last.content }] : [...last.content]
+  blocks.push({ type: 'text', text })
+  messages[messages.length - 1] = { ...last, content: blocks }
+}
+
 export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncIterable<ActivityEvent> {
   const tracer = deps.tracer ?? NoopTracer
   const registry = deps.registry ?? createRegistry()
   // Share ONE registry instance for the turn: the loop advertises with it, and the scheduler/runTool look
   // up with it — so what the model is offered and what we execute always agree.
   const depth = deps.depth ?? 0
-  const ctx: ToolContext = { cwd: deps.cwd, abortSignal: deps.signal, permission: deps.permission, tracer, registry, archival: deps.archival, depth, sandbox: deps.sandbox, readFileState: deps.readFileState }
+  const ctx: ToolContext = { cwd: deps.cwd, abortSignal: deps.signal, permission: deps.permission, tracer, registry, archival: deps.archival, depth, sandbox: deps.sandbox, readFileState: deps.readFileState, todoStore: deps.todoStore }
   // Subagent delegation (ADR-017): inject a spawn closure (avoids an import cycle). Absent at the depth cap.
   // The child runs a NESTED runAgentLoop with its OWN messages + a filtered tool set (never Subagent → no
   // recursion; read-only subset for `explore`). Only its final text returns — its steps stay in its context.
@@ -71,6 +89,8 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
         permission: deps.permission,
         sandbox: deps.sandbox, // subagent's commands run in the same sandbox
         readFileState: deps.readFileState, // share freshness cache: a file the parent read is editable by the child
+        todoStore: deps.todoStore, // shared store, keyed by depth → the child's checklist is scoped separately
+        todoReminder: deps.todoReminder,
         maxTurns: 8,
         depth: depth + 1,
       })) {
@@ -101,16 +121,26 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
       }
     }
 
+    // ADR-034: if the model has drifted from its task checklist (idle on TodoWrite for several turns), re-inject
+    // the current list as a <system-reminder> so it re-grounds. Appended to the trailing user message (always a
+    // user message here — initial input or tool_results) so the converter emits it as a user turn AFTER any
+    // tool_results. NOT yielded as an activity event ⇒ it reaches the model but never the UI. Done after
+    // compaction so the reminder isn't immediately summarized away (and reflects the post-compaction state).
+    if (deps.todoStore) {
+      const items = deps.todoStore.get(depth)
+      if (shouldRemindTodos(messages, items, deps.todoReminder)) appendTodoReminder(messages, buildTodoReminder(items))
+    }
+
     yield { type: 'status', text: 'Thinking…' }
     // FORENSICS: record the FULL request we're about to send — the #1 thing you need when an answer
     // is wrong ("did the model even see the tool_result / the right system prompt?"). — ADR-023.
-    const system = buildSystemPrompt({ cwd: deps.cwd, recalled: deps.recalled, extraInstructions: deps.extraInstructions })
+    const system = buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, recalled: deps.recalled, extraInstructions: deps.extraInstructions })
     tracer.event({ t: 'model_request', turn, system, tools: registry.list().map((t) => t.name), messages })
     // Wrap the stream in recovery (ADR-016): transient failures retry with backoff; context overflow triggers
     // a (reactive) compaction then retries; abort/fatal surface. `make` re-reads `messages` each attempt, so
     // an overflow-compaction is reflected on the retry. System is rebuilt too (memory may have changed).
     const makeStream = () =>
-      deps.provider.stream({ messages, model: deps.model, system: buildSystemPrompt({ cwd: deps.cwd, recalled: deps.recalled, extraInstructions: deps.extraInstructions }), tools: registry.schemas() }, deps.signal)
+      deps.provider.stream({ messages, model: deps.model, system: buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, recalled: deps.recalled, extraInstructions: deps.extraInstructions }), tools: registry.schemas() }, deps.signal)
     for await (const ev of streamWithRecovery(makeStream, {
       ...deps.recovery,
       signal: deps.signal,

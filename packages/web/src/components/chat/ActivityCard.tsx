@@ -20,9 +20,12 @@ import {
   Loader2,
   SquareArrowOutUpRight,
   Layers,
+  ListTodo,
+  CheckSquare,
+  Square,
   type LucideIcon,
 } from 'lucide-react'
-import type { ToolDisplay } from '@cascade/core'
+import type { ToolDisplay, TodoItem } from '@cascade/core'
 import type { Item } from '../../lib/types'
 import { useStore } from '../../lib/store'
 import { cn } from '../../lib/utils'
@@ -63,7 +66,7 @@ function DiffView({ diff }: { diff: string }) {
 
 /** File-edit card: verb + filename + path + +/− stat, expanding to an INLINE diff. A side
  *  action opens the same diff in the Code pane (Monaco) for a fuller view. */
-function FileEditCard({ display }: { display: ToolDisplay }) {
+function FileEditCard({ display }: { display: Extract<ToolDisplay, { kind: 'fileEdit' }> }) {
   const openFileInCode = useStore((s) => s.openFileInCode)
   const [open, setOpen] = useState(false)
   const Icon = display.op === 'edit' ? FilePen : FilePlus
@@ -191,6 +194,38 @@ function ToolCard({ item }: { item: Extract<Item, { kind: 'tool' }> }) {
   )
 }
 
+/** The agent's task checklist (TodoWrite). Pending = empty box, in_progress = spinner (shows the activeForm),
+ *  completed = checked + struck through. */
+function TodoCard({ items }: { items: TodoItem[] }) {
+  const done = items.filter((t) => t.status === 'completed').length
+  return (
+    <div className="my-1.5 rounded-md border border-border bg-card/60 p-2.5 text-xs">
+      <div className="mb-1.5 flex items-center gap-2 font-medium text-muted-foreground">
+        <ListTodo className="h-3.5 w-3.5" /> Tasks
+        <span className="ml-auto font-mono text-[10px]">
+          {done}/{items.length}
+        </span>
+      </div>
+      <div className="space-y-1">
+        {items.map((t, i) => (
+          <div key={i} className="flex items-start gap-2">
+            {t.status === 'completed' ? (
+              <CheckSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-green-500" />
+            ) : t.status === 'in_progress' ? (
+              <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-blue-500" />
+            ) : (
+              <Square className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            )}
+            <span className={cn('min-w-0', t.status === 'completed' && 'text-muted-foreground line-through', t.status === 'in_progress' && 'font-medium text-foreground')}>
+              {t.status === 'in_progress' ? t.activeForm : t.content}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 /** A turn's run of file edits, grouped into one reviewable "change set" with a +/− summary. */
 export function ChangeSet({ items }: { items: Extract<Item, { kind: 'tool' }>[] }) {
   const [open, setOpen] = useState(true)
@@ -233,6 +268,7 @@ export function ActivityCard({ item }: { item: Item }) {
         </div>
       )
     case 'tool': {
+      if (item.display?.kind === 'todos') return <TodoCard items={item.display.items} />
       if (item.display?.kind === 'fileEdit') return <FileEditCard display={item.display} />
       if (item.name.toLowerCase() === 'bash') return <CommandCard item={item} />
       return <ToolCard item={item} />

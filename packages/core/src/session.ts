@@ -10,8 +10,10 @@ import type { ModelProvider } from './llm/provider'
 import { runAgentLoop } from './agent/agentLoop'
 import type { PermissionController, PermissionMode, PermissionState } from './permissions/gate'
 import { NoopTracer, type Tracer } from './observability/tracer'
+import { join } from 'node:path'
 import { createRegistry } from './tools/toolRegistry'
 import { FileStateCache } from './tools/fileState'
+import { TodoStore } from './tools/todoStore'
 import { McpHub, type McpServerConfig, type McpConnect, type McpServerStatus } from './mcp/mcpHub'
 import { createArchival, type ArchivalHit } from './memory/archival'
 import { loadMemory } from './memory/memoryStore'
@@ -97,6 +99,9 @@ export function createSession(opts: SessionOptions): CascadeSession {
   // ADR-032: read-before-edit freshness, session-scoped — a file Read in one turn stays editable in a later
   // one. Read records {content, mtime}; Edit/Write refuse a file with no entry or one that's gone stale.
   const readFileState = new FileStateCache()
+  // ADR-034: the authoritative todo checklist, persisted to .cascade/todos.json so it survives compaction and a
+  // restart and feeds the loop's periodic reminder. Session-scoped, keyed by agent depth.
+  const todoStore = new TodoStore(join(opts.cwd, '.cascade', 'todos.json'))
 
   // MCP (Phase 9): build the hub from config and start connecting in the BACKGROUND (non-blocking) so
   // tools are discovered without freezing startup. The registry is builtins + whatever is `ready` now —
@@ -175,6 +180,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
           recovery: opts.recovery,
           sandbox: opts.sandbox,
           readFileState,
+          todoStore,
           extraInstructions: opts.extraInstructions,
           maxTurns: opts.maxTurns,
         })

@@ -53,6 +53,47 @@ function DiffBlock({ diff }: { diff: string }) {
   )
 }
 
+type Todo = { content: string; status: 'pending' | 'in_progress' | 'completed'; activeForm: string }
+
+/** The agent's task checklist (TodoWrite). Status glyphs: ✓ completed (struck through), a
+ *  spinner while in_progress (shows the activeForm), dimmed ○ pending. */
+function TodoList({ items }: { items: Todo[] }) {
+  const done = items.filter((t) => t.status === 'completed').length
+  return (
+    <div style={styles.todoCard}>
+      <div style={styles.todoHeader}>
+        <span>☑</span>
+        <span style={styles.toolName}>Tasks</span>
+        <span style={styles.todoCount}>
+          {done}/{items.length}
+        </span>
+      </div>
+      <div style={styles.todoBody}>
+        {items.map((t, i) => (
+          <div key={i} style={styles.todoRow}>
+            {t.status === 'completed' ? (
+              <span style={styles.todoDone}>✓</span>
+            ) : t.status === 'in_progress' ? (
+              <span className="cascade-spinner" />
+            ) : (
+              <span style={styles.todoPending}>○</span>
+            )}
+            <span
+              style={{
+                opacity: t.status === 'completed' ? 0.55 : 1,
+                textDecoration: t.status === 'completed' ? 'line-through' : 'none',
+                fontWeight: t.status === 'in_progress' ? 600 : 400,
+              }}
+            >
+              {t.status === 'in_progress' ? t.activeForm : t.content}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // Transcript items: user/assistant messages and tool cards, interleaved in order.
 type Item =
   | { kind: 'user'; text: string }
@@ -428,6 +469,10 @@ export function App() {
             <div key={i} style={styles.compactMarker}>
               🗜 Context compacted — {it.text}
             </div>
+          ) : it.kind === 'tool' && it.display?.kind === 'todos' ? (
+            // TodoWrite updates the SAME checklist — render only the latest card (skip superseded ones), so
+            // it reads as one live list, not a 0/3 → 1/3 → 2/3 stack.
+            i === items.reduce((acc, x, ix) => (x.kind === 'tool' && x.display?.kind === 'todos' ? ix : acc), -1) ? <TodoList key={i} items={it.display.items} /> : null
           ) : it.kind === 'tool' && it.display?.kind === 'fileEdit' ? (
             // File edit → an inline diff (in the extension panel).
             <div key={i} style={styles.toolCard}>
@@ -684,6 +729,13 @@ const styles: Record<string, React.CSSProperties> = {
   toolHeader: { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', fontSize: 12 },
   toolName: { fontWeight: 600, fontFamily: 'var(--vscode-editor-font-family, monospace)' },
   toolSummary: { opacity: 0.7 },
+  todoCard: { margin: '6px 0', border: '1px solid var(--vscode-panel-border)', borderRadius: 6, background: 'var(--vscode-editorWidget-background)', padding: '4px 0 6px' },
+  todoHeader: { display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px 6px', fontSize: 12 },
+  todoCount: { marginLeft: 'auto', opacity: 0.6, fontSize: 11, fontFamily: 'var(--vscode-editor-font-family, monospace)' },
+  todoBody: { display: 'flex', flexDirection: 'column', gap: 4, padding: '0 10px', fontSize: 12 },
+  todoRow: { display: 'flex', alignItems: 'flex-start', gap: 8 },
+  todoDone: { color: 'var(--vscode-charts-green, #3a3)' },
+  todoPending: { opacity: 0.5 },
   toolPreview: {
     margin: 0,
     padding: '6px 10px',

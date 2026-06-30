@@ -21,9 +21,11 @@ Legend: ☐ not started · ◐ partial · ☑ done. "Target capability" = the be
 | A2 | ◐ **5-layer compaction stack** | 2 phases: mask old tool output + 9-section summary ([compactor.ts](../packages/core/src/context/compactor.ts)) | 5 layers: **tool-result budget → snip → microcompact → context-collapse → autocompact** | ADR-030 |
 | A3 | ◐ **Recovery depth** | retry/backoff + overflow→compact ([resilience.ts](../packages/core/src/llm/resilience.ts)) | + **token escalation** (raise `max_tokens` on truncation) + **budget continuation** | ADR-031 |
 | A4 | ☑ **Read-before-Edit freshness** | **DONE (ADR-032):** session-scoped `FileStateCache`; Edit refuses unread/stale files (mtime + content fallback), CRLF-normalized | `readFileState` map: Edit **refuses** a file not Read first, or changed since read | ADR-032 ✅ |
-| A5 | ◐ **Permission depth** | rules match by **tool name only**; Bash is one opaque allow/deny ([gate.ts:38](../packages/core/src/permissions/gate.ts)) | input-aware rules (`Bash(npm run test:*)`, `Edit(src/**)`), a **bash command classifier** (split `a && b \| c`, gate each), and **hooks** | ADR-033 (rules), ADR-034 (hooks) |
-| A6 | ◐ **Prompt & context engineering** | compact system prompt ([systemPrompt.ts](../packages/core/src/agent/systemPrompt.ts)) | rich tone/conventions prompt + **context gathering** (instruction files, directory structure, git status injected) + static/dynamic **cache boundary** | ADR-035 |
-| A7 | ☐ **Cost / token accounting** | JSONL tracer only ([tracer.ts](../packages/core/src/observability/tracer.ts)) | per-turn token + cost tracking | ADR-036 |
+| A5 | ◐ **Permission depth** | rules match by **tool name only**; Bash is one opaque allow/deny ([gate.ts:38](../packages/core/src/permissions/gate.ts)) | input-aware rules (`Bash(npm run test:*)`, `Edit(src/**)`), a **bash command classifier** (split `a && b \| c`, gate each), and **hooks** | ADR-035 (rules), ADR-036 (hooks) |
+| A6 | ◐ **Prompt & context engineering** | compact system prompt ([systemPrompt.ts](../packages/core/src/agent/systemPrompt.ts)) | rich tone/conventions prompt + **context gathering** (instruction files, directory structure, git status injected) + static/dynamic **cache boundary** | ADR-037 |
+| A7 | ☐ **Cost / token accounting** | JSONL tracer only ([tracer.ts](../packages/core/src/observability/tracer.ts)) | per-turn token + cost tracking | ADR-038 |
+| A9 | ☑ **Durable todo checklist + reminder** | **DONE (ADR-034):** session `TodoStore` persisted to `.cascade/todos.json`; state-aware `<system-reminder>` re-injected when the model drifts; one-in_progress invariant enforced | a todo list in app state + a re-injected reminder (turns since last use) | ADR-034 ✅ |
+| A8 | ☑ **Filesystem confinement (host ↔ sandbox)** | **DONE (ADR-033):** `resolveInProject` jails every file tool to the project root; `/app`·`/workspace` aliases re-root, escapes rejected; `Sandbox.root` + prompt show one coherent cwd | file tools confined via input validation + permission deny-rules + path expansion | ADR-033 ✅ |
 
 ---
 
@@ -33,7 +35,7 @@ Cascade has: `Read, Write, Edit, Bash, Glob, Grep, Memory, MemorySearch, Subagen
 
 | Core tool | Purpose | Priority for Cascade | Status |
 |-----------|---------|----------------------|--------|
-| **TodoWriteTool** | the agent maintains a live task list (plan & track multi-step work) | **HIGH** — big agent-quality win | ☐ |
+| **Todo list** (`TodoWrite`) | the agent maintains a live task list (plan & track multi-step work) | **HIGH** — big agent-quality win | ☑ done — tool + one live list (web + extension); **+ ADR-034: durable `TodoStore` (persisted to `.cascade/todos.json`, survives compaction/restart), state-aware periodic reminder, enforced one-in_progress invariant** — goes past an in-memory list + static nag |
 | **MultiEdit** *(multi-edit mode of Edit)* | several edits to one file atomically | **HIGH** | ☐ |
 | **Web fetch** / **web search** | fetch a URL / web search | MED (needs network; optional for offline) | ☐ |
 | **EnterPlanModeTool** / **ExitPlanModeTool** | present a plan, get approval before acting | MED (we have `plan` permission mode, no flow) | ☐ |

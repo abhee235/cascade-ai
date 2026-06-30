@@ -9,7 +9,15 @@
 // Grows in Phase 3+. In Phase 0 only `text` is exercised.
 // A generic UI rendering hint a tool can attach to its result (M2). The engine just passes it through; the
 // FRONTEND interprets it (e.g. a file-edit shows a diff card instead of a plain output preview).
-export type ToolDisplay = { kind: 'fileEdit'; path: string; op: 'create' | 'edit' | 'overwrite'; diff: string }
+/** One task in the agent's session checklist (TodoWrite). `content` is imperative ("Run tests"); `activeForm`
+ *  is the present-continuous shown while in_progress ("Running tests"). */
+export type TodoItem = { content: string; status: 'pending' | 'in_progress' | 'completed'; activeForm: string }
+
+/** A generic UI rendering hint a tool may attach to its result; the engine passes it through untouched and the
+ *  frontend interprets it (ADR-028). The model never sees it. */
+export type ToolDisplay =
+  | { kind: 'fileEdit'; path: string; op: 'create' | 'edit' | 'overwrite'; diff: string }
+  | { kind: 'todos'; items: TodoItem[] } // the current task checklist (TodoWrite) — frontend renders it
 
 export type ContentBlock =
   | { type: 'text'; text: string }

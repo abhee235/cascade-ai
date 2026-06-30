@@ -11,6 +11,7 @@ import type { ToolRegistry } from './toolRegistry'
 import type { ArchivalMemory } from '../memory/archival'
 import type { Sandbox } from '../sandbox/sandbox'
 import type { FileStateCache } from './fileState'
+import type { TodoStore } from './todoStore'
 
 export interface ToolContext {
   cwd: string
@@ -33,6 +34,10 @@ export interface ToolContext {
   /** ADR-032: read-before-edit freshness. Read records {content, mtime} here; Edit/Write require an entry
    *  (the file was read) that hasn't gone stale. Session-scoped. Omit ⇒ no freshness enforcement. */
   readFileState?: FileStateCache
+  /** ADR-034: the authoritative todo checklist (per agent scope), written by TodoWrite. Survives compaction
+   *  so the loop's periodic reminder + the UI read a list that the transcript may have summarized away.
+   *  Session-scoped. Omit ⇒ TodoWrite still works (display passthrough) but there's no stored list/reminder. */
+  todoStore?: TodoStore
   /** Phase 12: delegate a subtask to a nested agent loop (own context + tool subset) → returns its final
    *  text. Injected by the loop (avoids an import cycle); absent at/over the depth cap. */
   spawnSubagent?(opts: { prompt: string; readOnly?: boolean }): Promise<string>
