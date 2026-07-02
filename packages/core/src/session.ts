@@ -17,7 +17,7 @@ import { TodoStore } from './tools/todoStore'
 import { McpHub, type McpServerConfig, type McpConnect, type McpServerStatus } from './mcp/mcpHub'
 import { createArchival, type ArchivalHit } from './memory/archival'
 import { loadMemory } from './memory/memoryStore'
-import { resolveCompactConfig } from './context/compactor'
+import { resolveCompactionPlan } from './context/compactor'
 import { curateMemory } from './memory/curator'
 
 export interface SessionOptions {
@@ -42,7 +42,10 @@ export interface SessionOptions {
   autoMemory?: boolean
   /** Context window (tokens) for compaction sizing (Phase 11). Overrides the model→window map. */
   contextWindow?: number
-  /** Compaction tuning (Phase 11): compact at window*compactRatio; keep window*keepRecentRatio verbatim. */
+  /** Model max output tokens (ADR-039): caps the compaction summary reserve; helps small windows size correctly. */
+  maxOutputTokens?: number
+  /** Compaction tuning: `compactRatio` is the proportional trigger `pct` in the ADR-039 ladder (default 0.7);
+   *  `keepRecentRatio` is the fraction of the effective window kept verbatim (default 0.25). */
   compactRatio?: number
   keepRecentRatio?: number
   /** Resilience tuning (Phase 12): retry/backoff for transient model-call failures. */
@@ -116,11 +119,13 @@ export function createSession(opts: SessionOptions): CascadeSession {
   const embed = opts.provider.embed ? (texts: string[]) => opts.provider.embed!(texts, embedModel) : undefined
   const archival = createArchival({ cwd: opts.cwd, embed })
 
-  // Compaction config (Phase 11): resolved once — window via override → model map → default; ratios scale.
-  const compactConfig = resolveCompactConfig({
+  // Compaction plan (ADR-039): resolved once — window via override → model map → default. The threshold ladder
+  // keeps the fixed reserve on big windows and falls back to proportional on small ones (no big-model regression).
+  const compactPlan = resolveCompactionPlan({
     model: opts.model,
     contextWindow: opts.contextWindow,
-    compactRatio: opts.compactRatio,
+    maxOutputTokens: opts.maxOutputTokens,
+    pct: opts.compactRatio,
     keepRecentRatio: opts.keepRecentRatio,
   })
 
@@ -172,7 +177,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
           compact: {
             provider: opts.provider,
             model: opts.model,
-            config: compactConfig,
+            plan: compactPlan,
             signal: controller.signal,
             // Coupled curation: harvest durable facts from the OLDER messages right before they're summarized away.
             onDiscard: autoMemory ? async (older) => void (await curate(older)) : undefined,

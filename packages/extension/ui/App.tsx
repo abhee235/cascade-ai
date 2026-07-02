@@ -102,6 +102,19 @@ type Item =
   | { kind: 'memory'; text: string }
   | { kind: 'compacted'; text: string }
 
+// Label for the `compacted` event's layer kind (ADR-039). Mirrors core's compactionKindLabel; inlined so the
+// webview bundle doesn't pull in the node-side @cascade/core runtime just for a string.
+function compactedLabel(kind: string): string {
+  switch (kind) {
+    case 'collapsed': return 'collapsed superseded reads/searches'
+    case 'masked': return 'masked large old tool output'
+    case 'microcompacted': return 'cleared old tool results'
+    case 'snipped': return 'snipped large tool inputs'
+    case 'summarized': return 'summarized older turns'
+    default: return 'compacted context'
+  }
+}
+
 function extract(message: Message): { text: string; thinking: string } {
   if (typeof message.content === 'string') return { text: message.content, thinking: '' }
   let text = ''
@@ -234,7 +247,7 @@ export function App() {
         case 'compacted':
           setItems((it) => [
             ...it,
-            { kind: 'compacted', text: event.kind === 'summarized' ? 'summarized older turns' : 'masked old tool output' },
+            { kind: 'compacted', text: compactedLabel(event.kind) },
           ])
           break
         case 'mcpStatus':

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { tmpdir } from 'node:os'
 import { runAgentLoop } from '../src/agent/agentLoop'
+import { planCompaction } from '../src/context/compactionPlan'
 import { createFakeProvider, textDelta, done } from './fakeProvider'
 import type { ActivityEvent, Message } from '../src/protocol'
 
@@ -25,7 +26,7 @@ describe('compaction e2e (through runAgentLoop)', () => {
       model: 'fake',
       cwd: tmpdir(),
       signal: new AbortController().signal,
-      compact: { provider, model: 'fake', config: { window: 400, compactRatio: 0.8, keepRecentRatio: 0.25 } },
+      compact: { provider, model: 'fake', plan: planCompaction({ window: 400 }) },
     })) {
       events.push(e)
     }

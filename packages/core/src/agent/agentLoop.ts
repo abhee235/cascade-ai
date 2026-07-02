@@ -146,7 +146,9 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
       signal: deps.signal,
       onOverflow: deps.compact
         ? async () => {
-            const { messages: c, kind } = await compactIfNeeded(messages, { ...deps.compact!, config: { ...deps.compact!.config, compactRatio: 0.6 } })
+            // Reactive overflow: force compaction regardless of the threshold (ADR-039 `force`) — the model just
+            // reported the prompt is too large, so waiting for the `auto` gate would just loop.
+            const { messages: c, kind } = await compactIfNeeded(messages, deps.compact!, { force: true })
             if (kind !== 'none') messages.splice(0, messages.length, ...c)
           }
         : undefined,

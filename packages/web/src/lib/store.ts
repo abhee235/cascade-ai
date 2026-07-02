@@ -10,6 +10,19 @@ import { StreamingOptimizer } from './streamingOptimizer'
 import { applyAccent, applyTheme, getInitialAccent, getInitialTheme, type Theme } from './theme'
 import type { ChatMeta, FileNode, Problem, ProjectInfo, TemplateInfo, Version } from '@cascade/app-protocol'
 
+// Label for the `compacted` event's layer kind (ADR-039). Mirrors core's compactionKindLabel; inlined so the
+// browser bundle doesn't pull in the node-side @cascade/core runtime just for a string.
+function compactedLabel(kind: string): string {
+  switch (kind) {
+    case 'collapsed': return 'collapsed superseded reads/searches'
+    case 'masked': return 'masked large old tool output'
+    case 'microcompacted': return 'cleared old tool results'
+    case 'snipped': return 'snipped large tool inputs'
+    case 'summarized': return 'summarized older turns'
+    default: return 'compacted context'
+  }
+}
+
 interface UiState {
   // routing (lightweight in-store router)
   page: Page
@@ -293,7 +306,7 @@ export const useStore = create<UiState>((set, get) => {
           break
         case 'compacted':
           set((s) => ({
-            items: [...s.items, { kind: 'compacted', text: e.kind === 'summarized' ? 'summarized older turns' : 'masked old tool output' }],
+            items: [...s.items, { kind: 'compacted', text: compactedLabel(e.kind) }],
           }))
           break
         case 'turnDone':

@@ -18,14 +18,17 @@ Legend: ☐ not started · ◐ partial · ☑ done. "Target capability" = the be
 | # | Gap | Cascade today | Target capability | New ADR |
 |---|-----|---------------|-------------|---------|
 | A1 | ☐ **Streaming tool execution** | tools run only AFTER the full model stream completes ([agentLoop.ts:139‑167](../packages/core/src/agent/agentLoop.ts)) | a streaming tool executor starts a tool **while the model is still streaming** later blocks — overlaps model-time and tool-time | ADR-029 |
-| A2 | ◐ **5-layer compaction stack** | 2 phases: mask old tool output + 9-section summary ([compactor.ts](../packages/core/src/context/compactor.ts)) | 5 layers: **tool-result budget → snip → microcompact → context-collapse → autocompact** | ADR-030 |
+| A2 | ☑ **Plan-driven layer stack** | **DONE (ADR-039):** 5 gated layers run cheapest-first — `collapse` (dedupe superseded reads/searches) → `mask` (size-gated) → `microcompact` (evict compactable tool results) → `snip` (reclaim large tool *inputs*) → `summarize` (LLM); thresholds derive from the model profile (ADR-038). Also reclaims tool *inputs* (Write/Edit bodies) + fully automatic. ([compactionLayers.ts](../packages/core/src/context/compactionLayers.ts), [compactor.ts](../packages/core/src/context/compactor.ts)) | 5 layers: **tool-result budget → snip → microcompact → context-collapse → autocompact** | ADR-039 ✅ (defer: fresh-context mode, CJK est.) |
 | A3 | ◐ **Recovery depth** | retry/backoff + overflow→compact ([resilience.ts](../packages/core/src/llm/resilience.ts)) | + **token escalation** (raise `max_tokens` on truncation) + **budget continuation** | ADR-031 |
 | A4 | ☑ **Read-before-Edit freshness** | **DONE (ADR-032):** session-scoped `FileStateCache`; Edit refuses unread/stale files (mtime + content fallback), CRLF-normalized | `readFileState` map: Edit **refuses** a file not Read first, or changed since read | ADR-032 ✅ |
 | A5 | ◐ **Permission depth** | rules match by **tool name only**; Bash is one opaque allow/deny ([gate.ts:38](../packages/core/src/permissions/gate.ts)) | input-aware rules (`Bash(npm run test:*)`, `Edit(src/**)`), a **bash command classifier** (split `a && b \| c`, gate each), and **hooks** | ADR-035 (rules), ADR-036 (hooks) |
 | A6 | ◐ **Prompt & context engineering** | compact system prompt ([systemPrompt.ts](../packages/core/src/agent/systemPrompt.ts)) | rich tone/conventions prompt + **context gathering** (instruction files, directory structure, git status injected) + static/dynamic **cache boundary** | ADR-037 |
-| A7 | ☐ **Cost / token accounting** | JSONL tracer only ([tracer.ts](../packages/core/src/observability/tracer.ts)) | per-turn token + cost tracking | ADR-038 |
+| A7 | ☐ **Cost / token accounting** | JSONL tracer only ([tracer.ts](../packages/core/src/observability/tracer.ts)) | per-turn token + cost tracking | ADR-040 |
 | A9 | ☑ **Durable todo checklist + reminder** | **DONE (ADR-034):** session `TodoStore` persisted to `.cascade/todos.json`; state-aware `<system-reminder>` re-injected when the model drifts; one-in_progress invariant enforced | a todo list in app state + a re-injected reminder (turns since last use) | ADR-034 ✅ |
 | A8 | ☑ **Filesystem confinement (host ↔ sandbox)** | **DONE (ADR-033):** `resolveInProject` jails every file tool to the project root; `/app`·`/workspace` aliases re-root, escapes rejected; `Sandbox.root` + prompt show one coherent cwd | file tools confined via input validation + permission deny-rules + path expansion | ADR-033 ✅ |
+
+> **ADR numbering key.** Two cross-cutting ADRs sit outside the A-list: **ADR-038** = model-capability profile →
+> adaptive budgets; **ADR-039** = plan-driven layered compactor (consumes ADR-038; delivers A2). A7 uses ADR-040.
 
 ---
 

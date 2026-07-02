@@ -77,3 +77,25 @@ Each lands as a runnable, tested checkpoint. (Preview/Terminal need the 13.3 san
 
 Templates → File service + **M4 Code** (see files) → Live preview + **M3** (see it run) → **M2** permission/
 edit cards → Git checkpoints + **M6** → Terminal + **M7**. After that: prompt → running app → edit → restore.
+
+---
+
+## 5. Core-parity enhancements (post-Phase-13, tracked in `docs/CORE-PARITY.md`)
+
+Making the engine best-in-class across **all** model sizes (multi-provider), not just feature-complete.
+
+| | Item | ADR |
+|---|---|---|
+| ✅ | **Read-before-Edit freshness** — session `FileStateCache`; Edit refuses unread/stale files | ADR-032 |
+| ✅ | **Filesystem confinement** — every file tool jailed to the project root | ADR-033 |
+| ✅ | **Durable todo checklist + drift reminder** | ADR-034 |
+| ✅ | **Model-capability profile → adaptive budgets** — one algorithm adapts by window/output caps | ADR-038 |
+| ✅ | **Plan-driven layered compactor** — 5 layers (collapse→mask→microcompact→snip→summarize), big-window path = late absolute thresholds (golden-tested, no regression), reclaims tool *inputs* too | ADR-039 |
+| ⬜ | Streaming tool execution · deeper recovery (token escalation) · input-aware permissions + hooks · prompt/context engineering · cost accounting | A1/A3/A5/A6/A7 |
+
+**Verified:** `@cascade/core` typechecks; **101 tests pass** (1 skipped) incl. per-layer + golden no-regression;
+extension + web packages typecheck.
+
+> **ADR numbering (resolved):** ADR-038 = model-capability profile, ADR-039 = plan-driven compactor (both
+> shipped). A2 (compaction) now points to ADR-039; A7 (cost accounting) reservation moved to ADR-040 to avoid
+> the clash. Files stay as-is (no renames — they're cross-referenced by code + tests).

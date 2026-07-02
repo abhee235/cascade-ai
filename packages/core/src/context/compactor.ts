@@ -1,32 +1,40 @@
-// context/compactor.ts — keep the conversation within the model's window (ADR-012). Layered + ratio-sized:
-//   Phase A  observation masking (cheap, no LLM): replace large OLD tool outputs with a placeholder.
-//   Phase B  partial summarize (only if still over): summarize the OLDER half into one message via the
-//            9-section structured prompt, keep the RECENT half verbatim.
+// context/compactor.ts — keep the conversation within the model's window (ADR-012 / ADR-039). The orchestrator:
+// runs an escalating stack of pure, no-LLM layers (collapse → mask → microcompact → snip; compactionLayers.ts)
+// cheapest-first, stopping as soon as history is back under the plan's `auto` threshold; only if they don't free
+// enough does it fall back to the LLM summary (the older half → one message, recent half kept verbatim).
 // Returns NEW messages; the raw transcript + JSONL trace are untouched (the session swaps its history array).
+
 
 import type { Message } from '../protocol'
 import type { ModelProvider } from '../llm/provider'
-import { contextWindowForModel } from '../llm/contextWindows'
+import type { CompactionLayer, CompactionPlan } from './compactionPlan'
+import {
+  collapseSuperseded,
+  maskObservations,
+  microcompactToolResults,
+  snipLargeToolInputs,
+  type CompactionKind,
+} from './compactionLayers'
 
-export interface CompactConfig {
-  window: number // total context window (tokens)
-  compactRatio: number // compact when estimated tokens ≥ window * this (default 0.8)
-  keepRecentRatio: number // keep this fraction of the window as verbatim recent messages (default 0.25)
-}
-
-/** window = explicit override → known-model map → safe default; ratios scale across 8k↔200k. */
-export function resolveCompactConfig(opts: {
-  model: string
-  contextWindow?: number
-  compactRatio?: number
-  keepRecentRatio?: number
-}): CompactConfig {
-  return {
-    window: opts.contextWindow ?? contextWindowForModel(opts.model) ?? 8192,
-    compactRatio: opts.compactRatio ?? 0.8,
-    keepRecentRatio: opts.keepRecentRatio ?? 0.25,
-  }
-}
+// Sizing/thresholds live in the CompactionPlan (ADR-039); the pure no-LLM layers live in compactionLayers.ts.
+// Re-exported here so existing importers (session.ts, tests, UIs) keep a single import site.
+export {
+  planCompaction,
+  resolveCompactionPlan,
+  ALL_COMPACTION_LAYERS,
+  type CompactionPlan,
+  type CompactionLayer,
+} from './compactionPlan'
+export {
+  collapseSuperseded,
+  maskObservations,
+  microcompactToolResults,
+  snipLargeToolInputs,
+  compactionKindLabel,
+  isClearedContent,
+  COMPACTABLE_TOOLS,
+  type CompactionKind,
+} from './compactionLayers'
 
 /** Rough token estimate (chars/4) over serialized content — no tokenizer dependency. */
 export function estimateTokens(messages: Message[]): number {
@@ -55,19 +63,17 @@ export function olderBoundary(messages: Message[], keepRecentTokens: number): nu
   return 0 // it all fits in the recent window → nothing older
 }
 
-/** Phase A: replace large tool_result blocks in the OLDER region with a placeholder (keep the reasoning). */
-export function maskObservations(messages: Message[], olderCount: number, maxToolChars = 2000): Message[] {
-  return messages.map((m, idx) => {
-    if (idx >= olderCount || typeof m.content === 'string') return m
-    return {
-      ...m,
-      content: m.content.map((b) =>
-        b.type === 'tool_result' && b.content.length > maxToolChars
-          ? { ...b, content: `[output masked — ${b.content.length} chars elided to save context]` }
-          : b,
-      ),
-    }
-  })
+/** Turn-align the SUMMARIZE split so the surviving history is a VALID message sequence for any provider.
+ *  Summarize drops the older region and prepends one `user` summary; the recent region must therefore START on
+ *  an assistant message. Otherwise recent[0] is a `user(tool_result)` whose `assistant(tool_use)` was just
+ *  summarized away → an ORPHANED tool result (a hard 400 on strict hosted APIs such as OpenAI; silently accepted by Ollama), and
+ *  `user(summary)` + `user(...)` would also be two adjacent user turns (also rejected by strict providers).
+ *  Walk the boundary back to the nearest assistant. If the older region has no assistant at all (degenerate —
+ *  e.g. an all-text history, which by definition has no tool pairs to orphan), keep the raw split. — ADR-039. */
+export function turnAlignedBoundary(messages: Message[], boundary: number): number {
+  let b = Math.min(boundary, messages.length)
+  while (b > 0 && messages[b]?.role !== 'assistant') b--
+  return b > 0 ? b : boundary
 }
 
 // The structured summary prompt: seven headings built around what the agent needs to resume (where the work
@@ -115,33 +121,71 @@ async function summarize(older: Message[], provider: ModelProvider, model: strin
 export interface CompactDeps {
   provider: ModelProvider
   model: string
-  config: CompactConfig
+  plan: CompactionPlan // ADR-039: thresholds + gated layers, derived from the model profile (ADR-038)
   signal?: AbortSignal
   /** Coupled curation (ADR-015): harvest durable facts from the OLDER messages before they're compressed. */
   onDiscard?: (older: Message[]) => Promise<void>
 }
 
-export type CompactionKind = 'none' | 'masked' | 'summarized'
+// The pure, no-LLM layers in escalation order, each mapped to the kind it reports. `summarize` is handled
+// separately (it's async + needs the provider). Adding a layer later = one entry here + its transform.
+const CHEAP_LAYERS: { layer: CompactionLayer; kind: CompactionKind; apply: (m: Message[], older: number, plan: CompactionPlan) => Message[] }[] = [
+  { layer: 'collapse', kind: 'collapsed', apply: (m, older) => collapseSuperseded(m, older) },
+  { layer: 'mask', kind: 'masked', apply: (m, older, plan) => maskObservations(m, older, plan.toolResultMaxChars) },
+  { layer: 'microcompact', kind: 'microcompacted', apply: (m, older) => microcompactToolResults(m, older) },
+  { layer: 'snip', kind: 'snipped', apply: (m, older, plan) => snipLargeToolInputs(m, older, plan.toolResultMaxChars) },
+]
 
-/** Compact `messages` if over threshold. Returns the (possibly) new history and what was done. */
-export async function compactIfNeeded(messages: Message[], deps: CompactDeps): Promise<{ messages: Message[]; kind: CompactionKind }> {
-  const compactAt = deps.config.window * deps.config.compactRatio
-  if (estimateTokens(messages) < compactAt) return { messages, kind: 'none' }
+/**
+ * Compact `messages` when they cross the plan's `auto` threshold (ADR-039). Runs the plan's enabled layers in
+ * escalation order — collapse → mask → microcompact → snip (pure, no LLM) — stopping the moment history is back
+ * under `auto`; only if those don't free enough does it fall back to `summarize` (LLM side-query on the older
+ * half). `force` (reactive overflow) bypasses the threshold gate and always compresses as hard as it can.
+ * Returns the (possibly) new history and the kind of the most aggressive layer that ran.
+ */
+export async function compactIfNeeded(
+  messages: Message[],
+  deps: CompactDeps,
+  opts?: { force?: boolean },
+): Promise<{ messages: Message[]; kind: CompactionKind }> {
+  const { plan } = deps
+  const force = opts?.force ?? false
+  if (!force && estimateTokens(messages) < plan.auto) return { messages, kind: 'none' }
 
-  const keepRecent = deps.config.window * deps.config.keepRecentRatio
-  const boundary = olderBoundary(messages, keepRecent)
+  const boundary = olderBoundary(messages, plan.keepRecentTokens)
+  if (boundary === 0) return { messages, kind: 'none' } // all fits in the recent window — nothing older to compact
 
-  // Phase A — mask large old tool outputs; often enough on its own.
-  const masked = maskObservations(messages, boundary)
-  if (estimateTokens(masked) < compactAt || boundary === 0) {
-    return { messages: masked, kind: boundary === 0 ? 'none' : 'masked' }
+  // ── Cheap layers: escalate, stopping as soon as we're back under threshold. ──
+  // These are length-preserving (they clear content / stub inputs, never drop messages), so `boundary` stays
+  // valid across all of them. `kind` tracks the most aggressive layer that actually reduced tokens.
+  let working = messages
+  let kind: CompactionKind = 'none'
+  for (const step of CHEAP_LAYERS) {
+    if (!plan.layers.has(step.layer)) continue
+    const next = step.apply(working, boundary, plan)
+    if (estimateTokens(next) < estimateTokens(working)) {
+      working = next
+      kind = step.kind
+    }
+    if (!force && estimateTokens(working) < plan.auto) return { messages: working, kind }
   }
 
-  // Phase B — summarize the older half (harvest memory first), keep recent verbatim.
-  const older = masked.slice(0, boundary)
-  const recent = masked.slice(boundary)
-  if (deps.onDiscard) await deps.onDiscard(older)
-  const summary = await summarize(older, deps.provider, deps.model, deps.signal)
-  const summaryMsg: Message = { role: 'user', content: `[Earlier conversation compacted to save context]\n\n${summary}` }
-  return { messages: [summaryMsg, ...recent], kind: 'summarized' }
+  // ── Heavy layer: LLM summary of the older half, recent kept verbatim. ──
+  if (plan.layers.has('summarize')) {
+    // Recompute the boundary: the cheap layers changed token counts, shifting where "recent" starts. Then
+    // turn-align it so `recent` starts on an assistant — summarize replaces `older` with one user message, so a
+    // recent region beginning with a tool_result (or a user turn) would orphan a tool pair / stack two user
+    // messages, which strict providers reject (see turnAlignedBoundary).
+    const summarizeBoundary = turnAlignedBoundary(working, olderBoundary(working, plan.keepRecentTokens))
+    if (summarizeBoundary > 0) {
+      const older = working.slice(0, summarizeBoundary)
+      const recent = working.slice(summarizeBoundary)
+      if (deps.onDiscard) await deps.onDiscard(older)
+      const summary = await summarize(older, deps.provider, deps.model, deps.signal)
+      const summaryMsg: Message = { role: 'user', content: `[Earlier conversation compacted to save context]\n\n${summary}` }
+      return { messages: [summaryMsg, ...recent], kind: 'summarized' }
+    }
+  }
+
+  return { messages: working, kind }
 }

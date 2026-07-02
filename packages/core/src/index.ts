@@ -37,6 +37,9 @@ export {
 } from './memory/memoryStore'
 export { createArchival } from './memory/archival'
 export type { ArchivalMemory, ArchivalHit, ArchivalEntry } from './memory/archival'
+// Compaction (ADR-039): layered, plan-driven context compaction. `compactionKindLabel` renders the
+// `compacted` activity event; the plan/layers are internal but the label is part of the public surface.
+export { compactionKindLabel } from './context/compactor'
 // Resilience (ADR-016): retry/backoff + overflow→compact around the model call.
 export { streamWithRecovery, classifyError, RecoveryError } from './llm/resilience'
 export type { ErrorKind, RecoveryOptions } from './llm/resilience'
