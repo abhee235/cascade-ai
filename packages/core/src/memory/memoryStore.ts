@@ -10,6 +10,10 @@ import { dirname, join, resolve } from 'node:path'
 /** Committable project memory; the `.local` variant is personal/gitignored; user is global. */
 export const MEMORY_FILE = 'CASCADE.md'
 export const MEMORY_LOCAL_FILE = 'CASCADE.local.md'
+// ADR-046: cross-tool interop — a project (especially a real repo opened in the extension) may carry its agent
+// instructions in the emerging-standard AGENTS.md instead of CASCADE.md. Read those too, at LOWER
+// priority than the Cascade-native files, so those conventions are honoured without the user duplicating them.
+const INTEROP_FILES = ['AGENTS.md'] as const
 
 // Cap the always-injected memory so it can't dominate the (small) context window.
 const MAX_LINES = 200
@@ -90,6 +94,8 @@ export function memoryFiles(cwd: string): { path: string; scope: string }[] {
     if (dirname(d) === d) break
   }
   for (const dir of dirs.reverse()) {
+    // Interop files first (lower priority), then the Cascade-native ones — so on conflict CASCADE.md wins.
+    for (const name of INTEROP_FILES) files.push({ path: join(dir, name), scope: 'Project instructions' })
     files.push({ path: join(dir, MEMORY_FILE), scope: 'Project' })
     files.push({ path: join(dir, MEMORY_LOCAL_FILE), scope: 'Local' })
   }

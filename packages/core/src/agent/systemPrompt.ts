@@ -31,6 +31,10 @@ export interface SystemPromptInput {
   /** Generic extra system-prompt context the FRONTEND supplies (Phase 15). Headless: just a string. The
    *  builder uses it to inject a project template's AI rules ("this is a Vite+React+TS app; edit src/…"). */
   extraInstructions?: string
+  /** ADR-046: gathered project facts (directory tree + git status), pre-computed once per session by
+   *  gatherProjectContext and sized to the tier. Injected so a weak model doesn't burn turns rediscovering
+   *  the layout (or hallucinating paths). Main agent only — subagents get a focused task, not the whole tree. */
+  projectContext?: string
 }
 
 // ── Sections (each returns markdown; some collapse or drop at smaller tiers) ─────────────────────────────────
@@ -115,7 +119,7 @@ function environment(cwd: string, sandboxRoot?: string): string {
   ].join('\n')
 }
 
-export function buildSystemPrompt({ cwd, sandboxRoot, tier = 'full', subagent = false, recalled, extraInstructions }: SystemPromptInput): string {
+export function buildSystemPrompt({ cwd, sandboxRoot, tier = 'full', subagent = false, recalled, extraInstructions, projectContext }: SystemPromptInput): string {
   const agentNote = subagent ? subagentNote() : null // G8: inserted right after intro at every tier
   let sections: (string | null)[]
   if (tier === 'minimal') {
@@ -133,6 +137,9 @@ export function buildSystemPrompt({ cwd, sandboxRoot, tier = 'full', subagent = 
   if (memory) prompt += `\n\n${memory}`
   // Frontend-supplied context (e.g. a project template's AI rules). Outside the conversation history too.
   if (extraInstructions) prompt += `\n\n${extraInstructions}`
+  // ADR-046: gathered project facts (dir tree + git status). Pre-sized to the tier; kept out of the compactable
+  // history so the layout is always available. Subagents don't get it (they run a focused, delegated task).
+  if (projectContext && !subagent) prompt += `\n\n${projectContext}`
   // Proactive retrieval: relevant archival memories for this turn (lower trust than core — the model should
   // verify, since they're retrieved by similarity).
   if (recalled) {

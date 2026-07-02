@@ -31,6 +31,7 @@ export interface LoopDeps {
   archival?: import('../memory/archival').ArchivalMemory // Phase 10: semantic memory the tools can use
   recalled?: string // Phase 10: archival memories auto-retrieved for this turn (proactive retrieval)
   extraInstructions?: string // Phase 15: generic extra system-prompt context (e.g. a template's AI rules)
+  projectContext?: string // ADR-046: gathered project facts (dir tree + git status), main-agent only
   compact?: CompactDeps // Phase 11: compact the history when it nears the window
   depth?: number // Phase 12: subagent nesting depth (0 = main agent)
   recovery?: Pick<RecoveryOptions, 'maxRetries' | 'baseDelayMs' | 'maxDelayMs' | 'sleep'> // Phase 12: tune/inject for tests
@@ -147,13 +148,13 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     yield { type: 'status', text: 'Thinking…' }
     // FORENSICS: record the FULL request we're about to send — the #1 thing you need when an answer
     // is wrong ("did the model even see the tool_result / the right system prompt?"). — ADR-023.
-    const system = buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions })
+    const system = buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext })
     tracer.event({ t: 'model_request', turn, system, tools: registry.list().map((t) => t.name), messages })
     // Wrap the stream in recovery (ADR-016): transient failures retry with backoff; context overflow triggers
     // a (reactive) compaction then retries; abort/fatal surface. `make` re-reads `messages` each attempt, so
     // an overflow-compaction is reflected on the retry. System is rebuilt too (memory may have changed).
     const makeStream = () =>
-      deps.provider.stream({ messages, model: deps.model, system: buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions }), tools: registry.schemas(tier) }, deps.signal)
+      deps.provider.stream({ messages, model: deps.model, system: buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext }), tools: registry.schemas(tier) }, deps.signal)
     for await (const ev of streamWithRecovery(makeStream, {
       ...deps.recovery,
       signal: deps.signal,

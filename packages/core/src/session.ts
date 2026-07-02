@@ -8,6 +8,7 @@
 import type { ActivityEvent, ContentBlock, Message } from './protocol'
 import type { ModelProvider } from './llm/provider'
 import { runAgentLoop } from './agent/agentLoop'
+import { gatherProjectContext } from './agent/projectContext'
 import type { PermissionController, PermissionMode, PermissionState } from './permissions/gate'
 import { NoopTracer, type Tracer } from './observability/tracer'
 import { join } from 'node:path'
@@ -159,6 +160,21 @@ export function createSession(opts: SessionOptions): CascadeSession {
     }
   }
 
+  // ADR-046: gather the project-context block (directory tree + git status) ONCE, sized to the detected tier,
+  // and reuse it for every turn. Runs AFTER ensureDetectedPlan so it uses the real window tier. Best-effort:
+  // any failure leaves projectContext undefined and the prompt unchanged.
+  let projectContext: string | undefined
+  let contextGathered = false
+  async function ensureProjectContext(): Promise<void> {
+    if (contextGathered) return
+    contextGathered = true
+    try {
+      projectContext = (await gatherProjectContext({ cwd: opts.cwd, tier: compactPlan.tier })) || undefined
+    } catch {
+      /* best-effort — no project context is fine */
+    }
+  }
+
   // Event-driven curation (ADR-015): harvest durable facts when context is about to be discarded — at
   // compaction (the older chunk) and at session end. OPT-IN (autoMemory); consolidates (ADD/NOOP), no firehose.
   const autoMemory = opts.autoMemory === true
@@ -172,6 +188,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
       const controller = new AbortController()
       inFlight = controller
       await ensureDetectedPlan(controller.signal) // ADR-038: size the plan to the model's real window before turn 1
+      await ensureProjectContext() // ADR-046: gather the dir tree + git status once (uses the tier from above)
 
       // Multimodal turn (M11): attach image data-URIs as image blocks alongside the text; otherwise keep the
       // plain-string form (smaller history, unchanged behaviour for the common case).
@@ -219,6 +236,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
           todoStore,
           ask, // ADR-043: AskUserQuestion round-trip
           extraInstructions: opts.extraInstructions,
+          projectContext, // ADR-046: dir tree + git status (gathered once above)
           maxTurns: opts.maxTurns,
         })
       } catch (err) {
