@@ -39,6 +39,12 @@ interface UiState {
   status: string | null
   recovering: Recovering | null
   busy: boolean
+  // Liveness: when the current model STEP began (reset at each step boundary), so the UI can tick an elapsed
+  // timer — motion the user can see even when the model emits no tokens (prompt eval / a stall). `sawTokens`
+  // flips true on the first thinking/text delta of the step, so we can say "Processing input…" (still ingesting
+  // the prompt) vs "Thinking…"/streaming once output actually starts.
+  stepStartedAt: number | null
+  sawTokens: boolean
   // multiple chats per project (M11), server-persisted; the list + which is active
   chats: ChatMeta[]
   activeChatId: string | null
@@ -211,6 +217,8 @@ export const useStore = create<UiState>((set, get) => {
     status: null,
     recovering: null,
     busy: false,
+    stepStartedAt: null,
+    sawTokens: false,
     chats: [],
     activeChatId: null,
     fileTree: [],
@@ -251,11 +259,11 @@ export const useStore = create<UiState>((set, get) => {
           break
         case 'thinking_delta':
           if (thinkStart === null) thinkStart = Date.now()
-          set({ recovering: null })
+          set({ recovering: null, sawTokens: true }) // first token → we're past prompt eval, now generating
           thinkOpt.push(e.thinking)
           break
         case 'text_delta':
-          set({ recovering: null })
+          set({ recovering: null, sawTokens: true })
           textOpt.push(e.text)
           break
         case 'toolStart':
@@ -278,6 +286,9 @@ export const useStore = create<UiState>((set, get) => {
             items: s.items.map((x) =>
               x.kind === 'tool' && x.id === e.id ? { ...x, status: e.ok ? 'ok' : 'error', preview: e.preview, display: e.display } : x,
             ),
+            // The model resumes after a tool → a fresh step begins (with its own prompt-eval gap).
+            stepStartedAt: Date.now(),
+            sawTokens: false,
           }))
           break
         case 'message': {
@@ -296,9 +307,9 @@ export const useStore = create<UiState>((set, get) => {
                 thinking: [last.thinking, thinking].filter(Boolean).join('\n\n') || undefined,
                 thoughtMs: (last.thoughtMs ?? 0) + (thoughtMs ?? 0) || undefined,
               }
-              return { items: [...s.items.slice(0, -1), merged], streaming: null }
+              return { items: [...s.items.slice(0, -1), merged], streaming: null, stepStartedAt: Date.now(), sawTokens: false }
             }
-            return { items: [...s.items, { kind: 'assistant', text, thinking: thinking || undefined, thoughtMs }], streaming: null }
+            return { items: [...s.items, { kind: 'assistant', text, thinking: thinking || undefined, thoughtMs }], streaming: null, stepStartedAt: Date.now(), sawTokens: false }
           })
           break
         }
@@ -317,7 +328,7 @@ export const useStore = create<UiState>((set, get) => {
         case 'turnDone':
           flushStream()
           thinkStart = null
-          set({ status: null, recovering: null, busy: false })
+          set({ status: null, recovering: null, busy: false, stepStartedAt: null, sawTokens: false })
           break
         // ── app/builder events (BuilderEvent) ──
         case 'projects': {
@@ -410,7 +421,7 @@ export const useStore = create<UiState>((set, get) => {
       const { connected, activeId, send } = get()
       if ((!t && !images?.length) || !connected || !activeId) return
       const label = images?.length ? `${t}${t ? '\n\n' : ''}📎 ${images.length} image${images.length > 1 ? 's' : ''}` : t
-      set((s) => ({ items: [...s.items, { kind: 'user', text: label }], busy: true }))
+      set((s) => ({ items: [...s.items, { kind: 'user', text: label }], busy: true, stepStartedAt: Date.now(), sawTokens: false }))
       send({ type: 'submit', text: t, images })
     },
 
@@ -421,7 +432,7 @@ export const useStore = create<UiState>((set, get) => {
     },
     stop: () => {
       get().send({ type: 'abort' })
-      set({ busy: false, status: null })
+      set({ busy: false, status: null, stepStartedAt: null, sawTokens: false })
     },
     // ── multiple chats per project (M11) — the server owns the list + history; we just drive it ──
     newChat: () => get().send({ type: 'chat', action: 'new' }),
@@ -438,7 +449,7 @@ export const useStore = create<UiState>((set, get) => {
       if (id === get().activeId) return
       // Set activeId optimistically so submit() works before the server's `projects` snapshot round-trips.
       terminalSinks.clear() // the server kills the old project's shells on switch; drop their writers
-      set({ activeId: id, items: [], streaming: null, status: null, busy: false, chats: [], activeChatId: null, fileTree: [], openFile: null, fileError: null, fileDiff: null, codeView: 'code', preview: null, logs: [], problems: [], checking: false, runtimeErrors: [], versions: [], terminals: [], activeTerminalId: null, selectMode: false })
+      set({ activeId: id, items: [], streaming: null, status: null, busy: false, stepStartedAt: null, sawTokens: false, chats: [], activeChatId: null, fileTree: [], openFile: null, fileError: null, fileDiff: null, codeView: 'code', preview: null, logs: [], problems: [], checking: false, runtimeErrors: [], versions: [], terminals: [], activeTerminalId: null, selectMode: false })
       get().send({ type: 'project', action: 'open', id })
     },
     deleteProject: (id) => {

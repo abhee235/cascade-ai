@@ -43,8 +43,43 @@ function renderTranscript(items: Item[]) {
 type Attachment = { id: string; name: string; kind: 'image' | 'text'; dataUrl?: string; text?: string }
 const TEXT_EXT = /\.(txt|md|markdown|json|jsonc|ya?ml|toml|csv|tsv|html?|css|scss|jsx?|tsx?|mjs|cjs|py|rb|go|rs|java|kt|c|h|cpp|cs|php|sh|sql|env|gitignore|prisma|graphql|vue|svelte)$/i
 
+// Re-render ~once a second while `active`, so a timer label (elapsed seconds) advances even when no store
+// state is changing — the key liveness cue during prompt eval, when the model emits nothing for many seconds.
+function useTick(active: boolean) {
+  const [, force] = useState(0)
+  useEffect(() => {
+    if (!active) return
+    const id = setInterval(() => force((n) => n + 1), 1000)
+    return () => clearInterval(id)
+  }, [active])
+}
+
+// Live reasoning view: streams the tail of the model's thinking as it arrives (auto-scrolled to the bottom),
+// with a spinner + ticking elapsed. Replaces the old static "Thinking…" pill so the user can see the model is
+// actively reasoning — and roughly how long — instead of guessing whether it's thinking or stuck.
+function LiveThinking({ thinking, seconds }: { thinking: string; seconds: number }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    ref.current?.scrollTo({ top: ref.current.scrollHeight })
+  }, [thinking])
+  return (
+    <div className="my-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+      <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        <span>Thinking…</span>
+        {seconds > 0 && <span className="opacity-60 tabular-nums">{seconds}s</span>}
+      </div>
+      <div ref={ref} className="max-h-24 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground/80">
+        {thinking}
+      </div>
+    </div>
+  )
+}
+
 export function ChatPanel() {
-  const { items, streaming, status, recovering, busy, connected, activeId, submit, stop, composerDraft, setComposerDraft } = useStore()
+  const { items, streaming, status, recovering, busy, stepStartedAt, sawTokens, connected, activeId, submit, stop, composerDraft, setComposerDraft } = useStore()
+  useTick(busy) // re-render ~1×/s while a turn runs so the elapsed timer ticks even with no tokens
+  const elapsed = stepStartedAt ? Math.max(0, Math.floor((Date.now() - stepStartedAt) / 1000)) : 0
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [dragging, setDragging] = useState(false)
@@ -116,17 +151,16 @@ export function ChatPanel() {
       <div className="flex-1 overflow-y-auto px-4 py-3">
         {renderTranscript(items)}
 
-        {/* Live turn: while only thinking has arrived, show a "Thinking…" pill; once the answer text starts
-            streaming, render it as plain flow (no role label) — matches the finished assistant style. */}
+        {/* Live turn: while only thinking has arrived, stream the reasoning tail live (so the user sees the
+            model IS working, not frozen); once the answer text starts, render it as plain flow (no role
+            label) — matches the finished assistant style. */}
         {streaming &&
           (streaming.text ? (
             <div className="my-3 prose prose-sm dark:prose-invert max-w-none">
               <Streamdown>{streaming.text}</Streamdown>
             </div>
           ) : streaming.thinking ? (
-            <div className="my-2 flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Thinking…
-            </div>
+            <LiveThinking thinking={streaming.thinking} seconds={elapsed} />
           ) : null)}
 
         {recovering && (
@@ -138,10 +172,14 @@ export function ChatPanel() {
         )}
 
         {/* Persistent "still working" indicator: shows whenever the turn is running and nothing else is
-            currently rendering (between tool calls / model steps), so it never looks frozen. */}
+            currently rendering. Before the first token of a step it means the model is still INGESTING the
+            prompt ("Processing input…") — the dead-air phase that used to look like a hang; the ticking
+            elapsed seconds prove it's alive. Between steps it's a plain "Working…". */}
         {busy && !streaming && !recovering && (
           <div className="my-1 flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" /> {status || 'Working…'}
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <span>{sawTokens ? status || 'Working…' : 'Processing input…'}</span>
+            {elapsed > 0 && <span className="opacity-60 tabular-nums">{elapsed}s</span>}
           </div>
         )}
         <div ref={endRef} />
