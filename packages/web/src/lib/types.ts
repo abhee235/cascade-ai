@@ -1,4 +1,4 @@
-import type { Message, ToolDisplay } from '@cascade/core'
+import type { Answers, Message, Question, ToolDisplay } from '@cascade/core'
 
 /** One rendered row in the chat transcript. The agent-action cards (kind:'tool') are dispatched by name. */
 export type Item =
@@ -7,6 +7,7 @@ export type Item =
   | { kind: 'tool'; id: string; name: string; summary: string; status: 'running' | 'ok' | 'error'; preview?: string; display?: ToolDisplay }
   | { kind: 'memory'; text: string }
   | { kind: 'compacted'; text: string }
+  | { kind: 'question'; id: string; questions: Question[]; answered?: Answers } // ADR-043: AskUserQuestion card
 
 export type Streaming = { text: string; thinking: string }
 export type Recovering = { attempt: number; reason: string }

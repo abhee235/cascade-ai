@@ -5,11 +5,12 @@
 // (a write) runs SOLO. Parallelism is a correctness choice — independent reads can't interfere, but
 // writes can race. Results are returned in the ORIGINAL order (tool_results map by id either way).
 
-import type { ActivityEvent, ContentBlock } from '../protocol'
+import type { ActivityEvent, ContentBlock, Question } from '../protocol'
 import type { ToolContext } from './Tool'
 import { defaultRegistry, type ToolRegistry } from './toolRegistry'
 import { executeTool, type ToolUse } from './runTool'
 import { checkPermission } from '../permissions/gate'
+import { formatAnswers } from './builtins/AskUserQuestion'
 import { NoopTracer } from '../observability/tracer'
 
 function isSafe(tu: ToolUse, registry: ToolRegistry): boolean {
@@ -78,6 +79,23 @@ export async function* scheduleTools(
     const toRun: ToolUse[] = []
     for (const tu of batch) {
       const tool = registry.find(tu.name)
+
+      // ── ADR-043: an INTERACTIVE tool (AskUserQuestion) — its effect is a round-trip to the user. Mirror the
+      //    permission park: yield a `question` event and BLOCK on ctx.ask.request() until respondQuestion().
+      //    call() is skipped. Only when a channel exists — otherwise fall through and the tool returns its
+      //    no-channel error (headless / non-interactive). ──
+      if (tool?.requiresUserInteraction?.() && ctx.ask) {
+        const questions = ((tu.input as { questions?: Question[] })?.questions ?? []) as Question[]
+        yield { type: 'toolStart', id: tu.id, name: tu.name, summary: summary(tu, registry) }
+        yield { type: 'question', id: tu.id, questions }
+        const answers = await ctx.ask.request(tu.id) // ← BLOCKS until respondQuestion(tu.id, answers)
+        const content = formatAnswers(answers)
+        byId.set(tu.id, { type: 'tool_result', tool_use_id: tu.id, content })
+        tracer.event({ t: 'tool_result', id: tu.id, name: tu.name, ok: true, ms: 0, content })
+        yield { type: 'toolResult', id: tu.id, ok: true, preview: content.slice(0, 200) }
+        continue
+      }
+
       let decision = tool && perm ? checkPermission(tool, tu.input, perm.state) : 'allow'
       const asked = decision === 'ask' // distinguishes a real prompt from an auto-allow in the trace
       if (decision === 'ask' && perm) {

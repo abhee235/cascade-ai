@@ -63,6 +63,8 @@ export interface SessionOptions {
 export interface CascadeSession {
   submit(userText: string, images?: string[]): AsyncIterable<ActivityEvent>
   respondPermission(id: string, decision: 'allow' | 'allow-always' | 'deny'): void
+  /** ADR-043: deliver the user's answer to a `question` event, waking the parked loop. */
+  respondQuestion(id: string, answers: import('./protocol').Answers): void
   abort(): void
   /** Clear conversation history ("New chat"). */
   reset(): void
@@ -97,6 +99,12 @@ export function createSession(opts: SessionOptions): CascadeSession {
   const permission: PermissionController = {
     state,
     request: (id) => new Promise((resolve) => pending.set(id, resolve)),
+  }
+  // ADR-043: AskUserQuestion plumbing — same shape as permissions. `pendingAnswers` holds the resolve() the
+  // scheduler is awaiting on a `question` event; respondQuestion(id, answers) resolves it (wakes the loop).
+  const pendingAnswers = new Map<string, (a: import('./protocol').Answers) => void>()
+  const ask: import('./tools/Tool').AskController = {
+    request: (id) => new Promise((resolve) => pendingAnswers.set(id, resolve)),
   }
   const tracer = opts.tracer ?? NoopTracer
   // ADR-032: read-before-edit freshness, session-scoped — a file Read in one turn stays editable in a later
@@ -209,6 +217,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
           sandbox: opts.sandbox,
           readFileState,
           todoStore,
+          ask, // ADR-043: AskUserQuestion round-trip
           extraInstructions: opts.extraInstructions,
           maxTurns: opts.maxTurns,
         })
@@ -234,6 +243,13 @@ export function createSession(opts: SessionOptions): CascadeSession {
       if (resolve) {
         pending.delete(id)
         resolve(decision) // wakes the scheduler awaiting perm.request(id)
+      }
+    },
+    respondQuestion(id, answers) {
+      const resolve = pendingAnswers.get(id)
+      if (resolve) {
+        pendingAnswers.delete(id)
+        resolve(answers) // wakes the scheduler awaiting ctx.ask.request(id)
       }
     },
 

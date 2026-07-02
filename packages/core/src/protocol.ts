@@ -30,6 +30,21 @@ export type Message =
   | { role: 'user'; content: string | ContentBlock[] }
   | { role: 'assistant'; content: ContentBlock[] }
 
+// ── AskUserQuestion (ADR-043): a structured multiple-choice question the agent asks mid-task. ──
+export interface QuestionOption {
+  label: string
+  description: string
+  preview?: string // optional artifact (mockup/code) for visual comparison; single-select only
+}
+export interface Question {
+  question: string
+  header: string // short chip label (≤12 chars), e.g. "Auth method"
+  options: QuestionOption[] // 2–4 distinct choices; the UI always adds an "Other" free-text option
+  multiSelect: boolean
+}
+/** The user's answers, keyed by question text → the chosen label(s) (multi-select: comma-joined). */
+export type Answers = Record<string, string>
+
 // ── Activity events: core → frontend ────────────────────────────────────────────────────
 // The frontend renders these. Note `message` carries the FINAL answer, rendered whole
 // (activity-first UI, no prose streaming — ADR-013). More variants arrive in later phases.
@@ -39,6 +54,7 @@ export type ActivityEvent =
   | { type: 'text_delta'; text: string } // a chunk of the answer, streamed live (ADR-013)
   | { type: 'toolStart'; id: string; name: string; summary: string } // a tool is about to run (Phase 4)
   | { type: 'permission'; id: string; tool: string; detail: string } // a write needs approval; loop BLOCKS until respondPermission (Phase 7)
+  | { type: 'question'; id: string; questions: Question[] } // ADR-043: the agent asks the user; loop BLOCKS until respondQuestion
   | { type: 'toolProgress'; id: string; chunk: string } // live output from a running tool, e.g. Bash stdout (Phase 8)
   | { type: 'toolResult'; id: string; ok: boolean; preview: string; display?: ToolDisplay } // a tool finished (Phase 4; M2 display hint)
   | { type: 'message'; message: Message } // the finalized answer (authoritative; UI commits it)
@@ -53,6 +69,7 @@ export type ActivityEvent =
 export type InboundMessage =
   | { type: 'submit'; text: string; images?: string[] } // images: data URIs for a multimodal turn (M11)
   | { type: 'permission'; id: string; decision: 'allow' | 'allow-always' | 'deny' }
+  | { type: 'answer'; id: string; answers: Answers } // ADR-043: the user's response to a `question` event
   | { type: 'abort' }
   | { type: 'reset' } // "New chat" — clears conversation history
   | { type: 'mcp'; action: 'list' | 'connect' | 'disconnect'; server?: string } // Phase 9: /mcp panel controls

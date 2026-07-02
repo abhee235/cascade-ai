@@ -5,6 +5,7 @@ import { useStore } from '@/lib/store'
 import type { Item } from '@/lib/types'
 import { ActivityCard, ChangeSet } from './ActivityCard'
 import { ChatHeader } from './ChatHeader'
+import { QuestionCard } from './QuestionCard'
 import { cn } from '@/lib/utils'
 
 const isFileEdit = (it: Item): it is Extract<Item, { kind: 'tool' }> => it.kind === 'tool' && it.display?.kind === 'fileEdit'
@@ -26,6 +27,9 @@ function renderTranscript(items: Item[]) {
       i = j
     } else if (isTodos(items[i]) && i !== lastTodo) {
       i++ // a superseded checklist update — skip it; only the latest todos card renders
+    } else if (items[i].kind === 'question') {
+      out.push(<QuestionCard key={i} item={items[i] as Extract<Item, { kind: 'question' }>} />) // ADR-043
+      i++
     } else {
       out.push(<ActivityCard key={i} item={items[i]} />)
       i++

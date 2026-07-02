@@ -8,6 +8,9 @@ export type {
   ContentBlock,
   ToolDisplay,
   TodoItem,
+  Question,
+  QuestionOption,
+  Answers,
 } from './protocol'
 // Provider abstraction (ADR-020): frontends build a provider via createProvider() and inject it.
 export { createProvider } from './llm/factory'

@@ -370,6 +370,9 @@ export function handleConnection(
         case 'permission':
           active?.respondPermission(msg.id, msg.decision)
           break
+        case 'answer': // ADR-043: the user's answer to an AskUserQuestion → wakes the parked loop
+          active?.respondQuestion(msg.id, msg.answers)
+          break
         case 'abort':
           active?.abort()
           break

@@ -82,6 +82,7 @@ interface UiState {
   setConnected: (b: boolean) => void
   handleEvent: (e: WireEvent) => void
   submit: (text: string, images?: string[]) => void
+  answerQuestion: (id: string, answers: import('@cascade/core').Answers) => void // ADR-043
   stop: () => void
   newChat: () => void // M11: start a fresh chat in the active project
   switchChat: (id: string) => void // M11: switch to a saved chat (loads its history)
@@ -304,6 +305,10 @@ export const useStore = create<UiState>((set, get) => {
         case 'memory':
           set((s) => ({ items: [...s.items, { kind: 'memory', text: e.text }] }))
           break
+        case 'question': // ADR-043: the agent is asking; the loop is parked until the user answers
+          flushStream()
+          set((s) => ({ streaming: null, recovering: null, items: [...s.items, { kind: 'question', id: e.id, questions: e.questions }] }))
+          break
         case 'compacted':
           set((s) => ({
             items: [...s.items, { kind: 'compacted', text: compactedLabel(e.kind) }],
@@ -407,6 +412,12 @@ export const useStore = create<UiState>((set, get) => {
       const label = images?.length ? `${t}${t ? '\n\n' : ''}📎 ${images.length} image${images.length > 1 ? 's' : ''}` : t
       set((s) => ({ items: [...s.items, { kind: 'user', text: label }], busy: true }))
       send({ type: 'submit', text: t, images })
+    },
+
+    // ADR-043: deliver the user's answer to a `question` event → wakes the parked agent loop; mark the card done.
+    answerQuestion: (id, answers) => {
+      get().send({ type: 'answer', id, answers })
+      set((s) => ({ items: s.items.map((x) => (x.kind === 'question' && x.id === id ? { ...x, answered: answers } : x)) }))
     },
     stop: () => {
       get().send({ type: 'abort' })

@@ -12,6 +12,14 @@ import type { ArchivalMemory } from '../memory/archival'
 import type { Sandbox } from '../sandbox/sandbox'
 import type { FileStateCache } from './fileState'
 import type { TodoStore } from './todoStore'
+import type { Answers } from '../protocol'
+
+/** ADR-043: the async bridge the SCHEDULER uses for a tool that requiresUserInteraction() — it yields a
+ *  `question` ActivityEvent, then awaits `request(id)`. The session resolves it when the frontend calls
+ *  respondQuestion(id, answers). Same shape as PermissionController; NOT serializable → lives on ToolContext. */
+export interface AskController {
+  request(id: string): Promise<Answers>
+}
 
 export interface ToolContext {
   cwd: string
@@ -38,6 +46,9 @@ export interface ToolContext {
    *  so the loop's periodic reminder + the UI read a list that the transcript may have summarized away.
    *  Session-scoped. Omit ⇒ TodoWrite still works (display passthrough) but there's no stored list/reminder. */
   todoStore?: TodoStore
+  /** ADR-043: the round-trip channel for AskUserQuestion — the scheduler yields a `question` event and awaits
+   *  this. Omit ⇒ no interactive channel (headless / non-interactive), and the tool returns a clear error. */
+  ask?: AskController
   /** Phase 12: delegate a subtask to a nested agent loop (own context + tool subset) → returns its final
    *  text. Injected by the loop (avoids an import cycle); absent at/over the depth cap. */
   spawnSubagent?(opts: { prompt: string; readOnly?: boolean }): Promise<string>
@@ -73,6 +84,9 @@ export interface Tool<I = unknown> {
   /** Safe to run in parallel with other tools this turn? Default when absent: false (conservative).
    *  Read-only tools are safe; writes are not (they can race). Used by the scheduler (Phase 6). */
   isConcurrencySafe?(input: I): boolean
+  /** ADR-043: this tool's effect IS a round-trip to the user (AskUserQuestion). The scheduler yields a
+   *  `question` event and awaits the answer via ctx.ask instead of running `call()`. Default: false. */
+  requiresUserInteraction?(): boolean
   /** Run the tool. Return text (and isError) — that becomes the tool_result.
    *  `onProgress` (Phase 8) lets long-running tools stream partial output (e.g. Bash stdout) live into
    *  the UI card as it arrives. Instantaneous tools ignore it. */

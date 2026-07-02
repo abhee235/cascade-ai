@@ -278,6 +278,7 @@ export function ActivityCard({ item }: { item: Item }) {
       if (item.kind === 'user') {
         return <div className="my-3 whitespace-pre-wrap rounded-2xl bg-muted px-3.5 py-2.5">{item.text}</div>
       }
+      if (item.kind === 'question') return null // ADR-043: rendered by QuestionCard in ChatPanel, not here
       return (
         <div className="my-3">
           {item.thinking && <ThoughtBlock thinking={item.thinking} ms={item.thoughtMs} />}

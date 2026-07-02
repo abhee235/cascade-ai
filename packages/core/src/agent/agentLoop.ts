@@ -38,6 +38,7 @@ export interface LoopDeps {
   readFileState?: import('../tools/fileState').FileStateCache // ADR-032: read-before-edit freshness cache (session-scoped)
   todoStore?: import('../tools/todoStore').TodoStore // ADR-034: authoritative todo checklist (drives the reminder)
   todoReminder?: TodoReminderConfig // ADR-034: tune/inject the reminder turn thresholds (default 6/6)
+  ask?: import('../tools/Tool').AskController // ADR-043: AskUserQuestion round-trip channel (main agent only)
   /** ADR-037: window tier sizing the system prompt + tool descriptions. Defaults to the compaction plan's tier
    *  (one source of truth); set explicitly for loops without compaction (e.g. subagents inherit the parent's). */
   tier?: import('../llm/contextWindows').WindowTier
@@ -75,7 +76,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   // ADR-037: one window tier for the whole loop — sizes the system prompt AND the tool descriptions. Explicit
   // deps.tier (subagents inherit the parent's) → the compaction plan's tier → 'full'.
   const tier = deps.tier ?? deps.compact?.plan.tier ?? 'full'
-  const ctx: ToolContext = { cwd: deps.cwd, abortSignal: deps.signal, permission: deps.permission, tracer, registry, archival: deps.archival, depth, sandbox: deps.sandbox, readFileState: deps.readFileState, todoStore: deps.todoStore }
+  const ctx: ToolContext = { cwd: deps.cwd, abortSignal: deps.signal, permission: deps.permission, tracer, registry, archival: deps.archival, depth, sandbox: deps.sandbox, readFileState: deps.readFileState, todoStore: deps.todoStore, ask: deps.ask }
   // Subagent delegation (ADR-017): inject a spawn closure (avoids an import cycle). Absent at the depth cap.
   // The child runs a NESTED runAgentLoop with its OWN messages + a filtered tool set (never Subagent → no
   // recursion; read-only subset for `explore`). Only its final text returns — its steps stay in its context.

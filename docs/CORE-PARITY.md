@@ -34,7 +34,7 @@ Legend: ☐ not started · ◐ partial · ☑ done. "Target capability" = the be
 
 ## B. Core tools — coverage
 
-Cascade has: `Read, Write, Edit, MultiEdit, Bash, Glob, Grep, TodoWrite, Lsp, Memory, MemorySearch, Subagent`.
+Cascade has: `Read, Write, Edit, MultiEdit, Bash, Glob, Grep, TodoWrite, Lsp, AskUserQuestion, Memory, MemorySearch, Subagent`.
 
 | Core tool | Purpose | Priority for Cascade | Status |
 |-----------|---------|----------------------|--------|
@@ -42,7 +42,7 @@ Cascade has: `Read, Write, Edit, MultiEdit, Bash, Glob, Grep, TodoWrite, Lsp, Me
 | **MultiEdit** *(multi-edit mode of Edit)* | several edits to one file atomically | **HIGH** | ☑ done (ADR-042) — atomic sequential edits + collision guard + replace_all; shares ADR-032 freshness with Edit via `editCore.ts`; `$`-literal fix. Pairs with `Lsp references` for rename |
 | **Web fetch** / **web search** | fetch a URL / web search | MED (needs network; optional for offline) | ☐ |
 | **EnterPlanModeTool** / **ExitPlanModeTool** | present a plan, get approval before acting | MED (we have `plan` permission mode, no flow) | ☐ |
-| **AskUserQuestionTool** | structured multiple-choice question to the user | MED | ☐ |
+| **AskUserQuestionTool** | structured multiple-choice question to the user | MED | ◐ engine done (ADR-043) — tool + scheduler park + session `respondQuestion` round-trip (reuses the permission-`ask` pause) + tier-sized description + weak-model "ask only when blocked" nudge. **Defer:** frontend question UI (web card + extension) |
 | **TaskCreate/Get/List/Update/Output/Stop** | background tasks / async sub-agents | MED (pairs with background Bash) | ☐ |
 | **Agent teams + messaging** | multi-agent coordination + messaging | LOW (after subagents mature) | ☐ |
 | **SkillTool** | invoke a packaged skill | MED | ☐ |
