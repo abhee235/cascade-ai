@@ -37,6 +37,7 @@ const plan: CompactionPlan = {
   toolResultMaxChars: 2000,
   layers: new Set(['mask', 'summarize']),
   mode: 'layered',
+  tier: 'full',
 }
 
 describe('compactor — helpers', () => {

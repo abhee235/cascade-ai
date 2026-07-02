@@ -19,7 +19,7 @@ const MAX_MATCHES = 100
 
 export const GrepTool: Tool<z.infer<typeof inputSchema>> = {
   name: 'Grep',
-  description: 'Search file contents with a regular expression. Returns matches as "file:line: text".',
+  description: `Search file CONTENTS with a regular expression, across the project. Use this to find where something appears — a function, symbol, string, or usage. To find files by NAME/path instead, use Glob. Narrow the search with \`path\` (a subdirectory) and \`glob\` (e.g. "**/*.ts"). The pattern is a JavaScript regex and matching is case-sensitive. Returns matches as \`file:line: text\` (capped; node_modules/dist/.git are ignored).`,
   inputSchema,
   activitySummary: (input) => `Searching "${input.pattern}"`,
   isReadOnly: () => true,

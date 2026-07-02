@@ -15,7 +15,10 @@ const inputSchema = z.object({
 
 export const WriteTool: Tool<z.infer<typeof inputSchema>> = {
   name: 'Write',
-  description: 'Write (create or overwrite) a UTF-8 text file with the given content.',
+  // ADR-037: deliberately NOT tier-sized — "overwrites the ENTIRE file / Read it first" prevents destroying
+  // work the model hasn't seen; short enough to afford at every tier.
+  description: `Create a NEW file, or COMPLETELY OVERWRITE an existing one, with the given UTF-8 content. Parent directories are created automatically.
+Prefer Edit for changing part of a file — Write replaces the ENTIRE file, so it's easy to destroy content you didn't mean to. If the file already exists, Read it first so you don't overwrite work you haven't seen. Use Write for brand-new files or a deliberate full rewrite.`,
   inputSchema,
   activitySummary: (input) => `Writing ${input.file_path}`,
   isReadOnly: () => false,

@@ -18,9 +18,10 @@ const inputSchema = z.object({
   todos: z.array(todoSchema).describe('The full updated task list (send the entire list every time, not a delta).'),
 })
 
-export const TodoWriteTool: Tool<z.infer<typeof inputSchema>> = {
-  name: 'TodoWrite',
-  description: `Keep a task list for this session — it tracks progress and shows the user what you're doing.
+// ADR-037: tier-sized (like Bash). The when-to-use guidance is advisory (compressible); the four rules are
+// load-bearing — every tier keeps ALL of them, smaller tiers just say them in fewer words (the tool result +
+// the periodic reminder also re-teach them, so the safety net is redundant by design).
+const DESCRIPTION_FULL = `Keep a task list for this session — it tracks progress and shows the user what you're doing.
 
 Use it PROACTIVELY for any non-trivial work: a task with 3+ steps, multiple requested items, or anything needing planning. Skip it for a single trivial task.
 
@@ -28,7 +29,16 @@ Rules:
 - Capture the plan as todos right after getting the request.
 - Mark a task in_progress BEFORE you start it; keep only ONE in_progress at a time.
 - Mark a task completed IMMEDIATELY after finishing it (don't batch completions).
-- Always send the ENTIRE list (with each task's current status), not just the changed item.`,
+- Always send the ENTIRE list (with each task's current status), not just the changed item.`
+
+const DESCRIPTION_LEAN = `Track a task list for the session (shown to the user). Use for any 3+-step task. Rules: plan first; ONE task in_progress before you work on it; mark completed immediately; always send the ENTIRE list.`
+
+const todoWriteDescription = (tier: 'minimal' | 'lean' | 'full'): string =>
+  tier === 'full' ? DESCRIPTION_FULL : DESCRIPTION_LEAN // lean/minimal share the condensed form — all 4 rules, fewest words
+
+export const TodoWriteTool: Tool<z.infer<typeof inputSchema>> = {
+  name: 'TodoWrite',
+  description: todoWriteDescription,
   inputSchema,
   activitySummary: (input) => {
     const done = input.todos.filter((t) => t.status === 'completed').length

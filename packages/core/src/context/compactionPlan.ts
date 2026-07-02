@@ -10,7 +10,7 @@
 // The buffer constants below pin the absolute branch exactly. The convergence is locked by a golden test
 // (compactionPlan.test.ts).
 
-import { contextWindowForModel } from '../llm/contextWindows'
+import { contextWindowForModel, windowTier, type WindowTier } from '../llm/contextWindows'
 
 // ── Buffer constants (the absolute branch) ───────────────────────────────────────────────────────────────
 /** Tokens reserved for the compaction summary output. */
@@ -80,6 +80,9 @@ export interface CompactionPlan {
   layers: Set<CompactionLayer>
   /** 'layered' = mask/summarize in place; 'fresh-context' = Ralph-style reset (tiny windows; deferred). */
   mode: 'layered' | 'fresh-context'
+  /** Coarse window band (shared with the system-prompt generator, ADR-037): minimal | lean | full. The
+   *  thresholds above are continuous, but the tier is recorded for the UI/logs and to keep the prompt in step. */
+  tier: WindowTier
 }
 
 export interface PlanInput {
@@ -134,6 +137,7 @@ export function planCompaction(input: PlanInput): CompactionPlan {
     ),
     layers: new Set<CompactionLayer>(ALL_COMPACTION_LAYERS), // full stack by default; the executor stops early
     mode: 'layered',
+    tier: windowTier(window),
   }
 }
 

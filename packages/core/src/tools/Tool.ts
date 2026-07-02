@@ -55,8 +55,10 @@ export interface ToolResult {
 export interface Tool<I = unknown> {
   /** Unique name the model calls, e.g. "Read". */
   name: string
-  /** What it does + when to use it — the model reads this to decide. */
-  description: string
+  /** What it does + when to use it — the model reads this to decide. Advertised on EVERY request, so it's
+   *  paid from the context window each turn. ADR-037: may be a function of the window tier — a 128k model
+   *  affords the rich guidance; an 8k model gets the essentials (same strategy as the system prompt). */
+  description: string | ((tier: import('../llm/contextWindows').WindowTier) => string)
   /** Zod schema for the input: validates the model's args AND is converted to JSON Schema (builtins).
    *  Optional because MCP tools (Phase 9) arrive with raw JSON Schema instead — see `parameters`. */
   inputSchema?: ZodType<I>

@@ -19,7 +19,7 @@ const MAX = 200
 
 export const GlobTool: Tool<z.infer<typeof inputSchema>> = {
   name: 'Glob',
-  description: 'Find files by glob pattern. Returns matching file paths (relative to the search dir).',
+  description: `Find files by NAME or path pattern, fast, at any repo size. Use it when you know the shape of the filename (e.g. "src/**/*.tsx", "**/package.json"). To search file CONTENTS instead, use Grep. Optionally scope to a subdirectory with \`path\`. Returns matching paths (node_modules/dist/.git are ignored).`,
   inputSchema,
   activitySummary: (input) => `Finding ${input.pattern}`,
   isReadOnly: () => true,

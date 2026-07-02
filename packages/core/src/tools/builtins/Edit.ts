@@ -16,7 +16,10 @@ const inputSchema = z.object({
 
 export const EditTool: Tool<z.infer<typeof inputSchema>> = {
   name: 'Edit',
-  description: 'Replace an exact substring in a file. old_string must occur exactly once (add context to disambiguate).',
+  // ADR-037: deliberately NOT tier-sized. Every rule below is load-bearing — exact match, uniqueness, the N→
+  // prefix warning each prevent a concrete failed-edit retry loop, which costs far more tokens than the ~90
+  // words saved. On a small window these rules matter MORE, not less.
+  description: `Replace an exact substring in a file. Read the file first (required). old_string must match the current file content EXACTLY — including whitespace and indentation — and must appear EXACTLY ONCE; if it isn't unique, include more surrounding lines until it is. Keep edits small and targeted: prefer several precise edits over one sweeping one. new_string is the replacement (use "" to delete the matched text). Note: Read shows line-number prefixes like "  12→code" — do NOT include the "N→" prefix in old_string; match only the raw file text.`,
   inputSchema,
   activitySummary: (input) => `Editing ${input.file_path}`,
   isReadOnly: () => false,

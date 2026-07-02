@@ -38,6 +38,9 @@ export interface LoopDeps {
   readFileState?: import('../tools/fileState').FileStateCache // ADR-032: read-before-edit freshness cache (session-scoped)
   todoStore?: import('../tools/todoStore').TodoStore // ADR-034: authoritative todo checklist (drives the reminder)
   todoReminder?: TodoReminderConfig // ADR-034: tune/inject the reminder turn thresholds (default 6/6)
+  /** ADR-037: window tier sizing the system prompt + tool descriptions. Defaults to the compaction plan's tier
+   *  (one source of truth); set explicitly for loops without compaction (e.g. subagents inherit the parent's). */
+  tier?: import('../llm/contextWindows').WindowTier
 }
 
 const MAX_SUBAGENT_DEPTH = 2
@@ -69,6 +72,9 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   // Share ONE registry instance for the turn: the loop advertises with it, and the scheduler/runTool look
   // up with it — so what the model is offered and what we execute always agree.
   const depth = deps.depth ?? 0
+  // ADR-037: one window tier for the whole loop — sizes the system prompt AND the tool descriptions. Explicit
+  // deps.tier (subagents inherit the parent's) → the compaction plan's tier → 'full'.
+  const tier = deps.tier ?? deps.compact?.plan.tier ?? 'full'
   const ctx: ToolContext = { cwd: deps.cwd, abortSignal: deps.signal, permission: deps.permission, tracer, registry, archival: deps.archival, depth, sandbox: deps.sandbox, readFileState: deps.readFileState, todoStore: deps.todoStore }
   // Subagent delegation (ADR-017): inject a spawn closure (avoids an import cycle). Absent at the depth cap.
   // The child runs a NESTED runAgentLoop with its OWN messages + a filtered tool set (never Subagent → no
@@ -91,6 +97,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
         readFileState: deps.readFileState, // share freshness cache: a file the parent read is editable by the child
         todoStore: deps.todoStore, // shared store, keyed by depth → the child's checklist is scoped separately
         todoReminder: deps.todoReminder,
+        tier, // child loops have no compact deps — inherit the parent's window tier (same model, same window)
         maxTurns: 8,
         depth: depth + 1,
       })) {
@@ -134,13 +141,13 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     yield { type: 'status', text: 'Thinking…' }
     // FORENSICS: record the FULL request we're about to send — the #1 thing you need when an answer
     // is wrong ("did the model even see the tool_result / the right system prompt?"). — ADR-023.
-    const system = buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, recalled: deps.recalled, extraInstructions: deps.extraInstructions })
+    const system = buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions })
     tracer.event({ t: 'model_request', turn, system, tools: registry.list().map((t) => t.name), messages })
     // Wrap the stream in recovery (ADR-016): transient failures retry with backoff; context overflow triggers
     // a (reactive) compaction then retries; abort/fatal surface. `make` re-reads `messages` each attempt, so
     // an overflow-compaction is reflected on the retry. System is rebuilt too (memory may have changed).
     const makeStream = () =>
-      deps.provider.stream({ messages, model: deps.model, system: buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, recalled: deps.recalled, extraInstructions: deps.extraInstructions }), tools: registry.schemas() }, deps.signal)
+      deps.provider.stream({ messages, model: deps.model, system: buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions }), tools: registry.schemas(tier) }, deps.signal)
     for await (const ev of streamWithRecovery(makeStream, {
       ...deps.recovery,
       signal: deps.signal,

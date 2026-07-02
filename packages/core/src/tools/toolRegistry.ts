@@ -9,6 +9,7 @@
 import { z } from 'zod'
 import type { Tool } from './Tool'
 import type { ToolSchema } from '../llm/provider'
+import type { WindowTier } from '../llm/contextWindows'
 import { ReadTool } from './builtins/Read'
 import { GlobTool } from './builtins/Glob'
 import { GrepTool } from './builtins/Grep'
@@ -31,12 +32,20 @@ export function schemaOf(t: Tool): Record<string, unknown> {
   return { type: 'object', properties: {} }
 }
 
+/** Resolve a tool's description for a window tier (ADR-037): descriptions are advertised on EVERY request, so
+ *  a tool may provide a tier function — rich guidance on big windows, essentials on small ones. Plain strings
+ *  (all MCP tools, most builtins) pass through unchanged. */
+export function descriptionOf(t: Tool, tier: WindowTier = 'full'): string {
+  return typeof t.description === 'function' ? t.description(tier) : t.description
+}
+
 /** The active tool set for a turn. Injected via DI (LoopDeps/ToolContext) so it can be DYNAMIC (MCP tools
  *  appear as their servers become ready) and per-session (safe for the multi-frontend web app). */
 export interface ToolRegistry {
   list(): Tool[]
   find(name: string): Tool | undefined
-  schemas(): ToolSchema[]
+  /** Advertised schemas for a turn. `tier` sizes the descriptions to the window (default 'full'). */
+  schemas(tier?: WindowTier): ToolSchema[]
 }
 
 /** Build a registry of builtins + `extraTools()` (e.g. `() => mcpHub.readyTools()`). `extraTools` is a
@@ -46,7 +55,7 @@ export function registryOf(tools: () => Tool[]): ToolRegistry {
   return {
     list: tools,
     find: (name) => tools().find((t) => t.name === name),
-    schemas: () => tools().map((t) => ({ name: t.name, description: t.description, parameters: schemaOf(t) })),
+    schemas: (tier) => tools().map((t) => ({ name: t.name, description: descriptionOf(t, tier), parameters: schemaOf(t) })),
   }
 }
 

@@ -29,8 +29,10 @@ function addLineNumbers(text: string, startLine: number): string {
 
 export const ReadTool: Tool<z.infer<typeof inputSchema>> = {
   name: 'Read',
+  // ADR-037: deliberately NOT tier-sized — the N→-prefix warning is load-bearing (a model that copies the
+  // prefix into an Edit old_string breaks every edit); compact enough to afford at every tier.
   description:
-    'Read a UTF-8 text file from the workspace and return its contents with line numbers. For very large files, read a window with the offset (1-based start line) and limit (line count) parameters.',
+    'Read a UTF-8 text file and return its contents with line numbers (e.g. "  12→const x = 1"). The "N→" prefix is for your reference only — when you copy text into an Edit\'s old_string, do NOT include it (Edit matches the raw file). For very large files, read a window with the offset (1-based start line) and limit (line count) parameters.',
   inputSchema,
   activitySummary: (input) => `Reading ${input.file_path}`,
   isReadOnly: () => true,

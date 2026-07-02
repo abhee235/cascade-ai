@@ -12,6 +12,37 @@ const inputSchema = z.object({
   command: z.string().describe('The shell command to run (executed via the platform shell).'),
 })
 
+// ADR-037: a weak model leans on the tool description to know WHEN and HOW to use Bash. It covers the
+// git-safety protocol, tool-preference, quoting, interactivity, and parallelism, condensed
+// for a local model and Cascade's sandbox. Descriptions are advertised EVERY request, so like the system prompt
+// they are TIER-SIZED (the description is a function of the window tier — toolRegistry.descriptionOf).
+const BASH_DESCRIPTION_FULL = `Run a shell command in the project and return its combined stdout/stderr. Use it for real shell work — building, running tests, installing dependencies, git, and running scripts.
+
+Prefer the dedicated tools over Bash so the user can review your work:
+- Read a file with Read (not cat/head/tail); change one with Edit (not sed/awk); create one with Write (not echo > or heredoc).
+- Find files by name with Glob (not find/ls); search file contents with Grep (not grep/rg).
+Reserve Bash for commands that genuinely need a shell.
+
+Execution notes:
+- The working directory persists between calls, but shell state (env vars, cd) does NOT — prefer absolute or project-relative paths over \`cd\`. Quote paths that contain spaces.
+- Do NOT run interactive commands (they hang): nothing that waits for input, such as \`git add -i\` or \`git rebase -i\`.
+- Multiple commands: if independent, send several Bash calls in ONE message (they run in parallel); if they depend on each other, chain them with \`&&\` in a single call. Don't separate commands with newlines.
+- Output is truncated if very long (the tail is kept). A non-zero exit is returned as an error — read it and fix the cause.
+
+Git safety (only when the user asks you to commit):
+- Only commit when explicitly asked. Create a NEW commit — never \`--amend\` unless asked (when a pre-commit hook fails there is no new commit, so --amend would change the previous one).
+- Don't use git commands that throw work away (\`push --force\`, \`reset --hard\`, \`checkout .\`, \`clean -f\`, deleting a branch) unless the user asks for them. Never skip hooks (\`--no-verify\`).
+- Stage specific files by name rather than \`git add -A\`, to avoid committing secrets (.env) or junk.`
+
+// lean (32k/64k): every load-bearing rule, one line each — no elaboration.
+const BASH_DESCRIPTION_LEAN = `Run a shell command (build, test, install, git, scripts); returns stdout+stderr. Prefer the dedicated tools: Read (not cat), Edit (not sed), Write (not echo>), Glob (not find), Grep (not grep/rg). No interactive commands (they hang). Independent commands: separate parallel calls; dependent: chain with &&. Shell state doesn't persist between calls — avoid cd. Git: only commit when asked; new commits (no --amend); no destructive commands (push --force, reset --hard) or --no-verify unless explicitly asked; stage files by name.`
+
+// minimal (<24k): the two rules that prevent real damage.
+const BASH_DESCRIPTION_MINIMAL = `Run a shell command (build/test/git); returns output. Prefer Read/Edit/Write/Glob/Grep for file work. No interactive commands. Git: only commit when asked; never destructive commands (--force, reset --hard, --no-verify) unless explicitly asked.`
+
+const bashDescription = (tier: 'minimal' | 'lean' | 'full'): string =>
+  tier === 'full' ? BASH_DESCRIPTION_FULL : tier === 'lean' ? BASH_DESCRIPTION_LEAN : BASH_DESCRIPTION_MINIMAL
+
 // Conservative heuristic: read-only ONLY if every piped/chained segment leads with a known safe command.
 // Anything unrecognized is treated as a mutation (fail-safe) — the read-only flag is input-dependent.
 const SAFE = [
@@ -27,7 +58,7 @@ const MAX_OUTPUT = 30_000 // keep the tool_result bounded; tail is the most usef
 
 export const BashTool: Tool<z.infer<typeof inputSchema>> = {
   name: 'Bash',
-  description: 'Run a shell command and return its combined stdout/stderr. Use for builds, tests, git, listing files, etc.',
+  description: bashDescription, // tier-sized (ADR-037): rich on 128k+, essentials on small windows
   inputSchema,
   activitySummary: (input) => `Running: ${input.command.length > 60 ? `${input.command.slice(0, 60)}…` : input.command}`,
   isReadOnly: (input) => isReadOnlyCommand(input.command),
