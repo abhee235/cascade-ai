@@ -1,0 +1,8 @@
+{
+	"id": "search-retry-default",
+	"tags": ["search"],
+	"prompt": "Users report that failed requests are retried only once. Somewhere in this codebase the default retry count is configured — find it and raise the default to 3. Do not change any other default (timeouts, backoff, etc.).",
+	"check": "node --test",
+	"budgets": { "maxTurns": 16, "timeoutMs": 300000 },
+	"protected": ["tests"]
+}

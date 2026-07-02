@@ -25,6 +25,15 @@ export interface CompletionRequest {
   system?: string
   /** Tools the model may call this turn. Phase 4. */
   tools?: ToolSchema[]
+  /** Sampling temperature (E1/eval: 0 for determinism). Omit ⇒ backend default. */
+  temperature?: number
+}
+
+/** Token counts reported by the backend for one completion (E1 / ADR-040). Fields are optional because not
+ *  every backend reports them (and OpenAI-compat streams only do so via stream_options.include_usage). */
+export interface TokenUsage {
+  inputTokens?: number // prompt tokens (OpenAI prompt_tokens / Ollama prompt_eval_count)
+  outputTokens?: number // completion tokens (OpenAI completion_tokens / Ollama eval_count)
 }
 
 export interface CompletionResult {
@@ -43,7 +52,7 @@ export type StreamEvent =
   | { type: 'thinking_delta'; thinking: string } // a chunk of reasoning (e.g. Ollama delta.reasoning)
   | { type: 'tool_use'; id: string; name: string; input: unknown } // a COMPLETE tool call (args accumulated + parsed)
   | { type: 'retry'; attempt: number; delayMs: number; reason: string } // synthetic: streamWithRecovery is retrying (resets partial output)
-  | { type: 'done'; stopReason: 'end_turn' | 'max_tokens' | 'tool_use' }
+  | { type: 'done'; stopReason: 'end_turn' | 'max_tokens' | 'tool_use'; usage?: TokenUsage } // usage: E1/ADR-040
 
 export interface ModelProvider {
   /** Stable id for logging/telemetry, e.g. "ollama", "groq". */
@@ -55,4 +64,9 @@ export interface ModelProvider {
   /** Embed texts for semantic (archival) memory (Phase 10, ADR-015). `model` is the embedding model id
    *  (e.g. "nomic-embed-text"). Optional — archival memory degrades to keyword search when absent. */
   embed?(texts: string[], model: string, signal?: AbortSignal): Promise<number[][]>
+  /** ADR-038: probe the model's ACTUAL runtime limits so the compactor/prompt size against reality, not a
+   *  static guess. For Ollama this reads the Modelfile's `num_ctx` (the ALLOCATED window — NOT the arch
+   *  `context_length`, which is the trained ceiling) + `num_predict`. Optional; returns {} when unknown or the
+   *  backend has no such endpoint (hosted providers 404 → fall back to the model map). */
+  detectModelLimits?(model: string, signal?: AbortSignal): Promise<{ contextWindow?: number; maxOutputTokens?: number }>
 }

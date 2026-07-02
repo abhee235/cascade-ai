@@ -13,7 +13,7 @@ import type { PermissionController } from '../permissions/gate'
 import { NoopTracer, type Tracer } from '../observability/tracer'
 import { createRegistry, registryOf, type ToolRegistry } from '../tools/toolRegistry'
 import { buildSystemPrompt } from './systemPrompt'
-import { compactIfNeeded, type CompactDeps } from '../context/compactor'
+import { compactIfNeeded, estimateTokens, type CompactDeps } from '../context/compactor'
 import { streamWithRecovery, type RecoveryOptions } from '../llm/resilience'
 import type { ToolUse } from '../tools/runTool'
 import { scheduleTools } from '../tools/scheduler'
@@ -115,15 +115,20 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   while (true) {
     let text = ''
     let thinking = ''
+    let usage: import('../llm/provider').TokenUsage | undefined // E1/ADR-040: backend token counts for this call
     const toolUses: ToolUse[] = []
 
     // Compaction (ADR-012): BEFORE each model call, if history nears the window, mask old tool output and/or
     // summarize the older half. We splice in place so the session's history reference stays valid; the raw
     // transcript + JSONL trace are untouched (you'll see the next model_request shrink).
     if (deps.compact) {
+      const tokensBefore = estimateTokens(messages)
       const { messages: compacted, kind } = await compactIfNeeded(messages, deps.compact)
       if (kind !== 'none') {
         messages.splice(0, messages.length, ...compacted)
+        // E1/ADR-040: record which layer fired and what it reclaimed — the eval analyzer counts these to
+        // diagnose context_thrash (≥3 compactions per run ⇒ thresholds/window are the knob to tweak).
+        tracer.event({ t: 'compaction', kind, tokensBefore, tokensAfter: estimateTokens(messages), forced: false })
         yield { type: 'compacted', kind }
       }
     }
@@ -155,8 +160,12 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
         ? async () => {
             // Reactive overflow: force compaction regardless of the threshold (ADR-039 `force`) — the model just
             // reported the prompt is too large, so waiting for the `auto` gate would just loop.
+            const tokensBefore = estimateTokens(messages)
             const { messages: c, kind } = await compactIfNeeded(messages, deps.compact!, { force: true })
-            if (kind !== 'none') messages.splice(0, messages.length, ...c)
+            if (kind !== 'none') {
+              messages.splice(0, messages.length, ...c)
+              tracer.event({ t: 'compaction', kind, tokensBefore, tokensAfter: estimateTokens(messages), forced: true })
+            }
           }
         : undefined,
       onRetry: (info) => tracer.event({ t: 'error', message: `recover(${info.reason}) attempt ${info.attempt}, wait ${Math.round(info.delayMs)}ms` }),
@@ -166,6 +175,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
         // text), and surface a persistent recovery CARD so the user sees we're reconnecting, not dead.
         text = ''
         thinking = ''
+        usage = undefined
         toolUses.length = 0
         yield { type: 'recovering', attempt: ev.attempt, reason: ev.reason, delayMs: ev.delayMs }
       } else if (ev.type === 'thinking_delta') {
@@ -176,10 +186,12 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
         yield { type: 'text_delta', text: ev.text }
       } else if (ev.type === 'tool_use') {
         toolUses.push({ id: ev.id, name: ev.name, input: ev.input })
+      } else if (ev.type === 'done' && ev.usage) {
+        usage = ev.usage // backend-reported prompt/output token counts (undefined when not reported)
       }
     }
 
-    tracer.event({ t: 'model_response', turn, text, thinking, toolUses })
+    tracer.event({ t: 'model_response', turn, text, thinking, toolUses, usage })
 
     // Record the assistant turn in history: thinking, text, then tool_use blocks.
     const assistant: ContentBlock[] = []

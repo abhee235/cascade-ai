@@ -15,3 +15,6 @@ _temp/
 # Local project workspaces created by @cascade/server at runtime
 cascade-projects/
 cascade-workspace/
+
+# Eval run outputs (PLAN-eval): per-run results + traces; fixtures under eval/tasks ARE committed
+eval/runs/

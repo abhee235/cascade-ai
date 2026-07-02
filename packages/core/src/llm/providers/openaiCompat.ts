@@ -6,7 +6,7 @@
 // bridge and the streamed tool-call accumulation (the in-app version of scripts/ollama-proxy.ts).
 
 import type { ContentBlock, Message } from '../../protocol'
-import type { CompletionRequest, CompletionResult, ModelProvider, StreamEvent } from '../provider'
+import type { CompletionRequest, CompletionResult, ModelProvider, StreamEvent, TokenUsage } from '../provider'
 
 interface OpenAIToolCall {
   id: string
@@ -75,6 +75,23 @@ function toOpenAITools(tools: CompletionRequest['tools']) {
     : undefined
 }
 
+/** Parse Ollama's `/api/show` `parameters` blob (newline-delimited "name    value" lines) into the model's
+ *  ALLOCATED limits (ADR-038). `num_ctx` is what Ollama actually runs the model at (the Modelfile pin), NOT the
+ *  arch `context_length` (the trained ceiling). `num_predict` ≤ 0 means "unbounded" → not a useful cap. Pure +
+ *  exported for testing. */
+export function parseOllamaLimits(parameters: string | undefined): { contextWindow?: number; maxOutputTokens?: number } {
+  const intParam = (name: string): number | undefined => {
+    const m = (parameters ?? '').match(new RegExp(`^\\s*${name}\\s+(-?\\d+)`, 'm'))
+    return m ? Number.parseInt(m[1], 10) : undefined
+  }
+  const numCtx = intParam('num_ctx')
+  const numPredict = intParam('num_predict')
+  return {
+    contextWindow: numCtx && numCtx > 0 ? numCtx : undefined,
+    maxOutputTokens: numPredict && numPredict > 0 ? numPredict : undefined,
+  }
+}
+
 export interface OpenAICompatConfig {
   id: string
   baseUrl: string
@@ -99,6 +116,10 @@ export class OpenAICompatProvider implements ModelProvider {
       messages: toOpenAIMessages(req.messages, req.system),
       stream,
     }
+    // E1/ADR-040: ask for token usage on the final stream chunk (OpenAI spec; Ollama supports it too).
+    // Backends that don't know the field ignore it — usage just stays undefined.
+    if (stream) body.stream_options = { include_usage: true }
+    if (req.temperature !== undefined) body.temperature = req.temperature // eval determinism (temperature 0)
     const tools = toOpenAITools(req.tools)
     if (tools) body.tools = tools
     return JSON.stringify(body)
@@ -134,6 +155,25 @@ export class OpenAICompatProvider implements ModelProvider {
     return (json.data ?? []).map((d) => d.embedding)
   }
 
+  /** ADR-038: read the model's allocated limits from Ollama's /api/show (Modelfile num_ctx/num_predict). This is
+   *  the FIX for the static-map mis-sizing bug (coding-qwen36 matched the generic qwen36→32k rule but actually
+   *  runs at 128k). Best-effort: a non-Ollama backend 404s → {} → the session falls back to the model map. */
+  async detectModelLimits(model: string, signal?: AbortSignal): Promise<{ contextWindow?: number; maxOutputTokens?: number }> {
+    try {
+      const res = await fetch(`${this.cfg.baseUrl}/api/show`, {
+        method: 'POST',
+        headers: this.headers(),
+        body: JSON.stringify({ model }),
+        signal,
+      })
+      if (!res.ok) return {}
+      const json = (await res.json()) as { parameters?: string }
+      return parseOllamaLimits(json.parameters)
+    } catch {
+      return {} // network error / not Ollama / aborted — the caller keeps its fallback window
+    }
+  }
+
   async *stream(req: CompletionRequest, signal?: AbortSignal): AsyncIterable<StreamEvent> {
     // M11: image turns go through Ollama's NATIVE /api/chat — its OpenAI-compat /v1 endpoint silently drops
     // image_url (verified on Ollama 0.30.10), whereas /api/chat accepts an `images:[base64]` array per message.
@@ -156,6 +196,7 @@ export class OpenAICompatProvider implements ModelProvider {
     const decoder = new TextDecoder()
     let buffer = ''
     let stopReason: 'end_turn' | 'max_tokens' | 'tool_use' = 'end_turn'
+    let usage: TokenUsage | undefined // E1: filled by the final chunk when stream_options.include_usage is honoured
     // Tool calls stream as fragments of a JSON string, keyed by index — accumulate, parse ONCE at end.
     const toolCalls = new Map<number, { id: string; name: string; args: string }>()
 
@@ -193,6 +234,10 @@ export class OpenAICompatProvider implements ModelProvider {
         }
         if (choice?.finish_reason === 'length') stopReason = 'max_tokens'
         if (choice?.finish_reason === 'tool_calls') stopReason = 'tool_use'
+        // E1/ADR-040: with include_usage the LAST chunk carries usage (typically with an empty choices array).
+        if (chunk.usage) {
+          usage = { inputTokens: chunk.usage.prompt_tokens, outputTokens: chunk.usage.completion_tokens }
+        }
       }
     }
 
@@ -206,7 +251,7 @@ export class OpenAICompatProvider implements ModelProvider {
       }
       yield { type: 'tool_use', id: c.id || `call_${idx}`, name: c.name, input }
     }
-    yield { type: 'done', stopReason }
+    yield { type: 'done', stopReason, usage }
   }
 
   // M11: Ollama-native streaming (/api/chat) for multimodal turns. NDJSON, one JSON object per line; each
@@ -223,6 +268,7 @@ export class OpenAICompatProvider implements ModelProvider {
     const decoder = new TextDecoder()
     let buffer = ''
     let stopReason: 'end_turn' | 'max_tokens' | 'tool_use' = 'end_turn'
+    let usage: TokenUsage | undefined // E1: the final done:true object carries prompt_eval_count/eval_count
     let toolIdx = 0
     while (true) {
       const { done, value } = await reader.read()
@@ -248,10 +294,15 @@ export class OpenAICompatProvider implements ModelProvider {
             yield { type: 'tool_use', id: tc.id || `call_${toolIdx++}`, name: tc.function?.name ?? '', input: tc.function?.arguments ?? {} }
           }
         }
-        if (obj.done && obj.done_reason === 'length') stopReason = 'max_tokens'
+        if (obj.done) {
+          if (obj.done_reason === 'length') stopReason = 'max_tokens'
+          if (obj.prompt_eval_count !== undefined || obj.eval_count !== undefined) {
+            usage = { inputTokens: obj.prompt_eval_count, outputTokens: obj.eval_count }
+          }
+        }
       }
     }
-    yield { type: 'done', stopReason }
+    yield { type: 'done', stopReason, usage }
   }
 }
 

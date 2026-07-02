@@ -1,0 +1,8 @@
+{
+	"id": "search-negative-amount",
+	"tags": ["search"],
+	"prompt": "Calling deposit(balance, amount) with a negative amount currently throws \"Invalid input\". Change that behaviour: a negative amount should be treated as 0 (the deposit is a no-op) instead of throwing. All OTHER validations in the codebase must keep throwing exactly as they do today — find the right place before changing anything.",
+	"check": "node --test",
+	"budgets": { "maxTurns": 16, "timeoutMs": 300000 },
+	"protected": ["tests"]
+}

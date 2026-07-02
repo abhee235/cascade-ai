@@ -1,0 +1,8 @@
+{
+	"id": "feature-stats-module",
+	"tags": ["feature"],
+	"prompt": "Create a new module src/stats.js exporting mean(numbers) and median(numbers) (median of an even-length list is the average of the two middle values; do not mutate the input). Then extend buildReport() in src/report.js so the report object also has `mean` and `median` fields computed from the totals it already uses.",
+	"check": "node --test",
+	"budgets": { "maxTurns": 16, "timeoutMs": 300000 },
+	"protected": ["tests"]
+}

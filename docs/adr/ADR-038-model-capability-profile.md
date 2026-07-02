@@ -1,8 +1,13 @@
 # ADR-038 — Model-capability profile → adaptive runtime budgets (feeds CORE-PARITY A2 / A3 / A6)
 
-> **Status:** accepted, not yet implemented. This ADR defines the shared input that A2 (compaction), A3
-> (recovery/token-escalation), and A6 (context engineering) should consume instead of each inventing its own
-> thresholds. Build order + verification land with those items.
+> **Status:** the load-bearing piece — **`num_ctx` auto-detection — is IMPLEMENTED** (`provider.detectModelLimits`
+> → Ollama `/api/show`, wired into the session's window resolution). The full `ModelProfile` (`nativeToolCalls`,
+> `parallelToolCalls`, …) and `deriveBudgets`/request-level `num_ctx` enforcement remain deferred; A2 (ADR-039)
+> already consumes the resolved window. This ADR defines the shared input A2/A3/A6 build against.
+>
+> **Correction (from the verification below, now reflected here):** discovery reads the Modelfile **`num_ctx`
+> parameter** — the ALLOCATED window — NOT the arch `context_length`, which is the trained CEILING (262144 for
+> qwen36). Reading the ceiling would over-allocate ~8× (262144 vs the real 32768/131072).
 
 ## Context
 
@@ -152,8 +157,11 @@ cleaner shape.
 
 ## Follow-ups
 
-- **Verify the `num_ctx` gap first** ([openaiCompat.ts]) — it is load-bearing for every budget; no point tuning
-  ratios against a window the model isn't actually allocated.
+- ~~**Verify the `num_ctx` gap first**~~ — **DONE + implemented.** `provider.detectModelLimits` reads Ollama
+  `/api/show` `num_ctx` (a pure `parseOllamaLimits` + the `/api/show` call in [openaiCompat.ts]); the session
+  resolves the window `override → detected → model map → default` on the first turn. Live-verified against real
+  Ollama: coding-qwen36 → 131072 (`full` tier), qwen36-agentic → 32768 (`lean`), a non-Ollama endpoint → `{}`
+  (falls back to the map). Retires the static map as the *primary* source (kept as a fallback).
 - Wire `deriveBudgets` into A2 (compaction stack), A3 (token escalation / budget continuation), A6 (prompt +
   context engineering) as those ADRs are written; add a CORE-PARITY row pointing back here.
 - `parseStrategy: 'prose-fallback'` depends on the text-channel tool-call parser (tracked separately).

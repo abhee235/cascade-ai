@@ -1,0 +1,8 @@
+{
+	"id": "fix-format-duration",
+	"tags": ["fix"],
+	"prompt": "Running `node --test` in this project shows a failing test. Fix the bug in the source code so ALL tests pass. Do not modify the tests — they define the correct behaviour.",
+	"check": "node --test",
+	"budgets": { "maxTurns": 14, "timeoutMs": 300000 },
+	"protected": ["tests"]
+}

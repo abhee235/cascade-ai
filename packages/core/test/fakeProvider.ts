@@ -4,7 +4,7 @@
 // Usage: each element of `turns` is the event list for one model call (one loop turn). The agent loop
 // calls stream() once per turn, so script per turn. Each script should end with a `done` event.
 
-import type { CompletionRequest, CompletionResult, ModelProvider, StreamEvent } from '../src/llm/provider'
+import type { CompletionRequest, CompletionResult, ModelProvider, StreamEvent, TokenUsage } from '../src/llm/provider'
 
 export type Turn = StreamEvent[]
 
@@ -35,4 +35,4 @@ export function createFakeProvider(turns: Turn[]): FakeProvider {
 // Small builders to keep test scripts readable.
 export const textDelta = (text: string): StreamEvent => ({ type: 'text_delta', text })
 export const toolUse = (id: string, name: string, input: unknown): StreamEvent => ({ type: 'tool_use', id, name, input })
-export const done = (stopReason: 'end_turn' | 'tool_use' | 'max_tokens' = 'end_turn'): StreamEvent => ({ type: 'done', stopReason })
+export const done = (stopReason: 'end_turn' | 'tool_use' | 'max_tokens' = 'end_turn', usage?: TokenUsage): StreamEvent => ({ type: 'done', stopReason, usage })

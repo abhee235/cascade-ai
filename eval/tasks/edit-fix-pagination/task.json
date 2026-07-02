@@ -1,0 +1,8 @@
+{
+	"id": "edit-fix-pagination",
+	"tags": ["edit"],
+	"prompt": "There is a pagination bug: paginate(['a','b','c','d'], 1, 2) should return ['a','b'] (page numbers are 1-based) but it returns ['c','d'], and the last page comes back empty. Find and fix the bug in src/paginate.js.",
+	"check": "node --test",
+	"budgets": { "maxTurns": 12, "timeoutMs": 300000 },
+	"protected": ["tests"]
+}

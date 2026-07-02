@@ -12,7 +12,9 @@
     "build:extension": "npm run build -w @cascade/extension",
     "typecheck": "tsc -b",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "eval": "tsx scripts/eval/run.mts",
+    "eval:verify-fixtures": "node eval/verify-fixtures.mjs"
   },
   "engines": {
     "node": ">=18"

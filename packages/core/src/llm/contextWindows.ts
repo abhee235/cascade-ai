@@ -1,7 +1,7 @@
-// llm/contextWindows.ts — best-effort model → context-window map (ADR-012). Used to size compaction when the
-// user hasn't set cascade.contextWindow. Hosted models have known windows; local (Ollama) is a GUESS — its
-// usable window is actually `num_ctx` (often 4k) regardless of the model's trained max, so for local models
-// prefer the cascade.contextWindow override. Auto-detect via /api/show is deferred.
+// llm/contextWindows.ts — best-effort model → context-window map (ADR-012). A FALLBACK now: the session first
+// tries provider.detectModelLimits() (ADR-038 — Ollama /api/show num_ctx, ground truth) and only lands here when
+// that returns nothing (a hosted backend with no /api/show, or a model with no Modelfile num_ctx). Hosted models
+// have known windows; local guesses stay conservative. An explicit cascade.contextWindow override beats both.
 
 // NOTE (ADR-039/038): the *usable* window is the model's allocated `num_ctx`, NOT its trained max — and two
 // variants of the same base can differ (qwen36-agentic pins num_ctx 32k via its Modelfile; coding-qwen36 pins

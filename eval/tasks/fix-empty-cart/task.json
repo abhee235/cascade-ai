@@ -1,0 +1,8 @@
+{
+	"id": "fix-empty-cart",
+	"tags": ["fix"],
+	"prompt": "The test suite (`node --test`) has failing tests: the cart functions crash when the cart is empty. Fix src/cart.js so an empty cart has a total of 0 and cheapest() returns null — without changing behaviour for non-empty carts. Do not modify the tests.",
+	"check": "node --test",
+	"budgets": { "maxTurns": 14, "timeoutMs": 300000 },
+	"protected": ["tests"]
+}

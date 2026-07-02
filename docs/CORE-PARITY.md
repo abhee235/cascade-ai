@@ -23,7 +23,7 @@ Legend: ☐ not started · ◐ partial · ☑ done. "Target capability" = the be
 | A4 | ☑ **Read-before-Edit freshness** | **DONE (ADR-032):** session-scoped `FileStateCache`; Edit refuses unread/stale files (mtime + content fallback), CRLF-normalized | `readFileState` map: Edit **refuses** a file not Read first, or changed since read | ADR-032 ✅ |
 | A5 | ◐ **Permission depth** | rules match by **tool name only**; Bash is one opaque allow/deny ([gate.ts:38](../packages/core/src/permissions/gate.ts)) | input-aware rules (`Bash(npm run test:*)`, `Edit(src/**)`), a **bash command classifier** (split `a && b \| c`, gate each), and **hooks** | ADR-035 (rules), ADR-036 (hooks) |
 | A6 | ◐ **Prompt & context engineering** | **DONE (ADR-037):** tier-aware sectioned system prompt (`minimal`/`lean`/`full` by window) — the behavioural core (read-before-edit, verify-before-done, report-faithfully, tool discipline, tone) weak models can't infer; 128k→full, adaptive. ([systemPrompt.ts](../packages/core/src/agent/systemPrompt.ts)) · **defer:** per-tool prompts, subagent prompt, git/dir context injection | rich tone/conventions prompt + **context gathering** (instruction files, directory structure, git status injected) + static/dynamic **cache boundary** | ADR-037 ✅ |
-| A7 | ☐ **Cost / token accounting** | JSONL tracer only ([tracer.ts](../packages/core/src/observability/tracer.ts)) | per-turn token + cost tracking | ADR-040 |
+| A7 | ◐ **Cost / token accounting** | **Trace layer DONE (ADR-040):** backend usage (`prompt_eval_count`/`usage`) captured per model call → `model_response.usage` trace event; `compaction {kind, tokensBefore/After, forced}` trace events; `temperature` passthrough for eval determinism. **Defer:** session totals, UI display, pricing | per-turn token + cost tracking | ADR-040 ◐ |
 | A9 | ☑ **Durable todo checklist + reminder** | **DONE (ADR-034):** session `TodoStore` persisted to `.cascade/todos.json`; state-aware `<system-reminder>` re-injected when the model drifts; one-in_progress invariant enforced | a todo list in app state + a re-injected reminder (turns since last use) | ADR-034 ✅ |
 | A8 | ☑ **Filesystem confinement (host ↔ sandbox)** | **DONE (ADR-033):** `resolveInProject` jails every file tool to the project root; `/app`·`/workspace` aliases re-root, escapes rejected; `Sandbox.root` + prompt show one coherent cwd | file tools confined via input validation + permission deny-rules + path expansion | ADR-033 ✅ |
 
@@ -34,12 +34,12 @@ Legend: ☐ not started · ◐ partial · ☑ done. "Target capability" = the be
 
 ## B. Core tools — coverage
 
-Cascade has: `Read, Write, Edit, Bash, Glob, Grep, Memory, MemorySearch, Subagent`.
+Cascade has: `Read, Write, Edit, MultiEdit, Bash, Glob, Grep, TodoWrite, Lsp, Memory, MemorySearch, Subagent`.
 
 | Core tool | Purpose | Priority for Cascade | Status |
 |-----------|---------|----------------------|--------|
 | **Todo list** (`TodoWrite`) | the agent maintains a live task list (plan & track multi-step work) | **HIGH** — big agent-quality win | ☑ done — tool + one live list (web + extension); **+ ADR-034: durable `TodoStore` (persisted to `.cascade/todos.json`, survives compaction/restart), state-aware periodic reminder, enforced one-in_progress invariant** — goes past an in-memory list + static nag |
-| **MultiEdit** *(multi-edit mode of Edit)* | several edits to one file atomically | **HIGH** | ☐ |
+| **MultiEdit** *(multi-edit mode of Edit)* | several edits to one file atomically | **HIGH** | ☑ done (ADR-042) — atomic sequential edits + collision guard + replace_all; shares ADR-032 freshness with Edit via `editCore.ts`; `$`-literal fix. Pairs with `Lsp references` for rename |
 | **Web fetch** / **web search** | fetch a URL / web search | MED (needs network; optional for offline) | ☐ |
 | **EnterPlanModeTool** / **ExitPlanModeTool** | present a plan, get approval before acting | MED (we have `plan` permission mode, no flow) | ☐ |
 | **AskUserQuestionTool** | structured multiple-choice question to the user | MED | ☐ |
@@ -47,7 +47,7 @@ Cascade has: `Read, Write, Edit, Bash, Glob, Grep, Memory, MemorySearch, Subagen
 | **Agent teams + messaging** | multi-agent coordination + messaging | LOW (after subagents mature) | ☐ |
 | **SkillTool** | invoke a packaged skill | MED | ☐ |
 | **Notebook editing** | edit Jupyter cells | LOW (niche) | ☐ |
-| **LSPTool** | language-server diagnostics/hover | MED (great for a code builder) | ☐ |
+| **LSPTool** | language-server diagnostics/hover | MED (great for a code builder) | ☑ done (ADR-041) — `Lsp` tool: real TS `LanguageService` (diagnostics/definition/references/hover); diagnostics route to sandbox `tsc`. TS/JS only |
 | **MCP resources** (list / read) + **MCP auth** | MCP resources (beyond MCP tools) | MED | ☐ |
 | **Tool search** | search/deferred-load a large tool catalog | LOW | ☐ |
 | **Specialized** — sleep, cron scheduling, remote triggers, REPL, PowerShell, workflows, briefs, config, git worktrees | specialized / host-specific | LOW / skip | ☐ |

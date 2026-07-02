@@ -15,14 +15,16 @@ import { GlobTool } from './builtins/Glob'
 import { GrepTool } from './builtins/Grep'
 import { WriteTool } from './builtins/Write'
 import { EditTool } from './builtins/Edit'
+import { MultiEditTool } from './builtins/MultiEdit'
 import { BashTool } from './builtins/Bash'
 import { MemoryTool } from './builtins/Memory'
 import { MemorySearchTool } from './builtins/MemorySearch'
 import { SubagentTool } from './builtins/Subagent'
 import { TodoWriteTool } from './builtins/TodoWrite'
+import { LspTool } from './builtins/Lsp'
 
 /** The always-present tools. MCP tools are added dynamically via createRegistry's `extraTools`. */
-export const builtinTools: Tool[] = [ReadTool, GlobTool, GrepTool, WriteTool, EditTool, BashTool, TodoWriteTool, MemoryTool, MemorySearchTool, SubagentTool]
+export const builtinTools: Tool[] = [ReadTool, GlobTool, GrepTool, WriteTool, EditTool, MultiEditTool, BashTool, TodoWriteTool, LspTool, MemoryTool, MemorySearchTool, SubagentTool]
 
 /** The JSON Schema to advertise for a tool: a builtin's Zod schema converted, an MCP tool's raw
  *  `parameters` used as-is, or an empty object if neither (no args). */

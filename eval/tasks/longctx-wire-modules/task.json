@@ -1,0 +1,9 @@
+{
+	"id": "longctx-wire-modules",
+	"tags": ["longctx"],
+	"prompt": "The pipeline stages under src/pipeline/ each self-register with a priority via registerStage(name, priority) — the calls are buried somewhere inside the four large stage files. Find every stage's priority, then fill in the STAGE_SEQUENCE array in src/pipeline/order.js with the stage names in ascending priority order (lowest priority number first).",
+	"check": "node --test",
+	"budgets": { "maxTurns": 24, "timeoutMs": 600000 },
+	"protected": ["tests"],
+	"session": { "contextWindow": 8192 }
+}

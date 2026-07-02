@@ -1,0 +1,9 @@
+{
+	"id": "longctx-changelog-version",
+	"tags": ["longctx"],
+	"prompt": "Fill in src/meta.js from the project docs: CURRENT_VERSION must be the latest RELEASED version in CHANGELOG.md (ignore the Unreleased section), MIN_NODE must be the CURRENT minimum supported Node major version stated in docs/UPGRADING.md, and MIGRATION_TARGETS must be the supported migration targets listed in the changelog for that latest release (array of strings, ascending). Read the docs carefully — older sections contain outdated values.",
+	"check": "node --test",
+	"budgets": { "maxTurns": 24, "timeoutMs": 600000 },
+	"protected": ["tests"],
+	"session": { "contextWindow": 8192 }
+}

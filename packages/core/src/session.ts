@@ -119,15 +119,37 @@ export function createSession(opts: SessionOptions): CascadeSession {
   const embed = opts.provider.embed ? (texts: string[]) => opts.provider.embed!(texts, embedModel) : undefined
   const archival = createArchival({ cwd: opts.cwd, embed })
 
-  // Compaction plan (ADR-039): resolved once — window via override → model map → default. The threshold ladder
-  // keeps the fixed reserve on big windows and falls back to proportional on small ones (no big-model regression).
-  const compactPlan = resolveCompactionPlan({
+  // Compaction plan (ADR-039): sized once with a SYNC fallback — window via override → model map → default.
+  // When the caller didn't pin a window, we refine this on the FIRST turn via provider.detectModelLimits
+  // (ADR-038: Ollama /api/show num_ctx) — ground truth beats the static map, which mis-sized coding-qwen36 as
+  // 32k. `let` so detection can replace it; the tier it carries also sizes the system prompt + tool descriptions.
+  let compactPlan = resolveCompactionPlan({
     model: opts.model,
     contextWindow: opts.contextWindow,
     maxOutputTokens: opts.maxOutputTokens,
     pct: opts.compactRatio,
     keepRecentRatio: opts.keepRecentRatio,
   })
+  let windowDetected = false
+  async function ensureDetectedPlan(signal?: AbortSignal): Promise<void> {
+    if (windowDetected) return
+    windowDetected = true // run at most once; on failure the sync fallback plan stands
+    if (opts.contextWindow != null || !opts.provider.detectModelLimits) return // explicit override wins
+    try {
+      const limits = await opts.provider.detectModelLimits(opts.model, signal)
+      if (limits.contextWindow) {
+        compactPlan = resolveCompactionPlan({
+          model: opts.model,
+          contextWindow: limits.contextWindow,
+          maxOutputTokens: limits.maxOutputTokens ?? opts.maxOutputTokens,
+          pct: opts.compactRatio,
+          keepRecentRatio: opts.keepRecentRatio,
+        })
+      }
+    } catch {
+      /* best-effort — a probe failure keeps the fallback plan */
+    }
+  }
 
   // Event-driven curation (ADR-015): harvest durable facts when context is about to be discarded — at
   // compaction (the older chunk) and at session end. OPT-IN (autoMemory); consolidates (ADD/NOOP), no firehose.
@@ -141,6 +163,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
     async *submit(userText: string, images?: string[]): AsyncIterable<ActivityEvent> {
       const controller = new AbortController()
       inFlight = controller
+      await ensureDetectedPlan(controller.signal) // ADR-038: size the plan to the model's real window before turn 1
 
       // Multimodal turn (M11): attach image data-URIs as image blocks alongside the text; otherwise keep the
       // plain-string form (smaller history, unchanged behaviour for the common case).
