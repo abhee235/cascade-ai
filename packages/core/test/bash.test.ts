@@ -98,4 +98,51 @@ describe('BashTool', () => {
     expect(result.isError).toBe(true)
     expect(result.content).toContain('[aborted]')
   })
+
+  // ── ADR-045: timeout ──
+  it('kills a command that exceeds its timeout and returns an actionable message (host)', async () => {
+    const start = Date.now()
+    const result = await BashTool.call({ command: 'node -e "setTimeout(()=>{},10000)"', timeout: 300 }, ctx())
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('timed out after 300ms')
+    expect(result.content).toContain('Rerun with a larger') // tells the model how to recover
+    expect(Date.now() - start).toBeLessThan(3000) // it actually stopped ~at the timeout, didn't wait 10s
+  })
+
+  it('timeout distinguishes from a user abort (timeout path fires when no one aborted the session)', async () => {
+    const result = await BashTool.call({ command: 'node -e "setTimeout(()=>{},10000)"', timeout: 200 }, ctx())
+    expect(result.content).toContain('timed out') // not "[aborted]"
+    expect(result.content).not.toContain('[aborted]')
+  })
+
+  it('sandbox path also honours the timeout (aborts the exec, reports timed out)', async () => {
+    // A sandbox whose exec never finishes on its own — only the abort signal ends it.
+    const sandbox: Sandbox = {
+      root: '/workspace',
+      exec: (_cmd, opts) =>
+        new Promise((resolve) => {
+          opts?.signal?.addEventListener('abort', () => resolve({ output: 'partial', exitCode: null }), { once: true })
+        }),
+      async dispose() {},
+    }
+    const result = await BashTool.call({ command: 'sleep 100', timeout: 200 }, { ...ctx(), sandbox })
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('timed out')
+  })
+
+  // ── ADR-045: output truncation (keep BOTH head and tail) ──
+  it('keeps the head AND the tail of long output, dropping the middle', async () => {
+    // ~40k chars across 5000 short lines — well over the head+tail budget.
+    const result = await BashTool.call({ command: `node -e "for(let i=0;i<5000;i++)console.log('line'+i)"` }, ctx())
+    expect(result.content).toContain('line0') // the START is kept (head)
+    expect(result.content).toContain('line4999') // the END is kept (tail) — not head-only; we keep both
+    expect(result.content).toMatch(/\[\d+ chars omitted\]/) // the middle is dropped with a marker
+    expect(result.content.length).toBeLessThan(30_000) // bounded
+  })
+
+  it('shortens a single pathologically long line', async () => {
+    const result = await BashTool.call({ command: `node -e "process.stdout.write('X'.repeat(5000))"` }, ctx())
+    expect(result.content).toContain('[+3000 chars]') // 5000 − 2000 cap
+    expect(result.content.length).toBeLessThan(3000)
+  })
 })
