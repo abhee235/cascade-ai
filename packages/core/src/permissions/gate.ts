@@ -24,6 +24,9 @@ export interface PermissionState {
   allow: Set<string>
   /** Tool names hard-denied. */
   deny: Set<string>
+  /** ADR-044: the mode to restore when ExitPlanMode is approved. EnterPlanMode saves the current mode here
+   *  before switching to 'plan', so a bypass (web) session returns to 'bypass', not 'default'. */
+  priorMode?: PermissionMode
 }
 
 /** Decide what to do with one tool call. Pure: no I/O, no awaiting. */

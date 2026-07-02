@@ -84,9 +84,15 @@ export interface Tool<I = unknown> {
   /** Safe to run in parallel with other tools this turn? Default when absent: false (conservative).
    *  Read-only tools are safe; writes are not (they can race). Used by the scheduler (Phase 6). */
   isConcurrencySafe?(input: I): boolean
-  /** ADR-043: this tool's effect IS a round-trip to the user (AskUserQuestion). The scheduler yields a
-   *  `question` event and awaits the answer via ctx.ask instead of running `call()`. Default: false. */
+  /** ADR-043: this tool's effect IS a round-trip to the user (AskUserQuestion, ExitPlanMode). The scheduler
+   *  yields a `question` event and awaits the answer via ctx.ask instead of running `call()`. Default: false. */
   requiresUserInteraction?(): boolean
+  /** ADR-043/044: for a requiresUserInteraction tool, the question(s) to put to the user (AskUserQuestion returns
+   *  its own; ExitPlanMode synthesizes an Approve/Revise question from the plan). */
+  toQuestions?(input: I): import('../protocol').Question[]
+  /** ADR-043/044: turn the user's answers into the tool_result — and optionally act on them (ExitPlanMode flips
+   *  the permission mode on approval). Omit ⇒ the scheduler formats the answers as text. */
+  applyAnswers?(input: I, answers: import('../protocol').Answers, ctx: ToolContext): ToolResult | Promise<ToolResult>
   /** Run the tool. Return text (and isError) — that becomes the tool_result.
    *  `onProgress` (Phase 8) lets long-running tools stream partial output (e.g. Bash stdout) live into
    *  the UI card as it arrives. Instantaneous tools ignore it. */

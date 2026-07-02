@@ -5,7 +5,7 @@
 // (a write) runs SOLO. Parallelism is a correctness choice — independent reads can't interfere, but
 // writes can race. Results are returned in the ORIGINAL order (tool_results map by id either way).
 
-import type { ActivityEvent, ContentBlock, Question } from '../protocol'
+import type { ActivityEvent, ContentBlock } from '../protocol'
 import type { ToolContext } from './Tool'
 import { defaultRegistry, type ToolRegistry } from './toolRegistry'
 import { executeTool, type ToolUse } from './runTool'
@@ -61,6 +61,20 @@ function deniedBlock(id: string): ContentBlock {
   }
 }
 
+/** ADR-044: a write blocked because the session is in PLAN MODE — NOT a user decline. Tell the model plainly so
+ *  it doesn't misread it as a filesystem error or retry; it should finish planning and call ExitPlanMode. */
+function planDeniedBlock(id: string): ContentBlock {
+  return {
+    type: 'tool_result',
+    tool_use_id: id,
+    content:
+      'You are in PLAN MODE — file writes and shell commands are blocked until the user approves your plan. ' +
+      'This is not an error and retrying will not help. Keep exploring read-only (Read/Glob/Grep/Lsp), finish ' +
+      'your plan, then call ExitPlanMode with it for approval.',
+    isError: true,
+  }
+}
+
 /** Yields toolStart/permission/toolResult activity; returns the tool_result blocks in original order.
  *  Phase 7: each tool passes through checkPermission BEFORE it runs. 'allow' → run; 'deny' → error result,
  *  no execution; 'ask' → yield a `permission` event and AWAIT the user (this is what blocks the loop). */
@@ -80,19 +94,20 @@ export async function* scheduleTools(
     for (const tu of batch) {
       const tool = registry.find(tu.name)
 
-      // ── ADR-043: an INTERACTIVE tool (AskUserQuestion) — its effect is a round-trip to the user. Mirror the
-      //    permission park: yield a `question` event and BLOCK on ctx.ask.request() until respondQuestion().
-      //    call() is skipped. Only when a channel exists — otherwise fall through and the tool returns its
-      //    no-channel error (headless / non-interactive). ──
+      // ── ADR-043/044: an INTERACTIVE tool (AskUserQuestion, ExitPlanMode) — its effect is a round-trip to the
+      //    user. Mirror the permission park: yield a `question` event and BLOCK on ctx.ask.request() until
+      //    respondQuestion(). `toQuestions` builds what to ask; `applyAnswers` turns the reply into the result
+      //    (and may act — ExitPlanMode flips the permission mode on approval). call() is skipped. Only when a
+      //    channel exists — otherwise fall through and the tool returns its no-channel error (headless). ──
       if (tool?.requiresUserInteraction?.() && ctx.ask) {
-        const questions = ((tu.input as { questions?: Question[] })?.questions ?? []) as Question[]
+        const questions = tool.toQuestions?.(tu.input as never) ?? []
         yield { type: 'toolStart', id: tu.id, name: tu.name, summary: summary(tu, registry) }
         yield { type: 'question', id: tu.id, questions }
         const answers = await ctx.ask.request(tu.id) // ← BLOCKS until respondQuestion(tu.id, answers)
-        const content = formatAnswers(answers)
-        byId.set(tu.id, { type: 'tool_result', tool_use_id: tu.id, content })
-        tracer.event({ t: 'tool_result', id: tu.id, name: tu.name, ok: true, ms: 0, content })
-        yield { type: 'toolResult', id: tu.id, ok: true, preview: content.slice(0, 200) }
+        const result = tool.applyAnswers ? await tool.applyAnswers(tu.input as never, answers, ctx) : { content: formatAnswers(answers) }
+        byId.set(tu.id, { type: 'tool_result', tool_use_id: tu.id, content: result.content, isError: result.isError })
+        tracer.event({ t: 'tool_result', id: tu.id, name: tu.name, ok: !result.isError, ms: 0, content: result.content })
+        yield { type: 'toolResult', id: tu.id, ok: !result.isError, preview: result.content.slice(0, 200) }
         continue
       }
 
@@ -106,9 +121,11 @@ export async function* scheduleTools(
       }
       tracer.event({ t: 'permission', id: tu.id, tool: tu.name, decision, asked }) // forensics: every gate verdict
       if (decision === 'deny') {
-        byId.set(tu.id, deniedBlock(tu.id))
+        // A write blocked BY PLAN MODE gets a plan-specific message (not the "user declined" one).
+        const inPlan = perm?.state.mode === 'plan' && !(tool?.isReadOnly?.(tu.input as never) ?? false)
+        byId.set(tu.id, inPlan ? planDeniedBlock(tu.id) : deniedBlock(tu.id))
         yield { type: 'toolStart', id: tu.id, name: tu.name, summary: summary(tu, registry) }
-        yield { type: 'toolResult', id: tu.id, ok: false, preview: 'Denied' }
+        yield { type: 'toolResult', id: tu.id, ok: false, preview: inPlan ? 'Blocked (plan mode)' : 'Denied' }
       } else {
         toRun.push(tu)
       }

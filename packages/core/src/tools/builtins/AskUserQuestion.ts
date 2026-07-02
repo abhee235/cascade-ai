@@ -70,6 +70,7 @@ export const AskUserQuestionTool: Tool<z.infer<typeof inputSchema>> = {
   isReadOnly: () => true, // no filesystem effect
   isConcurrencySafe: () => true,
   requiresUserInteraction: () => true, // ADR-043: the scheduler handles the round-trip via ctx.ask
+  toQuestions: (input) => input.questions.map((q) => ({ ...q, multiSelect: q.multiSelect ?? false })), // no applyAnswers ⇒ formatted as text
 
   // Only reached when there's NO interactive channel (headless / non-interactive run). With a channel, the
   // scheduler intercepts (yields `question`, awaits ctx.ask) and this never runs.
