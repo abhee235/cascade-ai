@@ -98,7 +98,7 @@ describe('session — reset() forgets allow-always grants', () => {
         [toolUse('w2', 'Write', { file_path: 'b.txt', content: 'b' }), done('tool_use')],
         [textDelta('ok2'), done('end_turn')],
       ])
-      const session = createSession({ cwd: dir, provider, model: 'fake', autoMemory: false })
+      const session = createSession({ cwd: dir, provider, model: 'fake', autoMemory: false, verifyGate: false }) // gate off: this test scripts exact permission turns
 
       const e1 = await drive(session, 'write a', 'allow-always') // grant always-allow Write
       expect(e1.some((e) => e.type === 'permission')).toBe(true)

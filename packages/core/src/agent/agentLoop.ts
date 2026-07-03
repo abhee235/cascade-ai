@@ -18,6 +18,7 @@ import { streamWithRecovery, type RecoveryOptions } from '../llm/resilience'
 import type { ToolUse } from '../tools/runTool'
 import { scheduleTools } from '../tools/scheduler'
 import { buildTodoReminder, shouldRemindTodos, type TodoReminderConfig } from './todoReminder'
+import { buildVerifyNudge, foldVerifyState } from './verifyGate'
 
 export interface LoopDeps {
   provider: ModelProvider
@@ -40,6 +41,9 @@ export interface LoopDeps {
   todoStore?: import('../tools/todoStore').TodoStore // ADR-034: authoritative todo checklist (drives the reminder)
   todoReminder?: TodoReminderConfig // ADR-034: tune/inject the reminder turn thresholds (default 6/6)
   ask?: import('../tools/Tool').AskController // ADR-043: AskUserQuestion round-trip channel (main agent only)
+  /** ADR-049: refuse a terminal answer when files were edited but nothing verified them (one nudge turn,
+   *  then accept). Default ON — it only ever fires when unverified edits exist. Set false to opt out. */
+  verifyGate?: boolean
   /** ADR-037: window tier sizing the system prompt + tool descriptions. Defaults to the compaction plan's tier
    *  (one source of truth); set explicitly for loops without compaction (e.g. subagents inherit the parent's). */
   tier?: import('../llm/contextWindows').WindowTier
@@ -113,6 +117,10 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   }
   const maxTurns = deps.maxTurns ?? 10
   let turn = 0
+  // ADR-049 verification gate: `editedSinceVerify` = a file-mutating tool succeeded and no test command has
+  // run since. At the terminal branch we nudge ONCE per submit, then accept the next answer unconditionally.
+  let editedSinceVerify = false
+  let verifyNudged = false
 
   while (true) {
     let text = ''
@@ -209,8 +217,18 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     if (text) display.push({ type: 'text', text })
     if (display.length) yield { type: 'message', message: { role: 'assistant', content: display } }
 
-    // TERMINAL — no tool calls → done.
+    // TERMINAL — no tool calls → done. Unless the verification gate objects (ADR-049): files were edited
+    // but nothing verified them → inject ONE nudge turn and loop; the next terminal answer is accepted
+    // unconditionally (the model may legitimately answer "no tests exist here").
     if (toolUses.length === 0) {
+      if (deps.verifyGate !== false && editedSinceVerify && !verifyNudged && turn + 1 < maxTurns) {
+        verifyNudged = true
+        tracer.event({ t: 'verify_gate', turn })
+        messages.push(buildVerifyNudge())
+        yield { type: 'status', text: 'Asking the agent to verify its changes…' }
+        turn++
+        continue
+      }
       if (!display.length) yield { type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: '' }] } }
       tracer.event({ t: 'turn_done', turns: turn })
       yield { type: 'turnDone', steps: turn }
@@ -221,6 +239,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     // the toolStart/toolResult activity and returns the tool_result blocks in original order.
     const results = yield* scheduleTools(toolUses, ctx)
     messages.push({ role: 'user', content: results }) // tool_results become the next turn's input
+    editedSinceVerify = foldVerifyState(editedSinceVerify, toolUses, results) // ADR-049 gate state
 
     if (++turn >= maxTurns) {
       tracer.event({ t: 'turn_done', turns: turn })

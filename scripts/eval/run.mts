@@ -72,7 +72,7 @@ function withTemperature(p: ModelProvider, temperature: number): ModelProvider {
 
 // ── trace → metrics (cheap inline subset; full failure classification is the E4 analyzer's job) ───────────
 function traceMetrics(tracePath: string) {
-	const m = { turns: 0, toolCalls: 0, toolErrors: 0, inputTokens: 0, outputTokens: 0, usageReported: false, compactions: [] as { kind: string; forced: boolean }[], recoveries: 0, backendFailed: false }
+	const m = { turns: 0, toolCalls: 0, toolErrors: 0, subagentCalls: 0, verifyNudges: 0, inputTokens: 0, outputTokens: 0, usageReported: false, compactions: [] as { kind: string; forced: boolean }[], recoveries: 0, backendFailed: false }
 	if (!existsSync(tracePath)) return m
 	for (const line of readFileSync(tracePath, 'utf8').split('\n')) {
 		if (!line.trim()) continue
@@ -83,7 +83,10 @@ function traceMetrics(tracePath: string) {
 			continue
 		}
 		if (e.t === 'model_request') m.turns++
-		else if (e.t === 'tool_call') m.toolCalls++
+		else if (e.t === 'tool_call') {
+			m.toolCalls++
+			if (e.name === 'Subagent') m.subagentCalls++ // delegation visibility (currently 0 across all history)
+		} else if (e.t === 'verify_gate') m.verifyNudges++ // ADR-049: how often the completion gate fired
 		else if (e.t === 'tool_result' && e.ok === false) m.toolErrors++
 		else if (e.t === 'model_response' && e.usage) {
 			m.usageReported = true

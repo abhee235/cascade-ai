@@ -29,14 +29,16 @@ describe('tracer — forensic event stream', () => {
       const tracer: Tracer = { event: (e) => events.push(e) }
       const provider = createFakeProvider([
         [toolUse('w1', 'Write', { file_path: 'note.txt', content: 'hi' }), done('tool_use')],
-        [textDelta('done'), done('end_turn')],
+        [textDelta('done'), done('end_turn')], // premature "done" — the ADR-049 gate objects (edit, no verification)
+        [textDelta('no tests exist here'), done('end_turn')], // post-nudge answer — accepted
       ])
       const session = createSession({ cwd: dir, provider, model: 'fake', tracer, autoMemory: false })
 
       await drive(session, 'write note.txt', 'allow')
 
       const seq = events.map((e) => e.t)
-      // The skeleton of any agent run, captured untruncated:
+      // The skeleton of any agent run, captured untruncated (incl. the ADR-049 verification gate firing
+      // on an unverified edit — files changed, no test command ran):
       expect(seq).toEqual([
         'submit',
         'model_request', // turn 0: the FULL request (messages/system/tools)
@@ -45,6 +47,9 @@ describe('tracer — forensic event stream', () => {
         'tool_call', // Write ran
         'tool_result',
         'model_request', // turn 1: model now sees the tool_result
+        'model_response', // "done" — but nothing verified the edit…
+        'verify_gate', // …so the ADR-049 gate injects ONE nudge turn
+        'model_request', // turn 2: model sees the nudge
         'model_response',
         'turn_done',
       ])

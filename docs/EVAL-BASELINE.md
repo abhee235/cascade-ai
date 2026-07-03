@@ -83,6 +83,15 @@ Not leaderboard-comparable (JS-only slice of the 225-task/6-language set); it is
    `no_tool_use` 0. Solves still 0/10 — the unblocked 3B acts cleanly, then quits without verifying. With
    `false_done` dominant at BOTH curve ends, the next knob is a structural **verification gate** (ADR-049
    candidate), not more parsing. Strong-tier gate: 10/10 → 10/10, exit 0.
+   **Rung 3 climbed (ADR-049, `verify-gate-3b` / `verify-gate-check-agentic`):** the loop now refuses a
+   terminal answer when files changed but nothing verified them (one nudge, then accept). Agentic:
+   **10/10 with the gate FIRING 4×** — the strong model tried to finish unverified on 4 tasks, was nudged,
+   verified, still swept. 3B: gate fired 2× (correctly silent when its edits fail — nothing to verify);
+   classes `false_done` 7→6. Observation for a classifier refinement: `false_done` without any successful
+   edit is really "gave up" — split the class when it starts mattering. Delegation visibility also added:
+   `subagentCalls`/`verifyNudges` metrics + the `delegate-scatter` fixture (6 shards vs 8k window; NEUTRAL
+   prompt — measures whether delegation happens, never instructs it). Empirical baseline: **zero Subagent
+   calls in all eval history** — the next candidate knob is the Subagent tool description.
 2. **The compactor works live under pressure.** Both longctx tasks (8k pinned window) ran real compactions;
    `longctx-wire-modules` (needles across 4×~500-line files) SOLVED at 8k. The one 35B failure
    (`longctx-changelog-version`) is `false_done` — it filled `meta.js` but never ran the tests — a

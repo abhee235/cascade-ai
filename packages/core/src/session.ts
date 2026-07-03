@@ -59,6 +59,9 @@ export interface SessionOptions {
   /** Max model round-trips per submit before the loop stops (default 10). A builder doing a full app
    *  needs far more than a chat turn — the server sets this high. */
   maxTurns?: number
+  /** ADR-049: refuse a terminal answer when files were edited but nothing verified them (one nudge turn,
+   *  then accept). Default true. */
+  verifyGate?: boolean
 }
 
 export interface CascadeSession {
@@ -238,6 +241,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
           extraInstructions: opts.extraInstructions,
           projectContext, // ADR-046: dir tree + git status (gathered once above)
           maxTurns: opts.maxTurns,
+          verifyGate: opts.verifyGate, // ADR-049 (default on in the loop)
         })
       } catch (err) {
         const e = err as { name?: string; message?: string; cause?: { message?: string } }

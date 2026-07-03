@@ -1,0 +1,9 @@
+{
+	"id": "delegate-scatter",
+	"tags": ["delegate", "longctx"],
+	"prompt": "The recovery passphrase for this system is split across the six vault shard files under src/vault/ — each shard registers one fragment via registerPart(order, word), buried somewhere inside its file. Recover all six fragments and set PASSPHRASE in src/config.js to the fragments joined with '-' in shard order (1 through 6).",
+	"check": "node --test",
+	"budgets": { "maxTurns": 30, "timeoutMs": 600000 },
+	"protected": ["tests"],
+	"session": { "contextWindow": 8192 }
+}

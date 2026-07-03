@@ -115,3 +115,41 @@ write(
 	'longctx-changelog-version/repo/docs/UPGRADING.md',
 	[`# Upgrading guide`, ``, `Work through the steps in order. Historical notes are kept for context —`, `always prefer the statements marked "as of the current release".`, ``, ...upgradingParas, ``].join('\n\n'),
 )
+
+// ── delegate-scatter: SIX large vault files, one passphrase fragment each (delegation-pressure fixture) ──
+// Design: ~30k tokens of required reading vs an 8k pinned window. A solo agent must compact repeatedly
+// (and masking can elide needles it read earlier); delegating per-file reads to subagents keeps the parent
+// lean. The prompt stays NEUTRAL — we measure whether delegation happens, we don't instruct it (the
+// `subagentCalls` metric + compactions tell the story).
+const WORDS = ['cascade', 'delegates', 'exploration', 'to', 'focused', 'subagents']
+for (let n = 1; n <= 6; n++) {
+	const parts = [
+		`// part${n}.js — vault shard ${n} of 6. (Generated fixture — bulk is intentional.)`,
+		`'use strict'`,
+		`const { registerPart } = require('./registry.js')`,
+		``,
+	]
+	const HELPERS = 40
+	const needleAt = Math.floor(HELPERS * (0.35 + n * 0.08)) // varied depth per file — no fixed offset to exploit
+	for (let i = 1; i <= HELPERS; i++) {
+		parts.push(`/**
+ * shard${n}Op${i} — maintenance routine ${i} for vault shard ${n}.
+ * Contract: pure; returns a fresh audit record; tolerates missing fields.
+ */
+function shard${n}Op${i}(entry) {
+	const audit = { ...entry, shard: ${n}, op: ${i} }
+	audit.digest = (String(audit.payload ?? '').length * ${i + n}) % 7919
+	audit.trail = [...(audit.trail ?? []), 'shard${n}:${i}']
+	return audit
+}
+`)
+		if (i === needleAt) {
+			parts.push(`// Shard ${n}'s fragment of the recovery passphrase. Order matters.`)
+			parts.push(`registerPart(${n}, '${WORDS[n - 1]}')`)
+			parts.push(``)
+		}
+	}
+	parts.push(`module.exports = { shard${n}Op1, shard${n}Op${HELPERS} }`)
+	parts.push(``)
+	write(`delegate-scatter/repo/src/vault/part${n}.js`, parts.join('\n'))
+}
