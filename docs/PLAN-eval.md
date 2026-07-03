@@ -88,10 +88,24 @@ Order matters: E1 first (cheap, benefits everything), E4's classifier is testabl
 - **No reward hacking:** check commands verify *behaviour* (run the tests), never string-match the diff —
   the 2025 SWE-bench audit found ~20% of "solved" labels were semantically wrong; don't recreate that.
 
-## Tier 2 — external benchmarks (later, after E5)
+## Tier 2 — external benchmarks
 
-- **The polyglot benchmark** first (edit-format reliability; fixed methodology, not gameable) via a thin adapter over
-  the headless core; then a **Terminal-Bench** subset; **BFCL** if we want a pure tool-calling number.
+- **Polyglot benchmark — JS track WIRED** (`scripts/eval/convert-polyglot.mts`): converts the 49 JavaScript
+  exercises of the public `polyglot-benchmark` into our fixture format (prompt from `.docs`, reference solution
+  from `.meta` → the same verify invariant as Tier-1), with ONE shared jest/babel install
+  (`eval/external/js-deps`, resolved via a per-task `run-tests.mjs` shim — no per-exercise `npm install`,
+  Windows-safe). One runner drives both suites: `npm run eval -- --tasks-dir eval/external/tasks-js …`.
+  Setup (all machine-local, gitignored under `eval/external/`):
+  ```sh
+  git clone --depth 1 https://github.com/Aider-AI/polyglot-benchmark eval/external/polyglot-benchmark
+  cd eval/external/js-deps && npm install          # once
+  npm run eval:convert-polyglot                     # regenerate tasks
+  node eval/verify-fixtures.mjs eval/external/tasks-js
+  npm run eval -- --model <m> --label polyglot-js --tasks-dir eval/external/tasks-js
+  ```
+- Other tracks (python/go/rust/java/cpp) need their toolchains (or a Docker image) — the converter's
+  per-language step makes them additive. Then a **Terminal-Bench** subset; **BFCL** for a pure
+  tool-calling number.
 - These give comparability to the outside world; the Tier-1 suite remains the daily instrument.
 
 ## Non-goals (now)

@@ -47,8 +47,11 @@ function classifyRow(dir: string, row: Row): Classification {
 	// Rows carry traceFile since the backend-crash-retry change (a retry gets `-r1`); fall back for old runs.
 	const tracePath = join(dir, 'traces', (row.traceFile as string) ?? `${row.task}-t${row.trial}.jsonl`)
 	const events = existsSync(tracePath) ? parseTrace(readFileSync(tracePath, 'utf8')) : []
-	// maxTurns comes from the task spec; fall back to the observed turn count (classifier only compares ≥).
-	const taskSpec = join(ROOT, 'eval', 'tasks', row.task, 'task.json')
+	// maxTurns comes from the task spec. Tier-2 runs use an external tasks dir — recorded in the run's
+	// meta.json (tasksDir) since --tasks-dir landed; fall back to the built-in suite for older runs.
+	const metaPath = join(dir, 'meta.json')
+	const tasksDir = existsSync(metaPath) ? (JSON.parse(readFileSync(metaPath, 'utf8')).tasksDir ?? join(ROOT, 'eval', 'tasks')) : join(ROOT, 'eval', 'tasks')
+	const taskSpec = join(tasksDir, row.task, 'task.json')
 	const maxTurns = existsSync(taskSpec) ? (JSON.parse(readFileSync(taskSpec, 'utf8')).budgets?.maxTurns ?? Infinity) : Infinity
 	return classify(events, { solved: row.solved, timedOut: row.timedOut, turns: row.turns, maxTurns })
 }

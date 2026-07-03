@@ -11,7 +11,7 @@
 import { spawnSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, appendFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { createProvider, createSession, JsonlTracer, type ModelProvider } from '@cascade/core'
 
@@ -25,6 +25,7 @@ const { values: args } = parseArgs({
 		provider: { type: 'string', default: 'ollama' },
 		'base-url': { type: 'string' },
 		temperature: { type: 'string', default: '0' }, // determinism by default (PLAN-eval ground rules)
+		'tasks-dir': { type: 'string' }, // Tier-2: point at a converted external suite (e.g. eval/external/tasks-js)
 	},
 })
 if (!args.model) {
@@ -33,7 +34,7 @@ if (!args.model) {
 }
 
 const ROOT = join(import.meta.dirname, '..', '..')
-const TASKS_DIR = join(ROOT, 'eval', 'tasks')
+const TASKS_DIR = args['tasks-dir'] ? resolve(ROOT, args['tasks-dir']) : join(ROOT, 'eval', 'tasks')
 const label = args.label ?? `${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}-${args.model!.replace(/[^a-z0-9.-]/gi, '_')}`
 const runDir = join(ROOT, 'eval', 'runs', label)
 const tracesDir = join(runDir, 'traces')
@@ -212,7 +213,7 @@ async function runTrial(task: TaskSpec, trial: number, attempt = 1) {
 // ── main ─────────────────────────────────────────────────────────────────────────────────────────────────
 writeFileSync(
 	join(runDir, 'meta.json'),
-	JSON.stringify({ label, model: args.model, provider: args.provider, baseUrl: args['base-url'] ?? null, temperature: Number(args.temperature), trials, tasks: wanted, node: process.version, startedAt: new Date().toISOString() }, null, '\t'),
+	JSON.stringify({ label, model: args.model, provider: args.provider, baseUrl: args['base-url'] ?? null, temperature: Number(args.temperature), trials, tasks: wanted, tasksDir: TASKS_DIR, node: process.version, startedAt: new Date().toISOString() }, null, '\t'),
 )
 console.log(`eval run "${label}" — model=${args.model} tasks=${wanted.length} trials=${trials}\n→ ${runDir}\n`)
 

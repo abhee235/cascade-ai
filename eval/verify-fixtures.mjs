@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const tasksDir = join(dirname(fileURLToPath(import.meta.url)), 'tasks')
+const tasksDir = process.argv[2] ? join(process.cwd(), process.argv[2]) : join(dirname(fileURLToPath(import.meta.url)), 'tasks')
 
 function runCheck(command, cwd) {
 	// shell:true → the check string runs as-is on both Windows and POSIX.
