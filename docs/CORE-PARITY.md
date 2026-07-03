@@ -8,6 +8,10 @@
 >
 > **How to use.** This is the single reference for enhancing `@cascade/core`. Pick an item, write its ADR,
 > build it, verify, tick the box.
+>
+> **Eval delta (PLAN-eval E5).** Any ADR touching loop/prompt/compaction/tool behaviour carries a before/after
+> eval line: `npm run eval -- --model <m> --label <adr>-after`, then
+> `npm run eval:report -- --diff <baseline> <adr>-after` (exit 1 = regression). Baselines: `docs/EVAL-BASELINE.md`.
 
 Legend: ☐ not started · ◐ partial · ☑ done. "Target capability" = the behaviour a mature agent core needs.
 
@@ -22,7 +26,7 @@ Legend: ☐ not started · ◐ partial · ☑ done. "Target capability" = the be
 | A3 | ◐ **Recovery depth** | retry/backoff + overflow→compact ([resilience.ts](../packages/core/src/llm/resilience.ts)) | + **token escalation** (raise `max_tokens` on truncation) + **budget continuation** | ADR-031 |
 | A4 | ☑ **Read-before-Edit freshness** | **DONE (ADR-032):** session-scoped `FileStateCache`; Edit refuses unread/stale files (mtime + content fallback), CRLF-normalized | `readFileState` map: Edit **refuses** a file not Read first, or changed since read | ADR-032 ✅ |
 | A5 | ◐ **Permission depth** | rules match by **tool name only**; Bash is one opaque allow/deny ([gate.ts:38](../packages/core/src/permissions/gate.ts)) | input-aware rules (`Bash(npm run test:*)`, `Edit(src/**)`), a **bash command classifier** (split `a && b \| c`, gate each), and **hooks** | ADR-035 (rules), ADR-036 (hooks) |
-| A6 | ◐ **Prompt & context engineering** | **DONE (ADR-037):** tier-aware sectioned system prompt (`minimal`/`lean`/`full` by window) — the behavioural core (read-before-edit, verify-before-done, report-faithfully, tool discipline, tone) weak models can't infer; 128k→full, adaptive. ([systemPrompt.ts](../packages/core/src/agent/systemPrompt.ts)) · **defer:** per-tool prompts, subagent prompt, git/dir context injection | rich tone/conventions prompt + **context gathering** (instruction files, directory structure, git status injected) + static/dynamic **cache boundary** | ADR-037 ✅ |
+| A6 | ◐ **Prompt & context engineering** | **DONE (ADR-037):** tier-aware sectioned system prompt (`minimal`/`lean`/`full` by window) — the behavioural core (read-before-edit, verify-before-done, report-faithfully, tool discipline, tone) weak models can't infer; 128k→full, adaptive (rather than one prompt for every model). ([systemPrompt.ts](../packages/core/src/agent/systemPrompt.ts)) · **+ context gathering DONE (ADR-046):** bounded tier-sized **directory tree** + **git status** snapshot gathered once/session ([projectContext.ts](../packages/core/src/agent/projectContext.ts)), injected into the system prompt (never compacted); **AGENTS.md** / other agents' instruction-file interop in memory loading (CASCADE.md was already injected) · **defer:** per-tool prompts, subagent prompt | rich tone/conventions prompt + **context gathering** (project instruction file, directory structure, git status injected) + static/dynamic **cache boundary** | ADR-037 ✅ · ADR-046 ✅ |
 | A7 | ◐ **Cost / token accounting** | **Trace layer DONE (ADR-040):** backend usage (`prompt_eval_count`/`usage`) captured per model call → `model_response.usage` trace event; `compaction {kind, tokensBefore/After, forced}` trace events; `temperature` passthrough for eval determinism. **Defer:** session totals, UI display, pricing | per-turn token + cost tracking | ADR-040 ◐ |
 | A9 | ☑ **Durable todo checklist + reminder** | **DONE (ADR-034):** session `TodoStore` persisted to `.cascade/todos.json`; state-aware `<system-reminder>` re-injected when the model drifts; one-in_progress invariant enforced | a todo list in app state + a re-injected reminder (turns since last use) | ADR-034 ✅ |
 | A8 | ☑ **Filesystem confinement (host ↔ sandbox)** | **DONE (ADR-033):** `resolveInProject` jails every file tool to the project root; `/app`·`/workspace` aliases re-root, escapes rejected; `Sandbox.root` + prompt show one coherent cwd | file tools confined via input validation + permission deny-rules + path expansion | ADR-033 ✅ |
@@ -34,20 +38,20 @@ Legend: ☐ not started · ◐ partial · ☑ done. "Target capability" = the be
 
 ## B. Core tools — coverage
 
-Cascade has: `Read, Write, Edit, MultiEdit, Bash, Glob, Grep, TodoWrite, Lsp, AskUserQuestion, Memory, MemorySearch, Subagent`.
+Cascade has: `Read, Write, Edit, MultiEdit, Bash, Glob, Grep, TodoWrite, Lsp, AskUserQuestion, EnterPlanMode, ExitPlanMode, Memory, MemorySearch, Subagent`.
 
 | Core tool | Purpose | Priority for Cascade | Status |
 |-----------|---------|----------------------|--------|
 | **Todo list** (`TodoWrite`) | the agent maintains a live task list (plan & track multi-step work) | **HIGH** — big agent-quality win | ☑ done — tool + one live list (web + extension); **+ ADR-034: durable `TodoStore` (persisted to `.cascade/todos.json`, survives compaction/restart), state-aware periodic reminder, enforced one-in_progress invariant** — goes past an in-memory list + static nag |
 | **MultiEdit** *(multi-edit mode of Edit)* | several edits to one file atomically | **HIGH** | ☑ done (ADR-042) — atomic sequential edits + collision guard + replace_all; shares ADR-032 freshness with Edit via `editCore.ts`; `$`-literal fix. Pairs with `Lsp references` for rename |
 | **Web fetch** / **web search** | fetch a URL / web search | MED (needs network; optional for offline) | ☐ |
-| **EnterPlanModeTool** / **ExitPlanModeTool** | present a plan, get approval before acting | MED (we have `plan` permission mode, no flow) | ☐ |
-| **AskUserQuestionTool** | structured multiple-choice question to the user | MED | ◐ engine done (ADR-043) — tool + scheduler park + session `respondQuestion` round-trip (reuses the permission-`ask` pause) + tier-sized description + weak-model "ask only when blocked" nudge. **Defer:** frontend question UI (web card + extension) |
-| **TaskCreate/Get/List/Update/Output/Stop** | background tasks / async sub-agents | MED (pairs with background Bash) | ☐ |
+| **Plan mode** (enter / exit) | present a plan, get approval before acting | MED (we have `plan` permission mode, no flow) | ☑ done (ADR-044) — Enter switches to `plan` mode (writes denied, plan-specific message); Exit presents the plan via the AskUserQuestion round-trip → **Approve/Revise** in the QuestionCard → restores the *prior* mode (bypass-safe). No new UI |
+| **Ask-user question** | structured multiple-choice question to the user | MED | ☑ done (ADR-043) — tool + scheduler park + `respondQuestion` round-trip + **web QuestionCard** (live-verified in browser) + tier-sized description + "ask only when blocked" nudge; generalized to also drive ExitPlanMode |
+| **Background tasks** (create / get / list / update / output / stop) | background tasks / async sub-agents | MED (pairs with background Bash) | ☐ |
 | **Agent teams + messaging** | multi-agent coordination + messaging | LOW (after subagents mature) | ☐ |
-| **SkillTool** | invoke a packaged skill | MED | ☐ |
+| **Skill invocation** | invoke a packaged skill | MED | ☐ |
 | **Notebook editing** | edit Jupyter cells | LOW (niche) | ☐ |
-| **LSPTool** | language-server diagnostics/hover | MED (great for a code builder) | ☑ done (ADR-041) — `Lsp` tool: real TS `LanguageService` (diagnostics/definition/references/hover); diagnostics route to sandbox `tsc`. TS/JS only |
+| **Language server** | language-server diagnostics/hover | MED (great for a code builder) | ☑ done (ADR-041) — `Lsp` tool: real TS `LanguageService` (diagnostics/definition/references/hover); diagnostics route to sandbox `tsc`. TS/JS only |
 | **MCP resources** (list / read) + **MCP auth** | MCP resources (beyond MCP tools) | MED | ☐ |
 | **Tool search** | search/deferred-load a large tool catalog | LOW | ☐ |
 | **Specialized** — sleep, cron scheduling, remote triggers, REPL, PowerShell, workflows, briefs, config, git worktrees | specialized / host-specific | LOW / skip | ☐ |
@@ -84,12 +88,12 @@ Each is a checklist of behaviours to port into our tool. (Cascade line counts in
 - ☐ Encoding + line-ending preservation
 - ☐ Parent-dir creation, large-content handling, diff preview in the result
 
-### C4. Bash — Cascade **74** lines
-- ☐ **Background tasks**: auto-background a long command after N ms; background-output / kill-shell equivalents
+### C4. Bash — Cascade **74→~185** lines — ◐ hardened (ADR-045)
+- ☐ **Background tasks**: auto-background a long command after N ms; background-output / kill-shell equivalents — *deferred (ADR-045): preview system already runs the dev server; finite commands covered by timeout*
 - ☐ **Command-prefix permissions**: parse the command, extract a prefix, wildcard-match rules — feeds A5
 - ☐ **cd / multi-command awareness** (does the command contain any `cd`?), reset cwd if it escapes the project
-- ☐ **Timeout** (default + max) with a clean kill
-- ☐ **Output truncation** that keeps the tail + per-line truncation
+- ☑ **Timeout** (default 120s + max 600s) with a clean kill — **ADR-045**: one AbortController (timer OR Stop) drives host+sandbox; actionable "rerun with a larger timeout" result (self-corrects, no background needed)
+- ☑ **Output truncation** — **ADR-045**: `BoundedOutput` keeps **head + tail** (rather than head-only; the failure summary is at the end) + per-line cap; bounded memory on any size
 - ☐ **Git operation tracking** (notice commits/branch changes)
 - ☐ **Image output** from a command (e.g., a screenshot) → multimodal result
 - ☐ Sandbox decision (should this command be sandboxed?) — *we already sandbox via Docker; align the policy*
