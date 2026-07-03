@@ -191,7 +191,13 @@ async function runTrial(task: TaskSpec, trial: number, attempt = 1) {
 		cpSync(join(TASKS_DIR, task.id, 'repo', p), join(work, p), { recursive: true })
 	}
 	const check = spawnSync(task.check, { cwd: work, shell: true, encoding: 'utf8', timeout: 120_000 })
-	rmSync(work, { recursive: true, force: true })
+	// Cleanup must NEVER kill the suite: on Windows a straggling child (observed: a zombie jest worker) can
+	// hold the temp dir → EPERM (crashed a 48-task run at 21). Retry briefly, then leave the dir to the OS.
+	try {
+		rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 })
+	} catch (e) {
+		console.warn(`\n(cleanup left ${work}: ${e instanceof Error ? e.message.split('\n')[0] : e})`)
+	}
 
 	return {
 		ts: new Date().toISOString(),

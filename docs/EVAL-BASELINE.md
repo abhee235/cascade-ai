@@ -44,6 +44,22 @@
 | search-negative-amount | ✅ | 50 | 21 | 25(11) | 141.3k | 0 |
 | search-retry-default | ✅ | 14 | 14 | 17(4) | 87.4k | 0 |
 
+## Tier-2 — polyglot benchmark, JavaScript track (2026-07-03)
+
+| Suite | Model | Score | Failures | Label |
+|---|---|---|---|---|
+| polyglot JS (48 tasks, hard subset) | `qwen36-agentic:latest` | **46/48 (95.8%)** | `js-zebra-puzzle`, `js-complex-numbers` (both `false_done` — genuine model limits, zero harness failures) | `polyglot-js-full` |
+
+Aggregates: 3.53M total tokens · median 5 turns/task · 46 tool errors all self-corrected except the two fails.
+Standouts: `js-react` (reactive cell system), `js-forth` (19 turns/354k tok, solved), `js-parallel-letter-frequency`
+(25 turns, solved), `js-alphametics`, `js-zipper`.
+
+**Method notes (honest):** N=1, temperature 0. The run surfaced and fixed two harness bugs mid-flight —
+zombie jest workers surviving task abort (hung 6 tasks to timeout + EPERM-crashed the suite at 21/48; fixed
+with `--forceExit --maxWorkers=1` in the shim + non-fatal cleanup) — the 6 affected tasks were re-run under
+the fixed shim (5/6 then solved; rows replaced). Early tasks' wall-times include a machine-sleep inflation.
+Not leaderboard-comparable (JS-only slice of the 225-task/6-language set); it is OUR fixed external yardstick.
+
 ## Findings (what the baselines already tell us)
 
 0. **The agentic tune dominates the coding tune in-harness — measured, not vibes.** Diff

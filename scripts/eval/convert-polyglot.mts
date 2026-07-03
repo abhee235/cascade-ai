@@ -37,9 +37,12 @@ if (!existsSync(JEST)) {
 
 // The per-repo test shim (protected in task.json): forwards to the SHARED jest with NODE_PATH set so the
 // exercise's babel preset resolves without a per-task npm install. Exit code passes through.
+// --forceExit: jest must die even with open handles — a zombie jest worker survived a task, held the temp
+// dir (EPERM on cleanup, crashed a suite at 21/48) and explains hung 600s tasks. --maxWorkers=1: don't
+// fork workers that compete with local inference and multiply the zombie risk.
 const runTestsSource = `// run-tests.mjs — eval test shim (generated; do not modify). Runs the shared jest.
 import { spawnSync } from 'node:child_process'
-const r = spawnSync(process.execPath, [${JSON.stringify(JEST)}, '--rootDir', '.', '--colors=false', './'], {
+const r = spawnSync(process.execPath, [${JSON.stringify(JEST)}, '--rootDir', '.', '--colors=false', '--forceExit', '--maxWorkers=1', './'], {
 	env: { ...process.env, NODE_PATH: ${JSON.stringify(JS_DEPS)} },
 	stdio: 'inherit',
 	shell: false,
