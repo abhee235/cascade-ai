@@ -11,7 +11,7 @@
 |---|---|---|---|---|
 | **strong (35B, 32k)** | `qwen36-agentic:latest` | **10/10** | — | label `baseline-qwen36-agentic` — **the reference baseline** |
 | strong (35B, 128k) | `coding-qwen36:latest` | **9/10** | 1× `false_done` | label `baseline-coding-qwen36` |
-| mid (8–20B) | — | *not yet run* | | `hermes3:8b` / `gpt-oss:20b` verified loadable |
+| mid (20B) | `gpt-oss:20b` | **7/11 (64%)** | 2× `false_done`, 1× `invalid_args`, 1× `loop_stall` | label `baseline-gpt-oss-20b` — fails by GRINDING (176k tok/27 turns on wire-modules vs the 35B's 5 turns) |
 | weak (3B) | `llama3.2:3b` | **0/10** | 10× `no_tool_use` | label `baseline-llama32-3b` |
 
 ### baseline-qwen36-agentic — 10/10, per task
@@ -100,6 +100,15 @@ Not leaderboard-comparable (JS-only slice of the 225-task/6-language set); it is
    the window"; the model may choose a better remedy than delegation. Fixture learning: greppable needles
    can't force delegation — a comprehension-shaped fixture is needed before `subagentCalls` is a target.
    Tier-1 suite is now 11 tasks (delegate-scatter included in the gate baseline).
+   **Rung 4b — the three-strike verdict (`delegate-prose-agentic`):** the comprehension-shaped fixture
+   (`delegate-prose`: six 337-line prose manuals, uniquely-phrased needles, NO shared token, decoy quotes —
+   ungreppable AND unexecutable; 12/12 fixtures sound) STILL produced **0 delegations** — the 35B solved
+   both trials by reading through compactions (52–62k tok) with the nudge firing. Conclusion, evidence-based:
+   at fixture scale the compactor makes solo-grinding viable, so the model never *needs* delegation, and
+   nudging cannot manufacture a need. Delegation's real payoff is at REAL-REPO scale (builder track) —
+   **park the delegation push there; keep the metrics; rung 3 (auto-delegation) only if real-scale evidence
+   demands it.** The 20B mid-tier tells the same story from below: it fails wire-modules by grinding
+   (27 turns/176k tok) where the 35B needs 5 turns — context *strategy*, not window size, is the mid-tier gap.
 2. **The compactor works live under pressure.** Both longctx tasks (8k pinned window) ran real compactions;
    `longctx-wire-modules` (needles across 4×~500-line files) SOLVED at 8k. The one 35B failure
    (`longctx-changelog-version`) is `false_done` — it filled `meta.js` but never ran the tests — a

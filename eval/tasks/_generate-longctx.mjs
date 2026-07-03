@@ -153,3 +153,39 @@ function shard${n}Op${i}(entry) {
 	parts.push(``)
 	write(`delegate-scatter/repo/src/vault/part${n}.js`, parts.join('\n'))
 }
+
+// ── delegate-prose: comprehension-shaped delegation fixture (ADR-050 fixture learning) ───────────────────
+// delegate-scatter failed to force delegation because its needles share a greppable token (registerPart) —
+// one targeted Grep beat delegation. Here each fact is stated in UNIQUE prose phrasing with NO shared
+// keyword, buried in six large operations manuals among decoy sentences that quote OTHER words. Search
+// can't collapse it; execution can't either (it's prose). Reading — or delegating the reading — is the
+// only path. Prompt stays NEUTRAL, as always.
+const NEEDLE_SENTENCES = [
+	`If a full restore is ever required, the opening element of the recovery sequence is "harness".`,
+	`Auditors should note that position two of the chain resolves to "beats".`,
+	`For the third slot, operations staff must supply "model".`,
+	`The fourth entry was fixed by the 2024 committee as "when".`,
+	`Component number five reads "context".`,
+	`The sequence closes with entry six: "stays".`,
+]
+const TOPICS = ['intake', 'reconciliation', 'archival', 'rotation', 'escalation', 'attestation']
+const DECOY_QUOTES = ['ledger', 'quorum', 'manifest', 'beacon', 'anchor', 'registry']
+for (let n = 1; n <= 6; n++) {
+	const topic = TOPICS[n - 1]
+	const paras = [`# Operations manual ${n}: ${topic}`, ``]
+	const PARAS = 55
+	const needlePara = Math.floor(PARAS * (0.3 + n * 0.09))
+	for (let p = 1; p <= PARAS; p++) {
+		paras.push(`## ${topic} procedure ${p}
+
+Before starting ${topic} run ${p}, confirm the previous cycle closed cleanly and the on-call rotation has
+acknowledged the hand-off. The reviewing operator files a summary under case ${n}00${p}; disputes go to the
+weekly sync. ${p % 7 === 3 ? `Historical note: the codeword "${DECOY_QUOTES[(n + p) % 6]}" was retired from this procedure in 2023 and must not be used.` : `Retain the working notes for ninety days, then archive them with the ${topic} ledger.`}`)
+		if (p === needlePara) {
+			paras.push(`### Continuity requirement
+
+${NEEDLE_SENTENCES[n - 1]} This value is confidential and appears only in this manual.`)
+		}
+	}
+	write(`delegate-prose/repo/docs/manual${n}.md`, paras.join('\n\n'))
+}

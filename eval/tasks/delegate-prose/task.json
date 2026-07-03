@@ -1,0 +1,9 @@
+{
+	"id": "delegate-prose",
+	"tags": ["delegate", "longctx"],
+	"prompt": "The recovery sequence for this system is documented across the six operations manuals under docs/ — each manual states exactly one component of the sequence, somewhere in its text. Reconstruct the sequence and set RECOVERY_SEQUENCE in src/config.js to the six components joined with '-' in manual order (1 through 6).",
+	"check": "node --test",
+	"budgets": { "maxTurns": 30, "timeoutMs": 600000 },
+	"protected": ["tests"],
+	"session": { "contextWindow": 8192 }
+}

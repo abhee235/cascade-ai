@@ -50,4 +50,5 @@ Rules:
 | search-negative-amount | search | locate the right throw among decoys; change behaviour |
 | longctx-wire-modules | longctx | needles across 4 large files; 8k window forces compaction |
 | longctx-changelog-version | longctx | synthesize facts from big docs into code |
-| delegate-scatter | delegate,longctx | 6 big files vs 8k window — delegation is the winning strategy; prompt stays NEUTRAL (we measure `subagentCalls`, we don't instruct delegation) |
+| delegate-scatter | delegate,longctx | 6 big files vs 8k window — delegation-pressure v1 (defeated by Grep: needles share a token) |
+| delegate-prose | delegate,longctx | comprehension-shaped v2: prose needles, unique phrasing, NO shared token, decoy quotes — ungreppable and unexecutable |
