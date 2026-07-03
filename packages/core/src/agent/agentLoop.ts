@@ -19,6 +19,7 @@ import type { ToolUse } from '../tools/runTool'
 import { scheduleTools } from '../tools/scheduler'
 import { buildTodoReminder, shouldRemindTodos, type TodoReminderConfig } from './todoReminder'
 import { buildVerifyNudge, foldVerifyState } from './verifyGate'
+import { buildDelegateNudgeText, foldReadPressure, READ_PRESSURE_FRACTION, sawSubagent } from './delegateNudge'
 
 export interface LoopDeps {
   provider: ModelProvider
@@ -44,6 +45,10 @@ export interface LoopDeps {
   /** ADR-049: refuse a terminal answer when files were edited but nothing verified them (one nudge turn,
    *  then accept). Default ON — it only ever fires when unverified edits exist. Set false to opt out. */
   verifyGate?: boolean
+  /** ADR-050 rung 2: when bulk reads have eaten a large share of the window and no delegation happened,
+   *  remind the model ONCE to send explore subagents instead. Default ON; needs a known window (compact
+   *  deps) and the Subagent tool in the registry, so children/chat-only sessions never see it. */
+  delegateNudge?: boolean
   /** ADR-037: window tier sizing the system prompt + tool descriptions. Defaults to the compaction plan's tier
    *  (one source of truth); set explicitly for loops without compaction (e.g. subagents inherit the parent's). */
   tier?: import('../llm/contextWindows').WindowTier
@@ -57,10 +62,10 @@ function messageText(m: Message): string {
   return m.content.filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text').map((b) => b.text).join('')
 }
 
-// ADR-034: append a reminder as a text block on the trailing user message. The leading blank line separates it
+// Append a reminder (<system-reminder> text) as a block on the trailing user message (ADR-034/049/050 share this). The leading blank line separates it
 // from any preceding text (e.g. the initial user input); when the trailing message is a tool_results message,
 // the reminder is its only text block, which the OpenAI converter emits as a clean user turn after the tools.
-function appendTodoReminder(messages: Message[], reminder: string): void {
+function appendReminder(messages: Message[], reminder: string): void {
   const last = messages[messages.length - 1]
   const text = `\n\n${reminder}`
   if (!last || last.role !== 'user') {
@@ -121,6 +126,11 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   // run since. At the terminal branch we nudge ONCE per submit, then accept the next answer unconditionally.
   let editedSinceVerify = false
   let verifyNudged = false
+  // ADR-050 delegation nudge: cumulative bulk-read result tokens this submit; fires once when they cross
+  // READ_PRESSURE_FRACTION of the window without any Subagent use. Window comes from the compaction plan.
+  let readPressureTokens = 0
+  let delegateNudged = false
+  let subagentUsed = false
 
   while (true) {
     let text = ''
@@ -150,7 +160,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     // compaction so the reminder isn't immediately summarized away (and reflects the post-compaction state).
     if (deps.todoStore) {
       const items = deps.todoStore.get(depth)
-      if (shouldRemindTodos(messages, items, deps.todoReminder)) appendTodoReminder(messages, buildTodoReminder(items))
+      if (shouldRemindTodos(messages, items, deps.todoReminder)) appendReminder(messages, buildTodoReminder(items))
     }
 
     yield { type: 'status', text: 'Thinking…' }
@@ -240,6 +250,27 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     const results = yield* scheduleTools(toolUses, ctx)
     messages.push({ role: 'user', content: results }) // tool_results become the next turn's input
     editedSinceVerify = foldVerifyState(editedSinceVerify, toolUses, results) // ADR-049 gate state
+
+    // ADR-050 rung 2: harness-detected delegation reminder. Recognition ("I should delegate") is
+    // meta-cognition weak/mid models don't do — so the LOOP watches bulk-read pressure and reminds ONCE.
+    // Requires a known window (compaction plan) + the Subagent tool advertised (parent loops only —
+    // children get a Subagent-less registry). Appended to the trailing tool_results message (ADR-034 style).
+    readPressureTokens = foldReadPressure(readPressureTokens, toolUses, results)
+    if (sawSubagent(toolUses)) subagentUsed = true
+    const window = deps.compact?.plan.window
+    if (
+      deps.delegateNudge !== false &&
+      !delegateNudged &&
+      !subagentUsed &&
+      window !== undefined &&
+      readPressureTokens > window * READ_PRESSURE_FRACTION &&
+      registry.list().some((t) => t.name === 'Subagent')
+    ) {
+      delegateNudged = true
+      tracer.event({ t: 'delegate_nudge', turn, readTokens: readPressureTokens })
+      appendReminder(messages, buildDelegateNudgeText())
+      yield { type: 'status', text: 'Suggesting delegation for the remaining reads…' }
+    }
 
     if (++turn >= maxTurns) {
       tracer.event({ t: 'turn_done', turns: turn })

@@ -92,6 +92,14 @@ Not leaderboard-comparable (JS-only slice of the 225-task/6-language set); it is
    `subagentCalls`/`verifyNudges` metrics + the `delegate-scatter` fixture (6 shards vs 8k window; NEUTRAL
    prompt — measures whether delegation happens, never instructs it). Empirical baseline: **zero Subagent
    calls in all eval history** — the next candidate knob is the Subagent tool description.
+   **Rung 4 climbed (ADR-050, delegation nudging):** rung 1 (imperative when-to description, tier-sized) →
+   **no behaviour change** (0 delegations in 3 samples — descriptions inform, they don't trigger; note this
+   is the entire mechanism of a description-only design). Rung 2 (harness-detected reminder at 35% bulk-read pressure) → nudge fired,
+   still 0 delegations, **but the model immediately switched from bulk reads to targeted Grep — the optimal
+   strategy — tokens 51.7k → 40.7k (−21%)**, solved, gate 11/11. The nudge's true effect is "stop wasting
+   the window"; the model may choose a better remedy than delegation. Fixture learning: greppable needles
+   can't force delegation — a comprehension-shaped fixture is needed before `subagentCalls` is a target.
+   Tier-1 suite is now 11 tasks (delegate-scatter included in the gate baseline).
 2. **The compactor works live under pressure.** Both longctx tasks (8k pinned window) ran real compactions;
    `longctx-wire-modules` (needles across 4×~500-line files) SOLVED at 8k. The one 35B failure
    (`longctx-changelog-version`) is `false_done` — it filled `meta.js` but never ran the tests — a

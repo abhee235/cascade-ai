@@ -21,6 +21,7 @@ export type TraceEvent =
   | { t: 'tool_result'; id: string; name: string; ok: boolean; ms: number; content: string }
   | { t: 'compaction'; kind: string; tokensBefore: number; tokensAfter: number; forced: boolean } // E1/ADR-039: which layer fired + what it reclaimed (estimates)
   | { t: 'verify_gate'; turn: number } // ADR-049: terminal answer refused — edits happened, nothing verified them; nudge injected
+  | { t: 'delegate_nudge'; turn: number; readTokens: number } // ADR-050: bulk-read pressure crossed the threshold with zero delegation; reminder injected
   | { t: 'turn_done'; turns: number }
   | { t: 'error'; message: string }
 

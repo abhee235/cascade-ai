@@ -62,6 +62,8 @@ export interface SessionOptions {
   /** ADR-049: refuse a terminal answer when files were edited but nothing verified them (one nudge turn,
    *  then accept). Default true. */
   verifyGate?: boolean
+  /** ADR-050: remind the model once to delegate when bulk reads dominate the window. Default true. */
+  delegateNudge?: boolean
 }
 
 export interface CascadeSession {
@@ -242,6 +244,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
           projectContext, // ADR-046: dir tree + git status (gathered once above)
           maxTurns: opts.maxTurns,
           verifyGate: opts.verifyGate, // ADR-049 (default on in the loop)
+          delegateNudge: opts.delegateNudge, // ADR-050 (default on in the loop)
         })
       } catch (err) {
         const e = err as { name?: string; message?: string; cause?: { message?: string } }
