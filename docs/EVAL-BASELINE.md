@@ -78,6 +78,11 @@ Not leaderboard-comparable (JS-only slice of the 225-task/6-language set); it is
    → schema coercion/JSON repair; `false_done` → verify-before-done in the minimal prompt tier.
    *Reliability note:* `longctx-changelog-version` is borderline at N=1 for strong models (observed
    pass/fail flips with identical code; a 2-trial resample passed 2/2) — **gate that task at `--trials 2`.**
+   **Rung 2 climbed (ADR-048, `invalid-args-3b`):** alias normalization + directive errors collapsed the
+   arg-retry storms (worst task 15→0 tool errors); classes now `false_done` **7** + `invalid_args` 3 +
+   `no_tool_use` 0. Solves still 0/10 — the unblocked 3B acts cleanly, then quits without verifying. With
+   `false_done` dominant at BOTH curve ends, the next knob is a structural **verification gate** (ADR-049
+   candidate), not more parsing. Strong-tier gate: 10/10 → 10/10, exit 0.
 2. **The compactor works live under pressure.** Both longctx tasks (8k pinned window) ran real compactions;
    `longctx-wire-modules` (needles across 4×~500-line files) SOLVED at 8k. The one 35B failure
    (`longctx-changelog-version`) is `false_done` — it filled `meta.js` but never ran the tests — a

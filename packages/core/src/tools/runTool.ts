@@ -6,6 +6,7 @@
 
 import type { ContentBlock } from '../protocol'
 import type { ToolContext } from './Tool'
+import { describeInvalidInput, normalizeInput } from './inputNormalizer'
 import { defaultRegistry } from './toolRegistry'
 
 export interface ToolUse {
@@ -33,8 +34,17 @@ export async function executeTool(
   // schema — the server validates — so we forward the args as-is.
   let input = toolUse.input
   if (tool.inputSchema) {
-    const parsed = tool.inputSchema.safeParse(toolUse.input)
-    if (!parsed.success) return err(`Invalid input for ${toolUse.name}: ${parsed.error.message}`)
+    let parsed = tool.inputSchema.safeParse(toolUse.input)
+    if (!parsed.success) {
+      // ADR-048: weak models send the right VALUE under the wrong KEY (Read{path:…} — the 3B's dominant
+      // invalid_args mode). Try conservative alias normalization, then re-validate once.
+      const normalized = normalizeInput(toolUse.input, tool.inputSchema)
+      if (normalized) parsed = tool.inputSchema.safeParse(normalized)
+      if (!parsed.success) {
+        // Compact, DIRECTIVE error — the raw Zod dump made the 3B retry the identical wrong call 4×.
+        return err(describeInvalidInput(toolUse.name, toolUse.input, tool.inputSchema, parsed.error.message))
+      }
+    }
     input = parsed.data
   }
 
