@@ -1,0 +1,6 @@
+{
+	"id": "builder-todo",
+	"template": "react",
+	"prompt": "Add a simple todo list to the main page: a text input with the exact placeholder 'What needs doing?', a button with the exact text 'Add', and the entered items rendered as a list below. Client-side state only (no persistence). Keep the project building cleanly.",
+	"budgets": { "maxTurns": 20, "timeoutMs": 600000 }
+}

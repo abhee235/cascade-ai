@@ -42,6 +42,7 @@ export type ChatHistoryItem = { role: 'user' | 'assistant' | 'tool'; text: strin
  *    | { type: 'files';    projectId: string; tree: ... }
  */
 export type BuilderEvent =
+  | { type: 'serverInfo'; sandbox: boolean; model: string } // capabilities greeting: is Docker up, which model (drives the Terminal gate + Settings)
   | { type: 'projects'; projects: ProjectInfo[]; activeId?: string } // project sidebar snapshot
   | { type: 'projectCreated'; project: ProjectInfo } // a project was just created (so the Home flow can open it)
   | { type: 'templates'; templates: TemplateInfo[] } // available scaffolds for the create flow (Phase 15)
@@ -56,6 +57,7 @@ export type BuilderEvent =
   | { type: 'versions'; versions: Version[] } // checkpoint history for the Versions panel (M6)
   | { type: 'chats'; chats: ChatMeta[]; activeId: string } // the active project's chat list (M11)
   | { type: 'chatHistory'; items: ChatHistoryItem[] } // the switched-to chat's transcript to render (M11)
+  | { type: 'allChats'; groups: { project: ProjectInfo; chats: ChatMeta[] }[] } // every project's chats, for the Chats page
   | { type: 'terminalData'; id: string; data: string } // a chunk of a terminal session's PTY output (M7)
   | { type: 'terminalExit'; id: string } // a terminal session's shell ended (M7)
 
@@ -79,3 +81,4 @@ export type BuilderCommand =
   | { type: 'terminalInput'; id: string; data: string } // keystrokes → a session's PTY (M7)
   | { type: 'terminalResize'; id: string; cols: number; rows: number } // a session's xterm resized (M7)
   | { type: 'chat'; action: 'list' | 'new' | 'switch' | 'delete' | 'rename'; id?: string; title?: string } // multi-chat (M11)
+  | { type: 'chats'; action: 'listAll' } // request every project's chat list (the Chats page)

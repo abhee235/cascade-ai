@@ -108,6 +108,18 @@ Order matters: E1 first (cheap, benefits everything), E4's classifier is testabl
   tool-calling number.
 - These give comparability to the outside world; the Tier-1 suite remains the daily instrument.
 
+## Tier 3 — the BUILDER bench (the product loop)
+
+Tier-1/2 measure coding-in-a-repo; nothing measured **prompt → working app** — the loop Cascade sells — and
+a `false_done` there ("done!" but a white screen) was invisible. Tier-3 (`scripts/eval/builder.mts` +
+`eval/builder/<id>/{scenario.json, check.mjs, solution/}`) drives a REAL session over the actual Vite+React
+template (`packages/server/templates/react`): working copy = pristine template + a **junction** to one
+shared `node_modules` (`eval/external/builder-template`, installed once — scenarios stay offline/fast).
+**Oracle = behavioural:** `vite build` must exit 0 AND the built bundle must carry the requested UI strings
+(string-through-build; headless-DOM render is the v2 upgrade). Same invariant as every tier:
+`npm run eval:builder -- --verify` proves each scenario's seed fails and its hand-written solution passes.
+Nightly-class (builds are heavy); starts with 2 scenarios (hero, todo) — grow deliberately.
+
 ## Non-goals (now)
 
 Leaderboard chasing · >10-task suites · LLM-judge scoring (behavioural checks only) · CI-hosted GPU runs.

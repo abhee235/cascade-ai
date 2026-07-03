@@ -1,0 +1,6 @@
+{
+	"id": "builder-hero",
+	"template": "react",
+	"prompt": "Replace the app's main page content with a landing hero: a top-level heading with the exact text 'Ship it with Cascade' and a button with the exact text 'Get started'. Keep the project building cleanly.",
+	"budgets": { "maxTurns": 20, "timeoutMs": 600000 }
+}

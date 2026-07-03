@@ -13,7 +13,8 @@ import type { FileNode } from '@cascade/app-protocol'
 // @babel/traverse ships as CJS; under ESM the callable hides behind `.default`.
 const traverse = ((_traverse as any).default ?? _traverse) as typeof _traverse
 
-const SKIP = new Set(['node_modules', '.git', 'dist', '.vite', '.next'])
+// `.cascade` is Cascade's own bookkeeping (chat transcripts, todos) — not the user's project; don't show it.
+const SKIP = new Set(['node_modules', '.git', 'dist', '.vite', '.next', '.cascade'])
 const MAX_DEPTH = 10
 const MAX_FILE_BYTES = 256 * 1024
 

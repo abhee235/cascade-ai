@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 
 export function ProjectsPage() {
-  const { projects, openProjectPage, deleteProject, navigate } = useStore()
+  const { projects, openProjectPage, deleteProject, navigate, connected } = useStore()
   const [query, setQuery] = useState('')
   const shown = projects.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()))
 
@@ -31,7 +31,8 @@ export function ProjectsPage() {
 
         {shown.length === 0 ? (
           <div className="mt-16 text-center text-sm text-muted-foreground/70">
-            {projects.length === 0 ? 'No projects yet — create one to get started.' : 'No projects match your search.'}
+            {/* While the socket is still connecting, the list simply hasn't arrived — don't claim it's empty. */}
+            {projects.length === 0 ? (connected ? 'No projects yet — create one to get started.' : 'Connecting…') : 'No projects match your search.'}
           </div>
         ) : (
           <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">

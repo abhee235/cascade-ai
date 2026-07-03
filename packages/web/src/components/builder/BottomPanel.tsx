@@ -34,19 +34,32 @@ function IconBtn({ title, onClick, icon: Icon }: { title: string; onClick: () =>
 
 // The Terminal tab: a session sub-strip + all sessions mounted (only the active one visible).
 function TerminalSessions() {
-  const { terminals, activeTerminalId, activeId, bottomTab, newTerminal, closeTerminal, setActiveTerminal } = useStore()
+  const { terminals, activeTerminalId, activeId, bottomTab, newTerminal, closeTerminal, setActiveTerminal, serverInfo } = useStore()
+  const noSandbox = serverInfo !== null && !serverInfo.sandbox
 
   // Ensure there's always a session while the Terminal tab is open (a fresh one per project). The ref guard
-  // stops React StrictMode's double-invoked effect from spawning two before state settles.
+  // stops React StrictMode's double-invoked effect from spawning two before state settles. Skipped entirely
+  // without a sandbox — there is no shell to attach (the terminal execs into the Docker container).
   const creating = useRef(false)
   useEffect(() => {
-    if (bottomTab === 'terminal' && activeId && terminals.length === 0 && !creating.current) {
+    if (bottomTab === 'terminal' && activeId && terminals.length === 0 && !creating.current && !noSandbox) {
       creating.current = true
       newTerminal()
     } else if (terminals.length > 0) {
       creating.current = false
     }
-  }, [bottomTab, activeId, terminals.length, newTerminal])
+  }, [bottomTab, activeId, terminals.length, newTerminal, noSandbox])
+
+  // No Docker ⇒ no terminal. Say it plainly instead of showing a dead, blank xterm.
+  if (noSandbox) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-1.5 bg-background text-center text-muted-foreground">
+        <SquareTerminal className="h-6 w-6 opacity-50" />
+        <p className="text-sm">The terminal needs Docker.</p>
+        <p className="text-xs opacity-70">Start Docker Desktop and restart the Cascade server to get an isolated shell per project.</p>
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-full min-h-0 bg-background">
@@ -92,8 +105,9 @@ function TerminalSessions() {
 }
 
 export function BottomPanel() {
-  const { bottomTab, setBottomTab, toggleBottom, toggleBottomMax, bottomMaximized, problems, runtimeErrors, activeTerminalId, newTerminal, closeTerminal } = useStore()
+  const { bottomTab, setBottomTab, toggleBottom, toggleBottomMax, bottomMaximized, problems, runtimeErrors, activeTerminalId, newTerminal, closeTerminal, serverInfo } = useStore()
   const problemCount = problems.length + runtimeErrors.length
+  const noSandbox = serverInfo !== null && !serverInfo.sandbox
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-card">
@@ -117,7 +131,7 @@ export function BottomPanel() {
         ))}
 
         <div className="ml-auto flex items-center gap-0.5">
-          {bottomTab === 'terminal' && (
+          {bottomTab === 'terminal' && !noSandbox && (
             <>
               <IconBtn title="New terminal" icon={Plus} onClick={newTerminal} />
               <IconBtn title="Kill terminal" icon={Trash2} onClick={() => activeTerminalId && closeTerminal(activeTerminalId)} />

@@ -31,14 +31,31 @@ export class ChatStore {
     writeFileSync(indexPath(projectDir), JSON.stringify(chats, null, 2))
   }
 
-  /** The project's chats (newest first), creating a first one if none exist. */
-  list(projectDir: string): ChatMeta[] {
+  /** The project's chats (newest first), creating a first one if none exist. Prunes abandoned empties first
+   *  (still-untitled chats with no messages — the "New chat someone clicked and walked away from" clutter),
+   *  keeping `keepId` (the active chat may legitimately be empty right now). */
+  list(projectDir: string, keepId?: string): ChatMeta[] {
+    this.prune(projectDir, keepId)
     let chats = this.readIndex(projectDir)
     if (chats.length === 0) {
       const m = this.create(projectDir)
       chats = [m]
     }
     return chats
+  }
+
+  /** Read-only view of the chat list — never creates or prunes. For cross-project listings (the Chats page). */
+  peek(projectDir: string): ChatMeta[] {
+    return this.readIndex(projectDir)
+  }
+
+  /** Drop chats that are still untitled AND have no persisted messages (except `keepId`). */
+  prune(projectDir: string, keepId?: string): void {
+    const chats = this.readIndex(projectDir)
+    const empty = chats.filter((c) => c.id !== keepId && c.title === 'New chat' && this.messages(projectDir, c.id).length === 0)
+    if (!empty.length) return
+    this.writeIndex(projectDir, chats.filter((c) => !empty.includes(c)))
+    for (const c of empty) if (existsSync(chatPath(projectDir, c.id))) rmSync(chatPath(projectDir, c.id))
   }
 
   create(projectDir: string): ChatMeta {

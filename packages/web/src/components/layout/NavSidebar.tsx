@@ -64,7 +64,8 @@ export function NavSidebar() {
           <SidebarGroupLabel>Recent projects</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {projects.length === 0 && <div className="px-2 py-1 text-xs text-muted-foreground/60">No projects yet.</div>}
+              {/* Distinguish "still connecting" from "truly none" — a slow connect must not read as data loss. */}
+              {projects.length === 0 && <div className="px-2 py-1 text-xs text-muted-foreground/60">{connected ? 'No projects yet.' : 'Connecting…'}</div>}
               {projects.slice(0, 12).map((p) => (
                 <SidebarMenuItem key={p.id}>
                   <SidebarMenuButton isActive={page === 'project' && activeId === p.id} onClick={() => openProjectPage(p.id)}>

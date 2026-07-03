@@ -28,11 +28,15 @@ interface UiState {
   page: Page
   pendingPrompt: string | null // a Home prompt waiting for its project to be created
   pendingSlug: string | null // a /project/<slug> URL awaiting the projects list to resolve it
+  slugNotFound: string | null // a /project/<slug> URL that failed to resolve (deleted/mistyped) → not-found view
   // connection + projects
   connected: boolean
+  serverInfo: { sandbox: boolean; model: string } | null // server capabilities greeting (Terminal gate, Settings)
   projects: ProjectInfo[]
   templates: TemplateInfo[]
   activeId: string | null
+  // every project's chats, for the Chats page (requested on demand)
+  allChats: { project: ProjectInfo; chats: ChatMeta[] }[]
   // transcript (per active project; cleared on open)
   items: Item[]
   streaming: Streaming | null
@@ -94,6 +98,8 @@ interface UiState {
   switchChat: (id: string) => void // M11: switch to a saved chat (loads its history)
   deleteChat: (id: string) => void // M11
   renameChat: (id: string, title: string) => void // M11
+  requestAllChats: () => void // the Chats page: ask for every project's chat list
+  openChat: (projectId: string, chatId: string) => void // the Chats page: open a project AND switch to a chat
   createProject: (name: string, templateId?: string) => void
   openProject: (id: string) => void
   deleteProject: (id: string) => void
@@ -193,25 +199,32 @@ export const useStore = create<UiState>((set, get) => {
       const param = decodeURIComponent(m[1])
       const p = resolveParam(param, get().projects)
       if (p) {
-        set({ page: 'project', pendingSlug: null })
+        set({ page: 'project', pendingSlug: null, slugNotFound: null })
         get().openProject(p.id) // sends `open`; doesn't push (URL already reflects it)
+      } else if (get().projects.length > 0) {
+        // The list is loaded and this slug matches nothing (deleted project / mistyped URL) — say so
+        // explicitly rather than silently rendering some other page at this URL.
+        set({ page: 'project', pendingSlug: null, slugNotFound: param, activeId: null })
       } else {
-        set({ page: 'project', pendingSlug: param }) // projects not loaded yet — resolve when they arrive
+        set({ page: 'project', pendingSlug: param, slugNotFound: null }) // projects not loaded yet — resolve when they arrive
       }
       return
     }
     const page: Page = path === '/projects' ? 'projects' : path === '/chats' ? 'chats' : path === '/settings' ? 'settings' : 'home'
-    set({ page, pendingSlug: null })
+    set({ page, pendingSlug: null, slugNotFound: null })
   }
 
   return {
     page: 'home',
     pendingPrompt: null,
     pendingSlug: null,
+    slugNotFound: null,
     connected: false,
+    serverInfo: null,
     projects: [],
     templates: [],
     activeId: null,
+    allChats: [],
     items: [],
     streaming: null,
     status: null,
@@ -246,7 +259,16 @@ export const useStore = create<UiState>((set, get) => {
     customizeOpen: false,
     send: () => {},
     setSend: (send) => set({ send }),
-    setConnected: (connected) => set({ connected }),
+    setConnected: (connected) => {
+      // A dropped socket killed every terminal shell server-side (ws close → killAllTerms). Drop the dead
+      // tabs (and their xterm sinks) so a reconnect starts fresh instead of showing blank zombie terminals.
+      if (!connected) {
+        terminalSinks.clear()
+        set({ connected, terminals: [], activeTerminalId: null })
+        return
+      }
+      set({ connected })
+    },
 
     handleEvent: (e) => {
       switch (e.type) {
@@ -331,6 +353,12 @@ export const useStore = create<UiState>((set, get) => {
           set({ status: null, recovering: null, busy: false, stepStartedAt: null, sawTokens: false })
           break
         // ── app/builder events (BuilderEvent) ──
+        case 'serverInfo':
+          set({ serverInfo: { sandbox: e.sandbox, model: e.model } })
+          break
+        case 'allChats':
+          set({ allChats: e.groups })
+          break
         case 'projects': {
           set({ projects: e.projects })
           // If we arrived on a /project/<slug> URL before the list loaded, resolve it now.
@@ -338,8 +366,11 @@ export const useStore = create<UiState>((set, get) => {
           if (page === 'project' && pendingSlug) {
             const p = resolveParam(pendingSlug, e.projects)
             if (p) {
-              set({ pendingSlug: null })
+              set({ pendingSlug: null, slugNotFound: null })
               get().openProject(p.id)
+            } else {
+              // The list has arrived and the slug matches nothing → an explicit not-found, not a silent home.
+              set({ pendingSlug: null, slugNotFound: pendingSlug })
             }
           } else if (e.activeId) set({ activeId: e.activeId })
           break
@@ -460,14 +491,21 @@ export const useStore = create<UiState>((set, get) => {
       }
     },
     navigate: (page) => {
-      set({ page, pendingSlug: null })
+      set({ page, pendingSlug: null, slugNotFound: null })
       pushUrl(pathForPage(page))
     },
     openProjectPage: (id) => {
       get().openProject(id)
-      set({ page: 'project', pendingSlug: null })
+      set({ page: 'project', pendingSlug: null, slugNotFound: null })
       const p = get().projects.find((x) => x.id === id)
       if (p) pushUrl(projectPath(p))
+    },
+    requestAllChats: () => get().send({ type: 'chats', action: 'listAll' }),
+    openChat: (projectId, chatId) => {
+      // Open the project first, then switch to the chat — same socket, ordered, so the server processes
+      // `open` (which attaches the session) before `chat switch`.
+      get().openProjectPage(projectId)
+      get().send({ type: 'chat', action: 'switch', id: chatId })
     },
     initRouter: () => {
       applyPath(location.pathname)

@@ -3,14 +3,15 @@
 // its size, never its mount position — so terminal sessions survive every layout change.
 
 import { useEffect, useRef, useState } from 'react'
+import { FolderX, Loader2 } from 'lucide-react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
 import { SidebarTrigger } from '@/components/ui/sidebar'
 import { ChatPanel } from '@/components/chat/ChatPanel'
 import { BuilderPane } from '@/components/builder/BuilderPane'
 import { BottomPanel } from '@/components/builder/BottomPanel'
-import { HomePage } from './HomePage'
 
 const Handle = () => (
   <Separator className="w-px shrink-0 cursor-col-resize bg-border transition-colors hover:bg-ring data-[state=dragging]:bg-ring" />
@@ -58,7 +59,7 @@ function BuilderArea() {
 }
 
 export function ProjectPage() {
-  const { activeId, projects, toggleBottom } = useStore()
+  const { activeId, projects, toggleBottom, slugNotFound, navigate } = useStore()
   const name = projects.find((p) => p.id === activeId)?.name
 
   // Ctrl+` toggles the bottom panel (VS Code's shortcut).
@@ -73,7 +74,34 @@ export function ProjectPage() {
     return () => window.removeEventListener('keydown', onKey)
   }, [toggleBottom])
 
-  if (!activeId) return <HomePage /> // safety: no project ⇒ fall back to the entry page
+  // The URL named a project that doesn't exist (deleted, or mistyped). Say so — never silently render some
+  // other page at this address (a stale bookmark would otherwise look like the app "forgot" the project).
+  if (!activeId && slugNotFound) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+        <FolderX className="h-8 w-8 text-muted-foreground/50" />
+        <div>
+          <p className="font-medium">Project not found</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            No project matches <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{slugNotFound}</code> — it may have been deleted.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={() => navigate('projects')}>View projects</Button>
+          <Button variant="ghost" onClick={() => navigate('home')}>Go home</Button>
+        </div>
+      </div>
+    )
+  }
+
+  // No active project yet (deep link still connecting / resolving) — a transient loading state.
+  if (!activeId) {
+    return (
+      <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Opening project…
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-full flex-col">

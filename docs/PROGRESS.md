@@ -47,10 +47,10 @@ Each lands as a runnable, tested checkpoint. (Preview/Terminal need the 13.3 san
 | ✅ | **Templates / scaffolding** | `ProjectManager.create` copies a Vite+React+Tailwind scaffold + `git init`; AI-rules via a generic core seam (ADR-025, `guide/phase-15.md`) |
 | ✅ | **File service** | read tree + file content over the protocol (host-side, guarded); ADR-026. *Write/save deferred (gated).* |
 | ✅ | **Live preview** | dev server in the per-project container + published port + iframe (ADR-027). *Proxy/stable-origin + Console logs are follow-ups.* |
-| 🔨 | **Integrated terminal** | xterm ↔ sandbox PTY over the protocol — **next** |
-| ⬜ | **Git checkpoints / restore** | commit each change-set; versions list + restore (baseline commit already lands at create) |
-| ⬜ | **Build-error auto-fix loop** | run checks in the sandbox; feed problems back |
-| ⬜ | **Persistence** | durable chats/versions; replay history on reattach |
+| ✅ | **Integrated terminal** | server handles terminal/terminalInput/terminalResize; xterm panes in the web store (M7) |
+| ✅ | **Git checkpoints / restore** | version/versions + restore over the protocol; store M6 wired |
+| ✅ | **Build-error auto-fix loop** | check → problems + fixProblems (M5.3) |
+| ✅ | **Persistence** | chats server-persisted (chat/allChats/chatHistory), multi-chat in store (M11) |
 | ⬜ | **Deploy / integrations** | GitHub / Vercel / Supabase (gated, optional) |
 
 ---
@@ -63,11 +63,11 @@ Each lands as a runnable, tested checkpoint. (Preview/Terminal need the 13.3 san
 | ✅ | **M4 Code** | FileTree + **Monaco** (read-only, self-hosted), refreshes on open + each turn (ADR-026) |
 | ✅ | **M3 Preview** | Run → install/start spinner → **iframe** + reload/stop toolbar (ADR-027) |
 | 🔨 | **M2 Activity cards** | ✅ **file-edit diff cards** (ADR-028); AddDependency / changeSet / MCP cards remain |
-| ⬜ | **M5 Console/Problems** | dev-server logs + problems + "Fix all" |
-| ⬜ | **M6 Versions** | checkpoint list + diff + restore |
-| ⬜ | **M7 Terminal** | xterm pane |
+| ✅ | **M5 Console/Problems** | logs + problems + fix-all wired in store/protocol |
+| ✅ | **M6 Versions** | versions list + restore wired |
+| ✅ | **M7 Terminal** | xterm panes + PTY protocol |
 | ⬜ | **M8 Settings** | model/provider, tools/MCP, switches |
-| ⬜ | **M9 Visual editing** | click-to-edit over the preview |
+| ✅ | **M9 Visual editing** | select-mode + editText/setClass + AI-edit prefill |
 | ⬜ | **M10 Integrations/Deploy** | publish panels |
 | ⬜ | **M11 Theming/polish** | custom themes, command palette, attachments, multi-chat |
 
@@ -96,6 +96,5 @@ Making the engine best-in-class across **all** model sizes (multi-provider), not
 **Verified:** `@cascade/core` typechecks; **101 tests pass** (1 skipped) incl. per-layer + golden no-regression;
 extension + web packages typecheck.
 
-> **ADR numbering (resolved):** ADR-038 = model-capability profile, ADR-039 = plan-driven compactor (both
 > shipped). A2 (compaction) now points to ADR-039; A7 (cost accounting) reservation moved to ADR-040 to avoid
 > the clash. Files stay as-is (no renames — they're cross-referenced by code + tests).

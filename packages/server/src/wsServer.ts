@@ -90,6 +90,7 @@ export function handleConnection(
   previewPort?: number,
   versions?: VersionManager,
   chatStore?: ChatStore,
+  serverInfo?: { sandbox: boolean; model: string },
 ): void {
   const send = (msg: unknown) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg))
@@ -124,7 +125,9 @@ export function handleConnection(
     stopTail = preview.tail(id, sandbox, (line) => send({ type: 'log', line }))
   }
 
-  // Greet the new connection with the project list + available templates so the UI can render immediately.
+  // Greet the new connection with capabilities + the project list + available templates so the UI can render
+  // immediately (serverInfo drives the Terminal's Docker gate and the Settings page).
+  if (serverInfo) send({ type: 'serverInfo', ...serverInfo })
   send({ type: 'projects', projects: manager.list(), activeId })
   send({ type: 'templates', templates: listTemplates() })
 
@@ -140,10 +143,11 @@ export function handleConnection(
     if (dir && versions) send({ type: 'versions', versions: versions.list(dir) })
   }
 
-  // M11: send the active project's chat list (the active chat highlighted).
+  // M11: send the active project's chat list (the active chat highlighted). list() prunes abandoned empty
+  // "New chat" entries — the ACTIVE chat is exempt (it may be empty right now, mid-composition).
   const sendChats = () => {
     const dir = activeId && manager.dirOf(activeId)
-    if (dir && chatStore && activeChatId) send({ type: 'chats', chats: chatStore.list(dir), activeId: activeChatId })
+    if (dir && chatStore && activeChatId) send({ type: 'chats', chats: chatStore.list(dir, activeChatId), activeId: activeChatId })
   }
   // M11: load a chat's saved conversation into the active session and send its transcript to render.
   const loadChat = (id: string) => {
@@ -319,6 +323,11 @@ export function handleConnection(
           if (!dir || !chatStore || !active) break
           if (msg.action === 'list') sendChats()
           else if (msg.action === 'new') {
+            // Already sitting on an empty chat? Reuse it — don't mint another "New chat" (they'd accumulate).
+            if (activeChatId && active.getHistory().length === 0) {
+              sendChats()
+              break
+            }
             saveChat() // snapshot the current chat before starting a fresh one
             active.reset()
             loadChat(chatStore.create(dir).id)
@@ -335,6 +344,18 @@ export function handleConnection(
           }
           break
         }
+        case 'chats': { // the Chats page: every project's chat list (read-only — never creates/prunes)
+          if (!chatStore) break
+          const groups = manager
+            .list()
+            .map((project) => {
+              const dir = manager.dirOf(project.id)
+              return { project, chats: dir ? chatStore.peek(dir) : [] }
+            })
+            .filter((g) => g.chats.length > 0)
+          send({ type: 'allChats', groups })
+          break
+        }
         case 'terminal': { // M7: open/close an interactive shell (one of possibly several sessions)
           if (!activeId) break
           if (msg.action === 'stop') {
@@ -343,7 +364,12 @@ export function handleConnection(
             break
           }
           const sandbox = manager.sandboxOf(activeId)
-          if (!(sandbox instanceof DockerSandbox)) break
+          if (!(sandbox instanceof DockerSandbox)) {
+            // No Docker ⇒ no shell to attach. Tell the client so the tab shows "exited" instead of a blank
+            // xterm forever (the UI also disables New terminal when serverInfo.sandbox is false).
+            send({ type: 'terminalExit', id: msg.id })
+            break
+          }
           terms.get(msg.id)?.kill() // replace if this id already had a shell
           const containerId = await sandbox.getContainerId()
           const sid = msg.id
@@ -467,7 +493,7 @@ async function start() {
   // WS upgrade's Origin + token (see handleHttp / verifyWsClient).
   const httpServer = createServer(handleHttp)
   const wss = new WebSocketServer({ server: httpServer, verifyClient: verifyWsClient })
-  wss.on('connection', (ws) => handleConnection(ws, manager, preview, previewProxy, PREVIEW_PORT, versions, chatStore))
+  wss.on('connection', (ws) => handleConnection(ws, manager, preview, previewProxy, PREVIEW_PORT, versions, chatStore, { sandbox: hasDocker, model: MODEL }))
   httpServer.listen(PORT, HOST)
   // Graceful exit (Ctrl-C / SIGTERM): dispose sessions + remove this run's sandbox containers. (A hard
   // SIGKILL skips this — the startup sweep above is the backstop.)

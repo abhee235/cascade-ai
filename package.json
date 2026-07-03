@@ -16,7 +16,8 @@
     "eval": "tsx scripts/eval/run.mts",
     "eval:report": "tsx scripts/eval/report.mts",
     "eval:verify-fixtures": "node eval/verify-fixtures.mjs",
-    "eval:convert-polyglot": "tsx scripts/eval/convert-polyglot.mts"
+    "eval:convert-polyglot": "tsx scripts/eval/convert-polyglot.mts",
+    "eval:builder": "tsx scripts/eval/builder.mts"
   },
   "engines": {
     "node": ">=18"
