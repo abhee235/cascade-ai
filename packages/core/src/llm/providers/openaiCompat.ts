@@ -7,6 +7,7 @@
 
 import type { ContentBlock, Message } from '../../protocol'
 import type { CompletionRequest, CompletionResult, ModelProvider, StreamEvent, TokenUsage } from '../provider'
+import { extractProseToolCalls } from '../proseToolCalls'
 
 interface OpenAIToolCall {
   id: string
@@ -197,6 +198,7 @@ export class OpenAICompatProvider implements ModelProvider {
     let buffer = ''
     let stopReason: 'end_turn' | 'max_tokens' | 'tool_use' = 'end_turn'
     let usage: TokenUsage | undefined // E1: filled by the final chunk when stream_options.include_usage is honoured
+    let fullText = '' // ADR-047: accumulated so the prose fallback can rescue text-channel tool calls at end
     // Tool calls stream as fragments of a JSON string, keyed by index — accumulate, parse ONCE at end.
     const toolCalls = new Map<number, { id: string; name: string; args: string }>()
 
@@ -221,7 +223,10 @@ export class OpenAICompatProvider implements ModelProvider {
         const choice = chunk.choices?.[0]
         const delta = choice?.delta
         if (delta?.reasoning) yield { type: 'thinking_delta', thinking: delta.reasoning }
-        if (delta?.content) yield { type: 'text_delta', text: delta.content }
+        if (delta?.content) {
+          fullText += delta.content
+          yield { type: 'text_delta', text: delta.content }
+        }
         if (Array.isArray(delta?.tool_calls)) {
           for (const tc of delta.tool_calls) {
             const idx: number = tc.index ?? 0
@@ -251,6 +256,16 @@ export class OpenAICompatProvider implements ModelProvider {
       }
       yield { type: 'tool_use', id: c.id || `call_${idx}`, name: c.name, input }
     }
+    // ADR-047: prose fallback — ONLY when the native channel produced nothing. Weak models (llama3.2:3b,
+    // measured 0/10 for exactly this) write their calls as ```json text; rescue the FIRST advertised-tool
+    // match so the loop continues ReAct-style instead of treating the turn as a final answer.
+    if (toolCalls.size === 0 && req.tools?.length) {
+      const prose = extractProseToolCalls(fullText, req.tools.map((t) => t.name))
+      if (prose.length > 0) {
+        stopReason = 'tool_use'
+        yield { type: 'tool_use', id: 'prose_0', name: prose[0].name, input: prose[0].input }
+      }
+    }
     yield { type: 'done', stopReason, usage }
   }
 
@@ -269,7 +284,9 @@ export class OpenAICompatProvider implements ModelProvider {
     let buffer = ''
     let stopReason: 'end_turn' | 'max_tokens' | 'tool_use' = 'end_turn'
     let usage: TokenUsage | undefined // E1: the final done:true object carries prompt_eval_count/eval_count
+    let fullText = '' // ADR-047: accumulated for the prose fallback
     let toolIdx = 0
+    let nativeCalls = 0
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
@@ -287,10 +304,14 @@ export class OpenAICompatProvider implements ModelProvider {
         }
         const m = obj.message
         if (m?.thinking) yield { type: 'thinking_delta', thinking: m.thinking }
-        if (m?.content) yield { type: 'text_delta', text: m.content }
+        if (m?.content) {
+          fullText += m.content
+          yield { type: 'text_delta', text: m.content }
+        }
         if (Array.isArray(m?.tool_calls)) {
           for (const tc of m.tool_calls) {
             stopReason = 'tool_use'
+            nativeCalls++
             yield { type: 'tool_use', id: tc.id || `call_${toolIdx++}`, name: tc.function?.name ?? '', input: tc.function?.arguments ?? {} }
           }
         }
@@ -300,6 +321,14 @@ export class OpenAICompatProvider implements ModelProvider {
             usage = { inputTokens: obj.prompt_eval_count, outputTokens: obj.eval_count }
           }
         }
+      }
+    }
+    // ADR-047: same prose fallback as the /v1 path (see stream() for the rationale).
+    if (nativeCalls === 0 && req.tools?.length) {
+      const prose = extractProseToolCalls(fullText, req.tools.map((t) => t.name))
+      if (prose.length > 0) {
+        stopReason = 'tool_use'
+        yield { type: 'tool_use', id: 'prose_0', name: prose[0].name, input: prose[0].input }
       }
     }
     yield { type: 'done', stopReason, usage }
