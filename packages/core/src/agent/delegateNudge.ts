@@ -33,12 +33,16 @@ export function sawSubagent(toolUses: ToolUse[]): boolean {
 	return toolUses.some((tu) => tu.name === 'Subagent')
 }
 
-/** The reminder text — appended to the trailing user (tool_results) message, ADR-034 style. */
+/** The reminder text — appended to the trailing user (tool_results) message, ADR-034 style.
+ *  MUST end by re-anchoring to the task: measured (item4-gate, longctx-wire-modules), a weak model whose
+ *  reads were just compacted away ANSWERED this reminder conversationally ("Acknowledged — what would you
+ *  like me to work on?") and ended its turn — the reminder was the last instruction-shaped text it saw. */
 export function buildDelegateNudgeText(): string {
 	return (
 		'<system-reminder>A large share of your context window has gone to bulk file reads. For the REMAINING ' +
 		"files or searches, use the Subagent tool instead of reading them yourself: one 'explore' subagent per " +
 		'file/area with a precise question (e.g. "Find the registerPart call in src/vault/part3.js; report only ' +
-		'that line"). Only the findings will enter your context.</system-reminder>'
+		'that line"). Only the findings will enter your context. This is a background note, NOT a new request: ' +
+		'do not reply to it or stop to acknowledge it — continue working on the ORIGINAL task now, using tools.</system-reminder>'
 	)
 }

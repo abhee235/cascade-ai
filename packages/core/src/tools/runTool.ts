@@ -5,8 +5,9 @@
 // (isError:true), never thrown — so the model sees what went wrong and can self-correct (Phase 5 idea).
 
 import type { ContentBlock } from '../protocol'
+import { RAW_ARGS_KEY } from '../llm/jsonRepair'
 import type { ToolContext } from './Tool'
-import { describeInvalidInput, normalizeInput } from './inputNormalizer'
+import { describeInvalidInput, normalizeInput, schemaKeys } from './inputNormalizer'
 import { defaultRegistry } from './toolRegistry'
 
 export interface ToolUse {
@@ -29,6 +30,19 @@ export async function executeTool(
 
   const tool = (ctx.registry ?? defaultRegistry).find(toolUse.name)
   if (!tool) return err(`No such tool: ${toolUse.name}`)
+
+  // Item 4a: the provider could not parse the arguments as JSON at all (repair ladder exhausted). Say THAT —
+  // schema-validating the sentinel would produce "missing required file_path", a lie pointing away from the
+  // model's actual mistake (its own JSON syntax). Echo what it sent so the retry has something to fix.
+  const rawArgs = (toolUse.input as Record<string, unknown> | null)?.[RAW_ARGS_KEY]
+  if (typeof rawArgs === 'string') {
+    const keys = tool.inputSchema ? schemaKeys(tool.inputSchema) : null
+    return err(
+      `${toolUse.name} was called with MALFORMED arguments — not valid JSON, and not mechanically repairable. ` +
+        `You sent: ${rawArgs.slice(0, 300)}${rawArgs.length > 300 ? '…' : ''}. ` +
+        `Call ${toolUse.name} again with ONE valid JSON object${keys ? ` using these keys: ${keys.join(', ')}` : ''}.`,
+    )
+  }
 
   // Builtins validate with Zod (and feed errors back so the model self-corrects). MCP tools have no Zod
   // schema — the server validates — so we forward the args as-is.

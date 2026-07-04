@@ -266,7 +266,20 @@ export async function compactIfNeeded(
       const olderTokens = estimateTokens(older)
       const expectedSummary = Math.min(EXPECTED_SUMMARY_TOKENS, Math.floor(plan.window / 16)) // scale down for tiny windows
       const canHelp = estimateTokens(working) + overhead - olderTokens + expectedSummary < plan.auto
-      if (survival || canHelp) {
+      // PRE-GATE (measured, json-repair-gate): with overhead counted, small-window usage hovers just over
+      // `auto` late in a task, and every turn paid a summarize SIDE-QUERY (60–120s each on a local model —
+      // two tasks timed out seconds from success). Worse, on a tiny older region the wrapper (task +
+      // instruction + summary) can be BIGGER than what it replaces (observed: 2,114 → 2,797). Only spend the
+      // LLM call when the older region is big enough to plausibly reclaim several times the wrapper cost.
+      // `force` bypasses worth-it: the backend REJECTED the prompt, so even a marginal shrink helps (and the
+      // monotonicity guard below still protects against a net-negative swap). WIRE SAFETY (measured,
+      // item4-gate-2 delegate-prose): when the cheap layers reclaimed nothing (small results, old markers)
+      // and the estimate is STILL over the ceiling, proceeding means silent front-truncation — Ollama never
+      // errors, so the reactive-force path can't catch it (the fatal call showed input 8,159 + output 33 =
+      // exactly 8,192). Over the ceiling, summarize is mandatory, worth-it or not.
+      const stillOverCeiling = estimateTokens(working) + overhead >= ceiling
+      const worthIt = force || stillOverCeiling || olderTokens >= expectedSummary * 3
+      if ((survival || canHelp) && worthIt) {
         if (deps.onDiscard) await deps.onDiscard(older)
         const summary = await summarize(older, deps.provider, deps.model, deps.signal)
         // The ORIGINAL TASK and the LATEST USER INSTRUCTION ride along VERBATIM — never entrusted to the
@@ -285,7 +298,11 @@ export async function compactIfNeeded(
             .filter(Boolean)
             .join('\n\n'),
         }
-        return { messages: [summaryMsg, ...recent], kind: 'summarized' }
+        // MONOTONICITY GUARD: a summarize that doesn't SHRINK the history is pure loss (context destroyed,
+        // side-query paid, tokens up). If the model wrote a long summary, keep `working` instead.
+        const swapped = [summaryMsg, ...recent]
+        if (estimateTokens(swapped) >= estimateTokens(working)) return { messages: working, kind }
+        return { messages: swapped, kind: 'summarized' }
       }
     }
   }

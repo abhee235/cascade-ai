@@ -16,7 +16,7 @@ import type { Tool } from '../Tool'
 import { lineDiff } from '../../utils/diff'
 import { normalizeText } from '../fileState'
 import { displayPath, ProjectPathError, resolveInProject } from '../projectPath'
-import { readFreshnessError, refreshReadState } from '../editCore'
+import { findEditTarget, readFreshnessError, refreshReadState } from '../editCore'
 
 const editSchema = z.object({
   old_string: z.string().min(1).describe('Exact text to replace — must match the file EXACTLY at this point in the sequence.'),
@@ -66,18 +66,25 @@ export const MultiEditTool: Tool<z.infer<typeof inputSchema>> = {
           return { content: `${label}: old_string is a substring of an earlier edit's new_string — it would match text you just inserted. Reorder or combine the edits.`, isError: true }
         }
 
-        const count = working.split(edit.old_string).length - 1
-        if (count === 0) {
-          return { content: `${label}: old_string not found${appliedNewStrings.length ? ' (after the earlier edits were applied)' : ''}. It must match the current file exactly.`, isError: true }
+        if (edit.replace_all) {
+          // replace_all stays EXACT-only: whitespace-tolerant matching of every occurrence is how a rename
+          // silently rewrites lines the model never saw. Fuzziness is for the single-target case.
+          const count = working.split(edit.old_string).length - 1
+          if (count === 0) {
+            return { content: `${label}: old_string not found${appliedNewStrings.length ? ' (after the earlier edits were applied)' : ''}. It must match the current file exactly.`, isError: true }
+          }
+          // Function replacer ⇒ `$`-sequences in new_string are inserted literally (not interpreted as $1/$&).
+          working = working.replaceAll(edit.old_string, () => edit.new_string)
+          appliedNewStrings.push(edit.new_string)
+        } else {
+          // Item 4b: exact → line-trimmed UNIQUE match (file's own bytes; indent remapped). Shared with Edit.
+          const target = findEditTarget(working, edit.old_string, edit.new_string)
+          if (!target.ok) {
+            return { content: `${label}: ${target.message}${target.reason === 'not-found' && appliedNewStrings.length ? ' (note: earlier edits in this batch were already applied)' : ''}`, isError: true }
+          }
+          working = working.replace(target.actual, () => target.newString)
+          appliedNewStrings.push(target.newString)
         }
-        if (!edit.replace_all && count > 1) {
-          return { content: `${label}: old_string appears ${count}× — make it unique (add surrounding context) or set replace_all: true.`, isError: true }
-        }
-        // Function replacer ⇒ `$`-sequences in new_string are inserted literally (not interpreted as $1/$&).
-        working = edit.replace_all
-          ? working.replaceAll(edit.old_string, () => edit.new_string)
-          : working.replace(edit.old_string, () => edit.new_string)
-        appliedNewStrings.push(edit.new_string)
       }
 
       if (working === original) return { content: `No change: the edits left ${input.file_path} identical.`, isError: true }

@@ -8,6 +8,7 @@
 import type { ContentBlock, Message } from '../../protocol'
 import type { CompletionRequest, CompletionResult, ModelProvider, StreamEvent, TokenUsage } from '../provider'
 import { extractProseToolCalls } from '../proseToolCalls'
+import { parseToolArgs } from '../jsonRepair'
 
 interface OpenAIToolCall {
   id: string
@@ -251,15 +252,12 @@ export class OpenAICompatProvider implements ModelProvider {
       }
     }
 
-    // Emit each accumulated tool call as a complete tool_use (parse the JSON args once).
+    // Emit each accumulated tool call as a complete tool_use. parseToolArgs repairs almost-JSON (trailing
+    // commas, quotes, truncation) and carries UNREPAIRABLE args through as { __rawArgs } so runTool can tell
+    // the model what it actually sent — the old `catch { input = {} }` produced "missing required file_path"
+    // lies that weak models retried verbatim (item 4a / ADR-048).
     for (const [idx, c] of toolCalls) {
-      let input: unknown = {}
-      try {
-        input = c.args ? JSON.parse(c.args) : {}
-      } catch {
-        input = {}
-      }
-      yield { type: 'tool_use', id: c.id || `call_${idx}`, name: c.name, input }
+      yield { type: 'tool_use', id: c.id || `call_${idx}`, name: c.name, input: parseToolArgs(c.args).input }
     }
     // ADR-047: prose fallback — ONLY when the native channel produced nothing. Weak models (llama3.2:3b,
     // measured 0/10 for exactly this) write their calls as ```json text; rescue the FIRST advertised-tool
@@ -321,7 +319,9 @@ export class OpenAICompatProvider implements ModelProvider {
           for (const tc of m.tool_calls) {
             stopReason = 'tool_use'
             nativeCalls++
-            yield { type: 'tool_use', id: tc.id || `call_${toolIdx++}`, name: tc.function?.name ?? '', input: tc.function?.arguments ?? {} }
+            // Usually an object already; some model templates deliver a STRING (occasionally malformed) —
+            // parseToolArgs repairs or carries it honestly (item 4a).
+            yield { type: 'tool_use', id: tc.id || `call_${toolIdx++}`, name: tc.function?.name ?? '', input: parseToolArgs(tc.function?.arguments).input }
           }
         }
         if (obj.done) {

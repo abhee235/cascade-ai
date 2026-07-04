@@ -7,7 +7,7 @@ import type { Tool } from '../Tool'
 import { lineDiff } from '../../utils/diff'
 import { normalizeText } from '../fileState'
 import { displayPath, ProjectPathError, resolveInProject } from '../projectPath'
-import { readFreshnessError, refreshReadState } from '../editCore'
+import { findEditTarget, readFreshnessError, refreshReadState } from '../editCore'
 
 const inputSchema = z.object({
   file_path: z.string().describe('Path to the file to edit, relative to the workspace or absolute.'),
@@ -41,19 +41,15 @@ export const EditTool: Tool<z.infer<typeof inputSchema>> = {
       const stale = await readFreshnessError(fs, path, input.file_path, content)
       if (stale) return { content: stale, isError: true }
 
-      const count = content.split(input.old_string).length - 1
-      // Uniqueness check → self-correction: tell the model to fix its old_string.
-      if (count === 0) return { content: `old_string not found in ${input.file_path}.`, isError: true }
-      if (count > 1)
-        return {
-          content: `old_string appears ${count}× in ${input.file_path}; it must be unique. Include surrounding context.`,
-          isError: true,
-        }
-      const after = content.replace(input.old_string, () => input.new_string) // fn replacer ⇒ `$` in new_string stays literal
+      // Item 4b: exact match first; on zero hits, a line-trimmed UNIQUE match that replaces the FILE's own
+      // bytes and remaps new_string's indentation (weak models retype tabs/indent wrong — edit_mismatch class).
+      const target = findEditTarget(content, input.old_string, input.new_string)
+      if (!target.ok) return { content: `${target.message} (file: ${input.file_path})`, isError: true }
+      const after = content.replace(target.actual, () => target.newString) // fn replacer ⇒ `$` in new_string stays literal
       await writeFile(path, after, 'utf8')
       await refreshReadState(fs, path, after)
       return {
-        content: `Edited ${input.file_path} (1 replacement).`,
+        content: `Edited ${input.file_path} (1 replacement${target.via === 'trimmed' ? '; old_string matched with whitespace tolerance — indentation was taken from the file' : ''}).`,
         display: { kind: 'fileEdit', path: displayPath(ctx.cwd, path), op: 'edit', diff: lineDiff(content, after) }, // ADR-033: project-relative
       }
     } catch (e) {

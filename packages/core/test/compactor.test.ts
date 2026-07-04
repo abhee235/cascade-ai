@@ -143,9 +143,10 @@ describe('compactor — compactIfNeeded (plan-driven, ADR-039)', () => {
   })
 
   it('force: compacts even under the threshold (reactive overflow path)', async () => {
-    // Well under auto=80, but force should still summarize the older half.
+    // Force should summarize the older half regardless of `auto` — with enough older mass that the swap
+    // genuinely shrinks (the monotonicity guard rightly rejects a wrapper bigger than a toy older region).
     const msgs: Message[] = [
-      ...Array.from({ length: 4 }, (_, i) => ({ role: 'user' as const, content: `old ${i} ${'x'.repeat(36)}` })),
+      ...Array.from({ length: 4 }, (_, i) => ({ role: 'user' as const, content: `old ${i} ${'x'.repeat(180)}` })),
       { role: 'user', content: `latest ${'w'.repeat(36)}` },
     ]
     const provider = createFakeProvider([[textDelta('FORCED SUMMARY')]])
@@ -218,6 +219,56 @@ describe('compactor — recency shield (live-incident regression)', () => {
     const { messages, kind } = await compactIfNeeded(msgs, { provider, model: 'fake', plan: plan8k, overheadTokens: 4000 })
     expect(kind).not.toBe('none') // …but WITH real overhead the same history must be reclaimed
     expect(estimateTokens(messages) + 4000).toBeLessThan(8192) // and the wire prompt now fits the window
+  })
+
+  it('summarize is SKIPPED when the older region is too small to pay for the side-query', async () => {
+    // Measured (json-repair-gate): late-game usage hovers just over auto (overhead counted), and every turn
+    // paid a 60–120s summarize side-query — sometimes NET-NEGATIVE (wrapper > older; observed 2,114→2,797).
+    // Two tasks timed out seconds from success. Tiny older ⇒ no LLM call at all.
+    const msgs: Message[] = [
+      { role: 'user', content: 'small task' }, // tiny older region
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'r1', name: 'Read', input: { file_path: 'a.md' } }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'r1', content: `x`.repeat(9000) }] }, // shielded
+    ]
+    const provider = createFakeProvider([]) // any summarize attempt would throw (no scripted turns)
+    const overhead = 3500 // pushes past auto with a tiny older region
+    const { kind } = await compactIfNeeded(msgs, { provider, model: 'fake', plan: plan8k, overheadTokens: overhead })
+    expect(provider.calls.length).toBe(0) // the side-query was never spent
+    expect(kind).not.toBe('summarized')
+  })
+
+  it('over the CEILING with nothing cheap left, summarize is MANDATORY (silent-truncation safety)', async () => {
+    // Measured (item4-gate-2, delegate-prose): cheap layers reclaimed nothing (small results, old markers),
+    // the worth-it pre-gate blocked summarize, and the loop proceeded over the ceiling — Ollama silently
+    // front-truncated (input 8,159 + output 33 = exactly 8,192) and the model died with 33 tokens of room.
+    const msgs: Message[] = [
+      { role: 'user', content: 'the task' },
+      // Text-heavy older region: only summarize can reclaim assistant text.
+      ...Array.from({ length: 3 }, (_, i) => ({
+        role: 'assistant' as const,
+        content: [{ type: 'text' as const, text: `analysis ${i} ${'y'.repeat(1600)}` }],
+      })),
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'r9', name: 'Read', input: { file_path: 'z.md' } }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'r9', content: 'z'.repeat(12000) }] }, // shielded last read
+    ]
+    const provider = createFakeProvider([[textDelta('COMPRESSED ANALYSIS')]])
+    const { messages, kind } = await compactIfNeeded(msgs, { provider, model: 'fake', plan: plan8k, overheadTokens: 3000 })
+    expect(kind).toBe('summarized') // worth-it was bypassed: over the ceiling there is no soft option
+    expect(provider.calls.length).toBe(1)
+    expect(estimateTokens(messages)).toBeLessThan(estimateTokens(msgs)) // and it genuinely shrank
+  })
+
+  it('a summarize that does not SHRINK the history is discarded (monotonicity guard)', async () => {
+    const older: Message[] = Array.from({ length: 8 }, (_, i) => ({ role: 'user' as const, content: `old ${i} ${'x'.repeat(36)}` }))
+    const recent: Message[] = [
+      { role: 'assistant', content: [{ type: 'text', text: `r ${'z'.repeat(36)}` }] },
+      { role: 'user', content: `latest ${'w'.repeat(36)}` },
+    ]
+    // The fake model writes a summary far LARGER than the older region it replaces.
+    const provider = createFakeProvider([[textDelta('B'.repeat(4000))]])
+    const { messages, kind } = await compactIfNeeded([...older, ...recent], { provider, model: 'fake', plan }, { force: true })
+    expect(kind).not.toBe('summarized') // swap discarded — history may never GROW from compaction
+    expect(messages.some((m) => String(m.content).includes('old 0'))) // original older still present
   })
 
   it('force (reactive overflow) still reclaims: shield shrinks to the very last result', async () => {

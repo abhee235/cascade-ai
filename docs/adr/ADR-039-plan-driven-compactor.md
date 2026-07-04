@@ -159,6 +159,13 @@ Two rules were added ([compactor.ts] / compactionLayers.ts, regression-tested ag
    schema JSON chars, /4, + template pad) and every threshold compares `estimate(messages) + overhead`; the
    survival ceiling is `min(hard, effectiveWindow)` so the output reserve is honored on backends where
    `num_ctx` covers prompt AND output together (large windows unaffected — `hard < effectiveWindow` there).
+6. **Summarize economics** (fifth incident, json-repair-gate): with overhead counted, small-window usage
+   hovers just over `auto` late in a task — and every turn paid a summarize SIDE-QUERY (60–120s each on a
+   local model; two tasks timed out seconds from success), sometimes NET-NEGATIVE (the preservation wrapper
+   outweighed a tiny older region: observed 2,114 → 2,797). Two guards: a **pre-gate** (spend the LLM call
+   only when the older region ≥ 3× the expected wrapper; `force` bypasses — a wire rejection is worth any
+   shrink) and a **monotonicity guard** (a swap that doesn't SHRINK the estimate is discarded — compaction
+   may never grow history).
 
 ## Follow-ups
 

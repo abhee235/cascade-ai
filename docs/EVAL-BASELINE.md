@@ -166,3 +166,32 @@ wire overhead (system + tool schemas + template) counted in every threshold.
 wall of `[output masked — N chars elided]` stubs that name neither the target nor the recovery path, and
 answers "I'm ready to help" as if nothing happened. The stub should self-describe (tool + target + how to
 recover), and this fixture family is the ADR-050 delegation story anyway.
+
+## Rung 6 — item 4 (arg honesty + edit tolerance) and the summarize-economics fallout (2026-07-04)
+
+Item 4 itself (ADR-048 addendum): JSON repair ladder + `__rawArgs` honest sentinel (4a), whitespace-tolerant
+Edit/MultiEdit matching (4b). The 3B probe (`json-repair-3b`) showed NO class flip — its surviving
+`invalid_args` are wrong-key schema errors, and its dominant class is **false_done despite the ADR-049
+nudge** (the weak tier's next measured rung). The gates then exposed three more small-window defects, each
+traced and locked (ADR-039 addendum rules 6+):
+
+- **Summarize economics**: usage hovering just over `auto` paid a 60–120s side-query per turn — two tasks
+  timed out SECONDS from success; one swap was net-negative (2,114 → 2,797). → worth-it pre-gate +
+  monotonicity guard.
+- **Nudge anchoring**: after a survival wipe, the delegation reminder was the last instruction-shaped text,
+  and the model ANSWERED it ("Acknowledged — what would you like me to work on?") instead of the task. →
+  reminders end by re-anchoring to the original task. `delegate-scatter` passed for the FIRST time ever on
+  this fix (then reverted to marginal — its real cure is self-describing stubs).
+- **Silent-truncation safety**: cheap layers reclaimed nothing, worth-it blocked summarize, the loop
+  proceeded over the ceiling — wire showed `input 8,159 + output 33 = exactly 8,192`. → over the ceiling,
+  summarize is mandatory.
+
+**Verification (final build):** marginal trio at N=3 — `longctx-wire-modules` **3/3**, `delegate-prose`
+**3/3**, `longctx-changelog-version` 1/3. Full gate `item4-gate-3`: **11/12, all 10 baseline tasks pass, 0
+regressions, exit 0.**
+
+**Finding — the honest window costs wall clock:** changelog's successful honest-8k runs take ~570s against
+a 600s task budget (baseline's 67s came from the pre-enforcement build silently planning against 32k). Its
+failures are now TIME, not confusion (t1 timed out mid-grind, still working correctly). The budget was
+calibrated for the cheating era; recalibrating it (or a compaction-latency rung, e.g. cheaper summaries) is
+a review-point decision.
