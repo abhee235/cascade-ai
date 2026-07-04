@@ -49,6 +49,8 @@ export interface ToolContext {
   /** ADR-043: the round-trip channel for AskUserQuestion — the scheduler yields a `question` event and awaits
    *  this. Omit ⇒ no interactive channel (headless / non-interactive), and the tool returns a clear error. */
   ask?: AskController
+  /** ADR-036: project hook config (.cascade/hooks.json), loaded once by the session. Absent = no hooks. */
+  hooks?: import('../hooks/hookRunner').HooksConfig
   /** Phase 12: delegate a subtask to a nested agent loop (own context + tool subset) → returns its final
    *  text. Injected by the loop (avoids an import cycle); absent at/over the depth cap. */
   spawnSubagent?(opts: { prompt: string; readOnly?: boolean }): Promise<string>

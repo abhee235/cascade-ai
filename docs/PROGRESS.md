@@ -90,6 +90,7 @@ Making the engine best-in-class across **all** model sizes (multi-provider), not
 | ✅ | **Filesystem confinement** — every file tool jailed to the project root | ADR-033 |
 | ✅ | **Durable todo checklist + drift reminder** | ADR-034 |
 | ✅ | **Model-capability profile → adaptive budgets** — one algorithm adapts by window/output caps | ADR-038 |
+| ✅ | **Tool hooks** — user-owned deterministic guards (.cascade/hooks.json, common hook wire protocol: exit-2 blocks, JSON decisions, PostToolUse feedback) | ADR-036 |
 | ✅ | **Plan-driven layered compactor** — 5 layers (collapse→mask→microcompact→snip→summarize), big-window path = late absolute thresholds (golden-tested, no regression), reclaims tool *inputs* too | ADR-039 |
 | ⬜ | Streaming tool execution · deeper recovery (token escalation) · input-aware permissions + hooks · prompt/context engineering · cost accounting | A1/A3/A5/A6/A7 |
 

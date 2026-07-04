@@ -11,6 +11,7 @@ import { defaultRegistry, type ToolRegistry } from './toolRegistry'
 import { executeTool, type ToolUse } from './runTool'
 import { checkPermission } from '../permissions/gate'
 import { formatAnswers } from './builtins/AskUserQuestion'
+import { runHooks } from '../hooks/hookRunner'
 import { NoopTracer } from '../observability/tracer'
 
 function isSafe(tu: ToolUse, registry: ToolRegistry): boolean {
@@ -75,6 +76,19 @@ function planDeniedBlock(id: string): ContentBlock {
   }
 }
 
+/** ADR-036: a tool blocked by a PROJECT HOOK — the user's own deterministic guard. The hook's stderr/reason
+ *  is the model-visible explanation (hook feedback counts as the user's own word). */
+function hookDeniedBlock(id: string, reason?: string): ContentBlock {
+  return {
+    type: 'tool_result',
+    tool_use_id: id,
+    content:
+      `A project hook blocked this tool call: ${reason ?? 'no reason given'}. ` +
+      'This is a deliberate project rule, not a transient error — do not retry the same call; adjust your approach to respect the rule.',
+    isError: true,
+  }
+}
+
 /** Yields toolStart/permission/toolResult activity; returns the tool_result blocks in original order.
  *  Phase 7: each tool passes through checkPermission BEFORE it runs. 'allow' → run; 'deny' → error result,
  *  no execution; 'ask' → yield a `permission` event and AWAIT the user (this is what blocks the loop). */
@@ -112,6 +126,25 @@ export async function* scheduleTools(
       }
 
       let decision = tool && perm ? checkPermission(tool, tu.input, perm.state) : 'allow'
+
+      // ── ADR-036: PreToolUse hooks — the USER's deterministic guards, run after the rule check and
+      //    before the prompt. deny → blocked with the hook's reason (model-visible);
+      //    allow → skip the ask; ask → force the prompt. Hook errors are fail-open (no opinion). ──
+      if (ctx.hooks && decision !== 'deny') {
+        const t0 = Date.now()
+        const hook = await runHooks({ event: 'PreToolUse', config: ctx.hooks, cwd: ctx.cwd, toolName: tu.name, toolInput: tu.input })
+        if (hook.decision) {
+          tracer.event({ t: 'hook', event: 'PreToolUse', id: tu.id, tool: tu.name, decision: hook.decision, ms: Date.now() - t0 })
+          if (hook.decision === 'deny') {
+            byId.set(tu.id, hookDeniedBlock(tu.id, hook.reason))
+            yield { type: 'toolStart', id: tu.id, name: tu.name, summary: summary(tu, registry) }
+            yield { type: 'toolResult', id: tu.id, ok: false, preview: 'Blocked by hook' }
+            continue
+          }
+          decision = hook.decision // 'allow' skips the ask; 'ask' forces it
+        }
+      }
+
       const asked = decision === 'ask' // distinguishes a real prompt from an auto-allow in the trace
       if (decision === 'ask' && perm) {
         yield { type: 'permission', id: tu.id, tool: tu.name, detail: summary(tu, registry) }
@@ -176,7 +209,18 @@ export async function* scheduleTools(
     }
     const ms = Date.now() - started
     for (const tu of toRun) {
-      const block = settled.get(tu.id)!
+      let block = settled.get(tu.id)!
+      // ── ADR-036: PostToolUse hooks — the feedback channel. A hook exiting 2 gets its stderr APPENDED to
+      //    the tool_result so THE MODEL sees it (e.g. a lint hook making the model fix its own edit). ──
+      if (ctx.hooks && block.type === 'tool_result') {
+        const t0 = Date.now()
+        const hook = await runHooks({ event: 'PostToolUse', config: ctx.hooks, cwd: ctx.cwd, toolName: tu.name, toolInput: tu.input, toolResponse: block.content })
+        if (hook.feedback.length > 0) {
+          tracer.event({ t: 'hook', event: 'PostToolUse', id: tu.id, tool: tu.name, decision: 'feedback', ms: Date.now() - t0 })
+          block = { ...block, content: `${block.content}\n\n[Project hook feedback — address this]: ${hook.feedback.join('\n')}` }
+          settled.set(tu.id, block)
+        }
+      }
       byId.set(tu.id, block)
       const isError = block.type === 'tool_result' && !!block.isError
       const content = block.type === 'tool_result' ? block.content : ''

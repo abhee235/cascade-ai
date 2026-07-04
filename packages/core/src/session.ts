@@ -20,6 +20,7 @@ import { createArchival, type ArchivalHit } from './memory/archival'
 import { loadMemory } from './memory/memoryStore'
 import { resolveCompactionPlan } from './context/compactor'
 import { curateMemory } from './memory/curator'
+import { loadHooksConfig } from './hooks/hookRunner'
 
 export interface SessionOptions {
   cwd: string
@@ -118,6 +119,8 @@ export function createSession(opts: SessionOptions): CascadeSession {
   const readFileState = new FileStateCache()
   // ADR-034: the authoritative todo checklist, persisted to .cascade/todos.json so it survives compaction and a
   // restart and feeds the loop's periodic reminder. Session-scoped, keyed by agent depth.
+  // ADR-036: project hooks (.cascade/hooks.json) — loaded once; null (absent/invalid) = zero code path.
+  const hooksConfig = loadHooksConfig(opts.cwd) ?? undefined
   const todoStore = new TodoStore(join(opts.cwd, '.cascade', 'todos.json'))
 
   // MCP (Phase 9): build the hub from config and start connecting in the BACKGROUND (non-blocking) so
@@ -245,6 +248,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
           maxTurns: opts.maxTurns,
           verifyGate: opts.verifyGate, // ADR-049 (default on in the loop)
           delegateNudge: opts.delegateNudge, // ADR-050 (default on in the loop)
+          hooks: hooksConfig, // ADR-036
         })
       } catch (err) {
         const e = err as { name?: string; message?: string; cause?: { message?: string } }

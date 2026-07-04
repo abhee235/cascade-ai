@@ -49,6 +49,8 @@ export interface LoopDeps {
    *  remind the model ONCE to send explore subagents instead. Default ON; needs a known window (compact
    *  deps) and the Subagent tool in the registry, so children/chat-only sessions never see it. */
   delegateNudge?: boolean
+  /** ADR-036: project hook config (.cascade/hooks.json), loaded once by the session. */
+  hooks?: import('../hooks/hookRunner').HooksConfig
   /** ADR-037: window tier sizing the system prompt + tool descriptions. Defaults to the compaction plan's tier
    *  (one source of truth); set explicitly for loops without compaction (e.g. subagents inherit the parent's). */
   tier?: import('../llm/contextWindows').WindowTier
@@ -86,7 +88,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   // ADR-037: one window tier for the whole loop — sizes the system prompt AND the tool descriptions. Explicit
   // deps.tier (subagents inherit the parent's) → the compaction plan's tier → 'full'.
   const tier = deps.tier ?? deps.compact?.plan.tier ?? 'full'
-  const ctx: ToolContext = { cwd: deps.cwd, abortSignal: deps.signal, permission: deps.permission, tracer, registry, archival: deps.archival, depth, sandbox: deps.sandbox, readFileState: deps.readFileState, todoStore: deps.todoStore, ask: deps.ask }
+  const ctx: ToolContext = { cwd: deps.cwd, abortSignal: deps.signal, permission: deps.permission, tracer, registry, archival: deps.archival, depth, sandbox: deps.sandbox, readFileState: deps.readFileState, todoStore: deps.todoStore, ask: deps.ask, hooks: deps.hooks }
   // Subagent delegation (ADR-017): inject a spawn closure (avoids an import cycle). Absent at the depth cap.
   // The child runs a NESTED runAgentLoop with its OWN messages + a filtered tool set (never Subagent → no
   // recursion; read-only subset for `explore`). Only its final text returns — its steps stay in its context.
