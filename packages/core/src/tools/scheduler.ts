@@ -10,6 +10,7 @@ import type { ToolContext } from './Tool'
 import { defaultRegistry, type ToolRegistry } from './toolRegistry'
 import { executeTool, type ToolUse } from './runTool'
 import { checkPermission } from '../permissions/gate'
+import { splitCommandSegments } from '../permissions/bashClassifier'
 import { formatAnswers } from './builtins/AskUserQuestion'
 import { runHooks } from '../hooks/hookRunner'
 import { NoopTracer } from '../observability/tracer'
@@ -149,7 +150,15 @@ export async function* scheduleTools(
       if (decision === 'ask' && perm) {
         yield { type: 'permission', id: tu.id, tool: tu.name, detail: summary(tu, registry) }
         const answer = await perm.request(tu.id) // ← BLOCKS here until respondPermission(tu.id, …)
-        if (answer === 'allow-always') perm.state.allow.add(tu.name) // remember for the rest of the session
+        if (answer === 'allow-always') {
+          // ADR-035: for Bash, learn EXACT-SEGMENT rules — repeat commands stop asking, variants still ask.
+          // Blanket `Bash` allow-always was the over-permissioning story (npm test approved => rm -rf rides free).
+          if (tu.name === 'Bash' && typeof (tu.input as { command?: string })?.command === 'string') {
+            for (const seg of splitCommandSegments((tu.input as { command: string }).command)) perm.state.allow.add(`Bash(${seg})`)
+          } else {
+            perm.state.allow.add(tu.name) // remember for the rest of the session
+          }
+        }
         decision = answer === 'deny' ? 'deny' : 'allow'
       }
       tracer.event({ t: 'permission', id: tu.id, tool: tu.name, decision, asked }) // forensics: every gate verdict
