@@ -83,6 +83,9 @@ export class ProjectManager {
           extraInstructions: [BUILDER_BEHAVIOR, extraInstructions].filter(Boolean).join('\n\n'),
           // A full build is many model round-trips (one per file batch); the chat default of 10 is far too low.
           maxTurns: 80,
+          // ADR-036 SAFETY: the project dir is MODEL-WRITABLE, but hook commands spawn on the HOST — never
+          // load a hooks.json the builder itself could have written (sandbox escape at the next open()).
+          loadProjectHooks: false,
         }))
     this.load()
   }

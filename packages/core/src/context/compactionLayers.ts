@@ -37,6 +37,26 @@ export function isClearedContent(content: string): boolean {
   )
 }
 
+/**
+ * RECENCY SHIELD (keep-recent, default 5): the ids of the last `keepCount`
+ * compactable tool calls. Eviction layers must never touch these — the newest observations are the model's
+ * working set, and clearing them leaves it with nothing to work from.
+ * Live incident: an 8k-window task read a changelog, the mask layer fired at 6,983 tokens
+ * and wiped the just-read file to 341 tokens; the model had nothing left to answer from. The token-based
+ * recent window alone can't prevent this — one big read exceeds it and lands "older" immediately.
+ */
+export function shieldedResultIds(messages: Message[], keepCount: number): Set<string> {
+  const ids: string[] = []
+  for (const m of messages) {
+    const blocks = asBlocks(m)
+    if (!blocks) continue
+    for (const b of blocks) {
+      if (b.type === 'tool_use' && COMPACTABLE_TOOLS.has(b.name)) ids.push(b.id)
+    }
+  }
+  return new Set(ids.slice(-Math.max(1, keepCount))) // floor 1 = "always keep at least the last"
+}
+
 export type CompactionKind =
   | 'none'
   | 'collapsed'
@@ -151,7 +171,7 @@ export function collapseSuperseded(messages: Message[], olderCount: number): Mes
  * Name-agnostic on purpose: the size gate is the safety valve (small, load-bearing results stay). This is the
  * historical Phase-A behaviour, preserved as the `mask` layer.
  */
-export function maskObservations(messages: Message[], olderCount: number, maxToolChars = 2000): Message[] {
+export function maskObservations(messages: Message[], olderCount: number, maxToolChars = 2000, shield?: Set<string>): Message[] {
   let changed = false
   const out = messages.map((m, idx) => {
     if (idx >= olderCount) return m
@@ -159,6 +179,7 @@ export function maskObservations(messages: Message[], olderCount: number, maxToo
     if (!blocks) return m
     let touched = false
     const next = blocks.map((b) => {
+      if (b.type === 'tool_result' && shield?.has(b.tool_use_id)) return b // recency shield
       if (b.type === 'tool_result' && !isClearedContent(b.content) && b.content.length > maxToolChars) {
         touched = true
         return { ...b, content: `[output masked — ${b.content.length} chars elided to save context]` }
@@ -178,7 +199,7 @@ export function maskObservations(messages: Message[], olderCount: number, maxToo
  * aggressive observation-eviction layer. Keyed on the
  * tool NAME (COMPACTABLE_TOOLS) so load-bearing results (TodoWrite, Memory, MCP) are never touched.
  */
-export function microcompactToolResults(messages: Message[], olderCount: number): Message[] {
+export function microcompactToolResults(messages: Message[], olderCount: number, shield?: Set<string>): Message[] {
   const names = toolNameById(messages)
   let changed = false
   const out = messages.map((m, idx) => {
@@ -187,6 +208,7 @@ export function microcompactToolResults(messages: Message[], olderCount: number)
     if (!blocks) return m
     let touched = false
     const next = blocks.map((b) => {
+      if (b.type === 'tool_result' && shield?.has(b.tool_use_id)) return b // recency shield
       if (
         b.type === 'tool_result' &&
         !isClearedContent(b.content) &&
@@ -211,7 +233,7 @@ export function microcompactToolResults(messages: Message[], olderCount: number)
  * stub that PRESERVES the record ("Write src/foo.ts — 8.2k chars elided") so the model still knows the operation
  * happened. This is our step beyond cheap output-clearing layers, which only ever clear outputs.
  */
-export function snipLargeToolInputs(messages: Message[], olderCount: number, maxInputChars: number): Message[] {
+export function snipLargeToolInputs(messages: Message[], olderCount: number, maxInputChars: number, shield?: Set<string>): Message[] {
   let changed = false
   const out = messages.map((m, idx) => {
     if (idx >= olderCount) return m
@@ -220,6 +242,7 @@ export function snipLargeToolInputs(messages: Message[], olderCount: number, max
     let touched = false
     const next = blocks.map((b) => {
       if (b.type !== 'tool_use' || !LARGE_INPUT_TOOLS.has(b.name)) return b
+      if (shield?.has(b.id)) return b // recency shield
       const json = JSON.stringify(b.input ?? {})
       if (json.length <= maxInputChars) return b
       const stub = stubForToolUse(b, json.length)

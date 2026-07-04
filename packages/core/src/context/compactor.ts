@@ -12,6 +12,7 @@ import {
   collapseSuperseded,
   maskObservations,
   microcompactToolResults,
+  shieldedResultIds,
   snipLargeToolInputs,
   type CompactionKind,
 } from './compactionLayers'
@@ -125,16 +126,74 @@ export interface CompactDeps {
   signal?: AbortSignal
   /** Coupled curation (ADR-015): harvest durable facts from the OLDER messages before they're compressed. */
   onDiscard?: (older: Message[]) => Promise<void>
+  /** Tokens the WIRE prompt carries beyond `messages`: system prompt + tool schemas + chat template. The plan's
+   *  thresholds are window-relative, so ignoring this plans the whole window for messages. Measured live (8k
+   *  window): ~4k of overhead ⇒ Ollama front-truncated the prompt to window−1 and left the model ONE token of
+   *  output room (`inputTokens: 8191, outputTokens: 1`). The loop measures and passes it; default 0. */
+  overheadTokens?: number
 }
 
 // The pure, no-LLM layers in escalation order, each mapped to the kind it reports. `summarize` is handled
 // separately (it's async + needs the provider). Adding a layer later = one entry here + its transform.
-const CHEAP_LAYERS: { layer: CompactionLayer; kind: CompactionKind; apply: (m: Message[], older: number, plan: CompactionPlan) => Message[] }[] = [
+const CHEAP_LAYERS: { layer: CompactionLayer; kind: CompactionKind; apply: (m: Message[], older: number, plan: CompactionPlan, shield: Set<string>) => Message[] }[] = [
+  // collapse is unshielded on purpose: it only clears results a NEWER read of the same target supersedes —
+  // the latest copy always survives, so there's no working-set loss even for a recent result.
   { layer: 'collapse', kind: 'collapsed', apply: (m, older) => collapseSuperseded(m, older) },
-  { layer: 'mask', kind: 'masked', apply: (m, older, plan) => maskObservations(m, older, plan.toolResultMaxChars) },
-  { layer: 'microcompact', kind: 'microcompacted', apply: (m, older) => microcompactToolResults(m, older) },
-  { layer: 'snip', kind: 'snipped', apply: (m, older, plan) => snipLargeToolInputs(m, older, plan.toolResultMaxChars) },
+  { layer: 'mask', kind: 'masked', apply: (m, older, plan, shield) => maskObservations(m, older, plan.toolResultMaxChars, shield) },
+  { layer: 'microcompact', kind: 'microcompacted', apply: (m, older, _plan, shield) => microcompactToolResults(m, older, shield) },
+  { layer: 'snip', kind: 'snipped', apply: (m, older, plan, shield) => snipLargeToolInputs(m, older, plan.toolResultMaxChars, shield) },
 ]
+
+/** Conservative estimate of the summary message's own size — used to decide whether summarizing HELPS. */
+const EXPECTED_SUMMARY_TOKENS = 500
+
+/** Plain text of a user message (string content or text blocks); undefined for tool_result-only messages. */
+function userText(m: Message): string | undefined {
+  if (m.role !== 'user') return undefined
+  if (typeof m.content === 'string') return m.content || undefined
+  const texts = m.content.filter((b) => b.type === 'text').map((b) => (b as { text: string }).text)
+  return texts.length > 0 ? texts.join('\n') : undefined
+}
+
+/** The FIRST (task statement) and LAST (latest instruction / harness steering nudge) plain-text user messages
+ *  in the region, for VERBATIM preservation across a summarize. A prior summary message is unwrapped back to
+ *  its task head (repeat compaction must not nest headers) and never counts as the "latest instruction". */
+function preservedUserTexts(older: Message[]): { task?: string; lastInstruction?: string } {
+  let task: string | undefined
+  let taskIdx = -1
+  for (let i = 0; i < older.length; i++) {
+    const text = userText(older[i]!)
+    if (!text) continue
+    taskIdx = i
+    // Repeat compaction: the first user text may BE a previous summary — keep only its original-task head.
+    task = text.startsWith('[Original task]\n')
+      ? text.split('\n\n[Earlier conversation compacted')[0]!.slice('[Original task]\n'.length)
+      : text.startsWith('[Earlier conversation compacted')
+        ? undefined
+        : text
+    break
+  }
+  for (let i = older.length - 1; i > taskIdx; i--) {
+    const text = userText(older[i]!)
+    if (!text || text.startsWith('[Original task]') || text.startsWith('[Earlier conversation compacted')) continue
+    return { task, lastInstruction: text.slice(0, 2000) }
+  }
+  return { task }
+}
+
+/** First message index that contains a shielded tool_use or tool_result — the summarize boundary must not
+ *  cross it, or the summary would eat the very results the cheap layers just protected. */
+function firstShieldedIndex(messages: Message[], shield: Set<string>): number {
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i]!
+    if (typeof m.content === 'string') continue
+    for (const b of m.content) {
+      if ((b.type === 'tool_use' && shield.has(b.id)) || (b.type === 'tool_result' && shield.has(b.tool_use_id)))
+        return i
+    }
+  }
+  return messages.length
+}
 
 /**
  * Compact `messages` when they cross the plan's `auto` threshold (ADR-039). Runs the plan's enabled layers in
@@ -150,10 +209,26 @@ export async function compactIfNeeded(
 ): Promise<{ messages: Message[]; kind: CompactionKind }> {
   const { plan } = deps
   const force = opts?.force ?? false
-  if (!force && estimateTokens(messages) < plan.auto) return { messages, kind: 'none' }
+  // The wire prompt = overhead (system + tool schemas + template) + messages; all thresholds compare the SUM.
+  const overhead = deps.overheadTokens ?? 0
+  const usage = estimateTokens(messages) + overhead
+  if (!force && usage < plan.auto) return { messages, kind: 'none' }
 
   const boundary = olderBoundary(messages, plan.keepRecentTokens)
   if (boundary === 0) return { messages, kind: 'none' } // all fits in the recent window — nothing older to compact
+
+  // RECENCY SHIELD: the last N compactable results are the model's working set — eviction
+  // layers skip them even when the token boundary says "older" (one big fresh read lands older instantly).
+  // SURVIVAL MODE: at the ceiling (or reactive `force`) the prompt will NOT fit on the wire — Ollama silently
+  // front-truncates it (the model loses its own history; measured: one 7-parallel-read turn hit 32k estimated
+  // in an 8k window, the 5-wide shield left 21k standing, and the model came back lobotomized). Survival beats
+  // recency: the shield shrinks to the very last result (a floor of 1). The ceiling is capped at
+  // `effectiveWindow` because on enforced backends `num_ctx` covers prompt AND output together — messages up
+  // to `hard`(=window on small plans) leave zero room to answer (measured: input 8191/8192, output 1 token).
+  // Large windows are unaffected: there `hard < effectiveWindow` already.
+  const ceiling = Math.min(plan.hard, plan.effectiveWindow)
+  const survival = force || usage >= ceiling
+  const shield = shieldedResultIds(messages, survival ? 1 : plan.keepRecentResults)
 
   // ── Cheap layers: escalate, stopping as soon as we're back under threshold. ──
   // These are length-preserving (they clear content / stub inputs, never drop messages), so `boundary` stays
@@ -162,28 +237,56 @@ export async function compactIfNeeded(
   let kind: CompactionKind = 'none'
   for (const step of CHEAP_LAYERS) {
     if (!plan.layers.has(step.layer)) continue
-    const next = step.apply(working, boundary, plan)
+    const next = step.apply(working, boundary, plan, shield)
     if (estimateTokens(next) < estimateTokens(working)) {
       working = next
       kind = step.kind
     }
-    if (!force && estimateTokens(working) < plan.auto) return { messages: working, kind }
+    if (!force && estimateTokens(working) + overhead < plan.auto) return { messages: working, kind }
   }
 
   // ── Heavy layer: LLM summary of the older half, recent kept verbatim. ──
   if (plan.layers.has('summarize')) {
     // Recompute the boundary: the cheap layers changed token counts, shifting where "recent" starts. Then
+    // cap it at the shield (the summary must not eat the results the cheap layers just protected) and
     // turn-align it so `recent` starts on an assistant — summarize replaces `older` with one user message, so a
     // recent region beginning with a tool_result (or a user turn) would orphan a tool pair / stack two user
     // messages, which strict providers reject (see turnAlignedBoundary).
-    const summarizeBoundary = turnAlignedBoundary(working, olderBoundary(working, plan.keepRecentTokens))
+    const summarizeBoundary = turnAlignedBoundary(
+      working,
+      Math.min(olderBoundary(working, plan.keepRecentTokens), firstShieldedIndex(working, shield)),
+    )
     if (summarizeBoundary > 0) {
       const older = working.slice(0, summarizeBoundary)
       const recent = working.slice(summarizeBoundary)
-      if (deps.onDiscard) await deps.onDiscard(older)
-      const summary = await summarize(older, deps.provider, deps.model, deps.signal)
-      const summaryMsg: Message = { role: 'user', content: `[Earlier conversation compacted to save context]\n\n${summary}` }
-      return { messages: [summaryMsg, ...recent], kind: 'summarized' }
+      // Only worth an LLM side-query if it can plausibly bring us back under `auto`. When the older region is
+      // tiny (all the weight sits in shielded recent results), summarizing destroys context for no relief —
+      // over-auto-but-under-HARD is a SOFT state: proceed as-is and let the next cycle (or a reactive force)
+      // reclaim once newer work rolls the shield forward. Over hard there is no soft option (see survival above).
+      const olderTokens = estimateTokens(older)
+      const expectedSummary = Math.min(EXPECTED_SUMMARY_TOKENS, Math.floor(plan.window / 16)) // scale down for tiny windows
+      const canHelp = estimateTokens(working) + overhead - olderTokens + expectedSummary < plan.auto
+      if (survival || canHelp) {
+        if (deps.onDiscard) await deps.onDiscard(older)
+        const summary = await summarize(older, deps.provider, deps.model, deps.signal)
+        // The ORIGINAL TASK and the LATEST USER INSTRUCTION ride along VERBATIM — never entrusted to the
+        // summary. Measured failures: a weak model's summary lost the task statement and its next reply was
+        // "please share the task you'd like me to work on" (window-gate-2, longctx-wire-modules); and a
+        // just-injected steering nudge was summarized away before the model ever read it (delegateNudge test).
+        // Folding them into the same user message is structural insurance and keeps the sequence valid.
+        const { task, lastInstruction } = preservedUserTexts(older)
+        const summaryMsg: Message = {
+          role: 'user',
+          content: [
+            task ? `[Original task]\n${task}` : '',
+            `[Earlier conversation compacted to save context]\n\n${summary}`,
+            lastInstruction ? `[Latest user instruction — still applies]\n${lastInstruction}` : '',
+          ]
+            .filter(Boolean)
+            .join('\n\n'),
+        }
+        return { messages: [summaryMsg, ...recent], kind: 'summarized' }
+      }
     }
   }
 

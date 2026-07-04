@@ -121,6 +121,7 @@ export class OpenAICompatProvider implements ModelProvider {
     // Backends that don't know the field ignore it — usage just stays undefined.
     if (stream) body.stream_options = { include_usage: true }
     if (req.temperature !== undefined) body.temperature = req.temperature // eval determinism (temperature 0)
+    if (req.maxOutputTokens !== undefined) body.max_tokens = req.maxOutputTokens // ADR-038: output cap on the wire
     const tools = toOpenAITools(req.tools)
     if (tools) body.tools = tools
     return JSON.stringify(body)
@@ -178,7 +179,11 @@ export class OpenAICompatProvider implements ModelProvider {
   async *stream(req: CompletionRequest, signal?: AbortSignal): AsyncIterable<StreamEvent> {
     // M11: image turns go through Ollama's NATIVE /api/chat — its OpenAI-compat /v1 endpoint silently drops
     // image_url (verified on Ollama 0.30.10), whereas /api/chat accepts an `images:[base64]` array per message.
-    if (req.messages.some((m) => Array.isArray(m.content) && m.content.some((b) => b.type === 'image'))) {
+    // ADR-038 ENFORCEMENT: /v1 cannot express num_ctx. When the caller pins a window and this is Ollama,
+    // route through the NATIVE /api/chat (which we already use for images) so options.num_ctx goes on the
+    // wire — the window the compactor protects becomes the window the model actually has.
+    const enforceWindow = this.cfg.id === 'ollama' && req.contextWindow !== undefined
+    if (enforceWindow || req.messages.some((m) => Array.isArray(m.content) && m.content.some((b) => b.type === 'image'))) {
       yield* this.streamNative(req, signal)
       return
     }
@@ -273,7 +278,11 @@ export class OpenAICompatProvider implements ModelProvider {
   // carries `message.content` (+ optional `thinking`/`tool_calls`) and the last one has `done:true`. Tool
   // calls arrive whole here (arguments already an object), so we emit them directly.
   private async *streamNative(req: CompletionRequest, signal?: AbortSignal): AsyncIterable<StreamEvent> {
-    const body = JSON.stringify({ model: req.model, messages: toNativeMessages(req.messages, req.system), tools: toOpenAITools(req.tools), stream: true })
+    const options: Record<string, unknown> = {}
+    if (req.contextWindow !== undefined) options.num_ctx = req.contextWindow // ADR-038: enforce the allocated window
+    if (req.maxOutputTokens !== undefined) options.num_predict = req.maxOutputTokens
+    if (req.temperature !== undefined) options.temperature = req.temperature
+    const body = JSON.stringify({ model: req.model, messages: toNativeMessages(req.messages, req.system), tools: toOpenAITools(req.tools), stream: true, ...(Object.keys(options).length ? { options } : {}) })
     const res = await fetch(`${this.cfg.baseUrl}/api/chat`, { method: 'POST', headers: this.headers(), body, signal })
     if (!res.ok || !res.body) {
       const b = await res.text().catch(() => '')

@@ -101,6 +101,10 @@ export class CascadeViewProvider implements vscode.WebviewViewProvider {
       case 'permission':
         this.getSession().respondPermission(msg.id, msg.decision)
         break
+      case 'answer':
+        // ADR-043: the user's answer to an AskUserQuestion — wakes the parked loop.
+        this.getSession().respondQuestion(msg.id, msg.answers)
+        break
       case 'reset':
         this.session?.reset()
         break

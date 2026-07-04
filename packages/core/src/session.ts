@@ -65,6 +65,10 @@ export interface SessionOptions {
   verifyGate?: boolean
   /** ADR-050: remind the model once to delegate when bulk reads dominate the window. Default true. */
   delegateNudge?: boolean
+  /** ADR-036: load `.cascade/hooks.json` from the project (default true). Frontends MUST pass false when the
+   *  cwd is MODEL-WRITABLE and untrusted (the server's sandboxed builder projects): hook commands spawn on the
+   *  HOST, so a model-written hooks.json would otherwise escalate out of the sandbox at the next open(). */
+  loadProjectHooks?: boolean
 }
 
 export interface CascadeSession {
@@ -109,9 +113,21 @@ export function createSession(opts: SessionOptions): CascadeSession {
   }
   // ADR-043: AskUserQuestion plumbing — same shape as permissions. `pendingAnswers` holds the resolve() the
   // scheduler is awaiting on a `question` event; respondQuestion(id, answers) resolves it (wakes the loop).
+  // The park also watches the turn's abort signal: abort() may run while the generator is still suspended at
+  // the `question` YIELD (before request() executes), so draining pendingAnswers alone races — the request
+  // itself must observe the abort and resolve with no answers (the aborted turn unwinds before they're read).
   const pendingAnswers = new Map<string, (a: import('./protocol').Answers) => void>()
   const ask: import('./tools/Tool').AskController = {
-    request: (id) => new Promise((resolve) => pendingAnswers.set(id, resolve)),
+    request: (id) =>
+      new Promise((resolve) => {
+        pendingAnswers.set(id, resolve)
+        const sig = inFlight?.signal
+        const onAbort = () => {
+          if (pendingAnswers.delete(id)) resolve({})
+        }
+        if (sig?.aborted) onAbort()
+        else sig?.addEventListener('abort', onAbort, { once: true })
+      }),
   }
   const tracer = opts.tracer ?? NoopTracer
   // ADR-032: read-before-edit freshness, session-scoped — a file Read in one turn stays editable in a later
@@ -120,7 +136,8 @@ export function createSession(opts: SessionOptions): CascadeSession {
   // ADR-034: the authoritative todo checklist, persisted to .cascade/todos.json so it survives compaction and a
   // restart and feeds the loop's periodic reminder. Session-scoped, keyed by agent depth.
   // ADR-036: project hooks (.cascade/hooks.json) — loaded once; null (absent/invalid) = zero code path.
-  const hooksConfig = loadHooksConfig(opts.cwd) ?? undefined
+  // Skipped entirely when the frontend marks the cwd untrusted (loadProjectHooks: false — see SessionOptions).
+  const hooksConfig = opts.loadProjectHooks === false ? undefined : (loadHooksConfig(opts.cwd) ?? undefined)
   const todoStore = new TodoStore(join(opts.cwd, '.cascade', 'todos.json'))
 
   // MCP (Phase 9): build the hub from config and start connecting in the BACKGROUND (non-blocking) so
@@ -148,6 +165,9 @@ export function createSession(opts: SessionOptions): CascadeSession {
     keepRecentRatio: opts.keepRecentRatio,
   })
   let windowDetected = false
+  // ADR-038 enforcement: only limits we are CONFIDENT about go on the wire (explicit option or /api/show
+  // detection). A static-map guess must NOT be enforced — it could SHRINK a model's real window.
+  let confidentLimits: { contextWindow?: number; maxOutputTokens?: number } = { contextWindow: opts.contextWindow, maxOutputTokens: opts.maxOutputTokens }
   async function ensureDetectedPlan(signal?: AbortSignal): Promise<void> {
     if (windowDetected) return
     windowDetected = true // run at most once; on failure the sync fallback plan stands
@@ -249,6 +269,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
           verifyGate: opts.verifyGate, // ADR-049 (default on in the loop)
           delegateNudge: opts.delegateNudge, // ADR-050 (default on in the loop)
           hooks: hooksConfig, // ADR-036
+          modelLimits: confidentLimits.contextWindow || confidentLimits.maxOutputTokens ? confidentLimits : undefined, // ADR-038 enforcement
         })
       } catch (err) {
         const e = err as { name?: string; message?: string; cause?: { message?: string } }
@@ -286,6 +307,9 @@ export function createSession(opts: SessionOptions): CascadeSession {
       inFlight?.abort()
       // Unblock any pending permission prompt so the loop can unwind instead of hanging forever.
       for (const [id, resolve] of pending) resolve('deny'), pending.delete(id)
+      // Same for a parked AskUserQuestion (ADR-043): resolve with no answers — the aborted turn unwinds
+      // before the model ever sees them. Without this, Stop during a question parks the loop forever.
+      for (const [id, resolve] of pendingAnswers) resolve({}), pendingAnswers.delete(id)
     },
 
     reset() {

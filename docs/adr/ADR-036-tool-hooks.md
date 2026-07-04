@@ -53,6 +53,12 @@ A small hook engine in core + wiring at the scheduler gate. **Default-off by abs
    tool_result content** — the feedback channel that lets a lint hook make the model fix its own edit.
 5. **Host execution, by design**: hooks are the USER'S guards, not the model's tools — they run on the
    host regardless of the Bash sandbox, and are never advertised to the model.
+6. **Untrusted-cwd opt-out** (`SessionOptions.loadProjectHooks: false`): host execution cuts both ways —
+   in the web builder, the project dir is MODEL-WRITABLE and the session runs in bypass mode, so a
+   model-written `.cascade/hooks.json` would execute arbitrary host commands at the next `open()` (a
+   sandbox escape). The server therefore disables project-hook loading for builder sessions
+   (`projectManager.ts`); the extension keeps the default (a workspace the user opened is user-trusted,
+   the usual trust model for local agents).
 
 **Deferred (v2+):** the other events (`Stop`, `UserPromptSubmit`, `SessionStart`, `PreCompact` — natural
 extensions of the same engine); `updatedInput` rewriting; global (`~/.cascade`) config; ADR-035

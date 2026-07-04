@@ -51,6 +51,9 @@ export interface LoopDeps {
   delegateNudge?: boolean
   /** ADR-036: project hook config (.cascade/hooks.json), loaded once by the session. */
   hooks?: import('../hooks/hookRunner').HooksConfig
+  /** ADR-038 enforcement: CONFIDENT allocated limits (user-pinned or /api/show-detected — never the static-map
+   *  guess). Sent on every model request so the wire window equals the planned window. */
+  modelLimits?: { contextWindow?: number; maxOutputTokens?: number }
   /** ADR-037: window tier sizing the system prompt + tool descriptions. Defaults to the compaction plan's tier
    *  (one source of truth); set explicitly for loops without compaction (e.g. subagents inherit the parent's). */
   tier?: import('../llm/contextWindows').WindowTier
@@ -140,12 +143,19 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     let usage: import('../llm/provider').TokenUsage | undefined // E1/ADR-040: backend token counts for this call
     const toolUses: ToolUse[] = []
 
+    // The WIRE prompt carries more than `messages`: system prompt + tool schemas + chat template. Measure it
+    // so compaction thresholds reflect what actually travels — in an 8k window the overhead is ~half the
+    // budget, and ignoring it meant Ollama front-truncated the prompt before the compactor ever triggered
+    // (measured: inputTokens 8191 of 8192, ONE token of output room). The +256 pad covers the template.
+    const systemNow = buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext })
+    const overheadTokens = Math.ceil((systemNow.length + JSON.stringify(registry.schemas(tier)).length) / 4) + 256
+
     // Compaction (ADR-012): BEFORE each model call, if history nears the window, mask old tool output and/or
     // summarize the older half. We splice in place so the session's history reference stays valid; the raw
     // transcript + JSONL trace are untouched (you'll see the next model_request shrink).
     if (deps.compact) {
       const tokensBefore = estimateTokens(messages)
-      const { messages: compacted, kind } = await compactIfNeeded(messages, deps.compact)
+      const { messages: compacted, kind } = await compactIfNeeded(messages, { ...deps.compact, overheadTokens })
       if (kind !== 'none') {
         messages.splice(0, messages.length, ...compacted)
         // E1/ADR-040: record which layer fired and what it reclaimed — the eval analyzer counts these to
@@ -168,13 +178,12 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     yield { type: 'status', text: 'Thinking…' }
     // FORENSICS: record the FULL request we're about to send — the #1 thing you need when an answer
     // is wrong ("did the model even see the tool_result / the right system prompt?"). — ADR-023.
-    const system = buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext })
-    tracer.event({ t: 'model_request', turn, system, tools: registry.list().map((t) => t.name), messages })
+    tracer.event({ t: 'model_request', turn, system: systemNow, tools: registry.list().map((t) => t.name), messages })
     // Wrap the stream in recovery (ADR-016): transient failures retry with backoff; context overflow triggers
     // a (reactive) compaction then retries; abort/fatal surface. `make` re-reads `messages` each attempt, so
     // an overflow-compaction is reflected on the retry. System is rebuilt too (memory may have changed).
     const makeStream = () =>
-      deps.provider.stream({ messages, model: deps.model, system: buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext }), tools: registry.schemas(tier) }, deps.signal)
+      deps.provider.stream({ messages, model: deps.model, ...deps.modelLimits, system: buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext }), tools: registry.schemas(tier) }, deps.signal)
     for await (const ev of streamWithRecovery(makeStream, {
       ...deps.recovery,
       signal: deps.signal,
@@ -183,7 +192,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
             // Reactive overflow: force compaction regardless of the threshold (ADR-039 `force`) — the model just
             // reported the prompt is too large, so waiting for the `auto` gate would just loop.
             const tokensBefore = estimateTokens(messages)
-            const { messages: c, kind } = await compactIfNeeded(messages, deps.compact!, { force: true })
+            const { messages: c, kind } = await compactIfNeeded(messages, { ...deps.compact!, overheadTokens }, { force: true })
             if (kind !== 'none') {
               messages.splice(0, messages.length, ...c)
               tracer.event({ t: 'compaction', kind, tokensBefore, tokensAfter: estimateTokens(messages), forced: true })

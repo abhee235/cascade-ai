@@ -5,6 +5,7 @@ import {
   turnAlignedBoundary,
   maskObservations,
   compactIfNeeded,
+  planCompaction,
   type CompactionPlan,
 } from '../src/context/compactor'
 import { createFakeProvider, textDelta } from './fakeProvider'
@@ -34,6 +35,7 @@ const plan: CompactionPlan = {
   auto: 80,
   hard: 97,
   keepRecentTokens: 25,
+  keepRecentResults: 5,
   toolResultMaxChars: 2000,
   layers: new Set(['mask', 'summarize']),
   mode: 'layered',
@@ -150,5 +152,150 @@ describe('compactor — compactIfNeeded (plan-driven, ADR-039)', () => {
     const { messages, kind } = await compactIfNeeded(msgs, { provider, model: 'fake', plan }, { force: true })
     expect(kind).toBe('summarized')
     expect(messages[0].content).toContain('FORCED SUMMARY')
+  })
+})
+
+describe('compactor — recency shield (live-incident regression)', () => {
+  // The incident (window-recheck, longctx-changelog-version): 8k window, the model's FIRST turn read the
+  // changelog it needed; usage crossed `auto` (6,983 > 5,734) and the mask layer wiped the just-read file to
+  // 341 tokens — the model had nothing left to answer from (0/3 after 8/8 pre-enforcement). The shield must
+  // keep the newest results verbatim; over-auto-but-under-hard is a SOFT state, so nothing else may fire.
+  const plan8k = planCompaction({ window: 8192 })
+
+  /** The incident history: task → assistant fires Glob + 2 Reads → results incl. a ~5k-token changelog. */
+  const incident = (): Message[] => [
+    { role: 'user', content: 'Fill in src/meta.js from the project docs.' },
+    {
+      role: 'assistant',
+      content: [
+        { type: 'tool_use', id: 'g1', name: 'Glob', input: { pattern: '**/*.md' } },
+        { type: 'tool_use', id: 'r1', name: 'Read', input: { file_path: 'CHANGELOG.md' } },
+        { type: 'tool_use', id: 'r2', name: 'Read', input: { file_path: 'docs/UPGRADING.md' } },
+      ],
+    },
+    {
+      role: 'user',
+      content: [
+        { type: 'tool_result', tool_use_id: 'g1', content: 'CHANGELOG.md\ndocs/UPGRADING.md' },
+        { type: 'tool_result', tool_use_id: 'r1', content: `## 4.2.0\n${'changelog '.repeat(1900)}` }, // ~19k chars ≈ 4.75k tok
+        { type: 'tool_result', tool_use_id: 'r2', content: `Node 18+\n${'upgrading '.repeat(400)}` }, // ~4k chars ≈ 1k tok
+      ],
+    },
+  ]
+
+  it('over auto, under the ceiling, everything recent ⇒ NOTHING is evicted and no summary is attempted', async () => {
+    const msgs = incident()
+    expect(estimateTokens(msgs)).toBeGreaterThan(plan8k.auto) // the trigger really fires
+    // …but the prompt still fits under the survival ceiling (effectiveWindow on small plans — output room).
+    expect(estimateTokens(msgs)).toBeLessThan(Math.min(plan8k.hard, plan8k.effectiveWindow))
+    const provider = createFakeProvider([]) // summarize must NOT be called
+    const { messages, kind } = await compactIfNeeded(msgs, { provider, model: 'fake', plan: plan8k })
+    expect(kind).toBe('none')
+    expect((messages[2].content as any)[1].content).toContain('changelog') // the read survives verbatim
+    expect(provider.calls.length).toBe(0)
+  })
+
+  it('the shield rolls forward: once ≥5 newer results exist, the old big read IS evictable', async () => {
+    const msgs = incident()
+    for (let i = 0; i < 5; i++) {
+      msgs.push(
+        { role: 'assistant', content: [{ type: 'tool_use', id: `n${i}`, name: 'Read', input: { file_path: `f${i}.ts` } }] },
+        { role: 'user', content: [{ type: 'tool_result', tool_use_id: `n${i}`, content: `file ${i} contents` }] },
+      )
+    }
+    const provider = createFakeProvider([])
+    const { messages, kind } = await compactIfNeeded(msgs, { provider, model: 'fake', plan: plan8k })
+    expect(kind).toBe('masked')
+    expect((messages[2].content as any)[1].content).toMatch(/output masked/) // old changelog reclaimed
+    expect((messages[4].content as any)[0].content).toContain('file 0 contents') // shielded newer results intact
+  })
+
+  it('overheadTokens counts toward every threshold: same messages, overhead pushes past the ceiling', async () => {
+    // Live incident (window-gate-5): ~4k of system+tools+template overhead in an 8k window — the compactor
+    // planned messages-only, Ollama front-truncated the prompt to 8191/8192 and the model got ONE output token.
+    const msgs = incident() // soft-state WITHOUT overhead (asserted above)…
+    const provider = createFakeProvider([])
+    const { messages, kind } = await compactIfNeeded(msgs, { provider, model: 'fake', plan: plan8k, overheadTokens: 4000 })
+    expect(kind).not.toBe('none') // …but WITH real overhead the same history must be reclaimed
+    expect(estimateTokens(messages) + 4000).toBeLessThan(8192) // and the wire prompt now fits the window
+  })
+
+  it('force (reactive overflow) still reclaims: shield shrinks to the very last result', async () => {
+    const provider = createFakeProvider([])
+    const { messages } = await compactIfNeeded(incident(), { provider, model: 'fake', plan: plan8k }, { force: true })
+    const results = (messages[2].content as any) as { content: string }[]
+    expect(results[1].content).toMatch(/output masked/) // survival wins: the big read goes
+    expect(results[2].content).toContain('Node 18+') // …but the LAST result always survives (floor of 1)
+  })
+
+  it('summarize preserves the ORIGINAL TASK verbatim (weak summarizers lose it)', async () => {
+    // Measured failure (window-gate-2, longctx-wire-modules): survival-mode summarize replaced the older
+    // region — including the task statement — and the model's next reply was "please share the task".
+    const older: Message[] = [
+      { role: 'user', content: 'Reconstruct STAGE_ORDER in src/pipeline/order.js from the registerStage calls.' },
+      ...Array.from({ length: 6 }, (_, i) => ({ role: 'user' as const, content: `noise ${i} ${'x'.repeat(36)}` })),
+    ]
+    const recent: Message[] = [
+      { role: 'assistant', content: [{ type: 'text', text: `working ${'z'.repeat(36)}` }] },
+      { role: 'user', content: `latest ${'w'.repeat(36)}` },
+    ]
+    const provider = createFakeProvider([[textDelta('SUMMARY WITHOUT THE TASK')]])
+    const { messages, kind } = await compactIfNeeded([...older, ...recent], { provider, model: 'fake', plan }, { force: true })
+    expect(kind).toBe('summarized')
+    expect(messages[0].content).toContain('Reconstruct STAGE_ORDER') // the task survives VERBATIM
+    expect(messages[0].content).toContain('SUMMARY WITHOUT THE TASK') // alongside the summary
+  })
+
+  it('summarize preserves the LATEST user instruction (harness steering) verbatim', async () => {
+    // A just-injected steering message (delegation nudge, verify prompt) must survive a summarize that fires
+    // before the model's next call — otherwise the harness steers into a void (caught by delegateNudge test).
+    const older: Message[] = [
+      { role: 'user', content: 'Original task here.' },
+      ...Array.from({ length: 5 }, (_, i) => ({ role: 'user' as const, content: `noise ${i} ${'x'.repeat(36)}` })),
+      { role: 'user', content: 'REMINDER: use the Subagent tool instead of reading more files.' },
+    ]
+    const recent: Message[] = [
+      { role: 'assistant', content: [{ type: 'text', text: `ok ${'z'.repeat(36)}` }] },
+      { role: 'user', content: `latest ${'w'.repeat(36)}` },
+    ]
+    const provider = createFakeProvider([[textDelta('SUMMARY')]])
+    const { messages } = await compactIfNeeded([...older, ...recent], { provider, model: 'fake', plan }, { force: true })
+    expect(messages[0].content).toContain('Original task here.')
+    expect(messages[0].content).toContain('use the Subagent tool instead')
+  })
+
+  it('repeat compaction does NOT nest [Original task] headers (idempotent preservation)', async () => {
+    const provider = createFakeProvider([[textDelta('SUMMARY ONE')], [textDelta('SUMMARY TWO')]])
+    const start: Message[] = [
+      { role: 'user', content: 'The one true task.' },
+      ...Array.from({ length: 6 }, (_, i) => ({ role: 'user' as const, content: `noise ${i} ${'x'.repeat(36)}` })),
+      { role: 'assistant', content: [{ type: 'text', text: `working ${'z'.repeat(36)}` }] },
+      { role: 'user', content: `more ${'w'.repeat(36)}` },
+    ]
+    const once = await compactIfNeeded(start, { provider, model: 'fake', plan }, { force: true })
+    const grown = [...once.messages, ...Array.from({ length: 6 }, (_, i) => ({ role: 'user' as const, content: `later ${i} ${'y'.repeat(36)}` }))]
+    const twice = await compactIfNeeded(grown, { provider, model: 'fake', plan }, { force: true })
+    const head = String(twice.messages[0].content)
+    expect(head.match(/\[Original task\]/g)?.length).toBe(1) // exactly one header
+    expect(head).toContain('The one true task.') // …and the task itself survived two compactions
+  })
+
+  it('over HARD ⇒ survival mode: the shield must NOT hold the prompt above the wire ceiling', async () => {
+    // The second live incident (window-gate-2, delegate-prose): ONE turn of 7 parallel reads hit ~32k estimated
+    // in the 8k window. A 5-wide shield left 21k standing — over `hard`, so Ollama front-truncated the prompt
+    // and the model lost its own history. Over hard the shield shrinks to 1 and the compactor MUST reclaim.
+    const uses = Array.from({ length: 7 }, (_, i) => ({ type: 'tool_use' as const, id: `m${i}`, name: 'Read', input: { file_path: `docs/manual${i}.md` } }))
+    const results = Array.from({ length: 7 }, (_, i) => ({ type: 'tool_result' as const, tool_use_id: `m${i}`, content: `manual ${i} ${'ops '.repeat(4500)}` })) // ~18k chars each
+    const msgs: Message[] = [
+      { role: 'user', content: 'Reconstruct RECOVERY_SEQUENCE from the six manuals.' },
+      { role: 'assistant', content: uses },
+      { role: 'user', content: results },
+    ]
+    expect(estimateTokens(msgs)).toBeGreaterThan(plan8k.hard) // the incident precondition
+    const provider = createFakeProvider([])
+    const { messages } = await compactIfNeeded(msgs, { provider, model: 'fake', plan: plan8k })
+    expect(estimateTokens(messages)).toBeLessThan(plan8k.hard) // the invariant that was violated
+    const out = (messages[2].content as any) as { content: string }[]
+    expect(out[6].content).toContain('manual 6') // floor of 1: the last result still survives
   })
 })

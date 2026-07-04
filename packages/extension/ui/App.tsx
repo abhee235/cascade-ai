@@ -3,7 +3,7 @@ import { Streamdown } from 'streamdown'
 import { mermaid } from '@streamdown/mermaid'
 import { createMathPlugin } from '@streamdown/math'
 import { createCodePlugin } from '@streamdown/code'
-import type { ActivityEvent, Message, ToolDisplay } from '@cascade/core'
+import type { ActivityEvent, Answers, Message, Question, ToolDisplay } from '@cascade/core'
 
 // VS Code injects this into the webview global scope.
 declare function acquireVsCodeApi(): { postMessage(msg: unknown): void }
@@ -101,6 +101,85 @@ type Item =
   | { kind: 'tool'; id: string; name: string; summary: string; status: 'running' | 'ok' | 'error'; preview?: string; display?: ToolDisplay }
   | { kind: 'memory'; text: string }
   | { kind: 'compacted'; text: string }
+  | { kind: 'question'; questions: Question[]; answered: Answers } // ADR-043: an answered AskUserQuestion (read-only record)
+
+/** The ACTIVE AskUserQuestion (ADR-043) — the loop is PARKED until the user submits, so this card is the
+ *  resume button. Single- or multi-select per question, plus an always-present "Other" free-text (the model
+ *  is told not to add its own Other option). Mirrors the web app's QuestionCard. */
+function QuestionCard({ questions, onSubmit }: { questions: Question[]; onSubmit: (answers: Answers) => void }) {
+  const [picked, setPicked] = useState<Record<number, string[]>>({}) // question index → selected labels
+  const [other, setOther] = useState<Record<number, string>>({}) // question index → "Other" free text
+
+  const toggle = (qi: number, label: string, multi: boolean) =>
+    setPicked((s) => {
+      const cur = s[qi] ?? []
+      if (multi) return { ...s, [qi]: cur.includes(label) ? cur.filter((l) => l !== label) : [...cur, label] }
+      return { ...s, [qi]: [label] }
+    })
+
+  const canSubmit = questions.every((_q, qi) => (picked[qi]?.length ?? 0) > 0 || (other[qi] ?? '').trim().length > 0)
+
+  const submit = () => {
+    const answers: Answers = {}
+    questions.forEach((q, qi) => {
+      const labels = [...(picked[qi] ?? [])]
+      const o = (other[qi] ?? '').trim()
+      if (o) labels.push(o)
+      answers[q.question] = labels.join(', ')
+    })
+    onSubmit(answers)
+  }
+
+  return (
+    <div style={styles.qCard}>
+      <div style={styles.qTitle}>❔ Cascade needs your input</div>
+      {questions.map((q, qi) => {
+        const multi = !!q.multiSelect
+        const sel = picked[qi] ?? []
+        return (
+          <div key={qi} style={qi > 0 ? styles.qDivider : undefined}>
+            <span style={styles.qChip}>{q.header}</span>
+            <div style={styles.qQuestion}>{q.question}</div>
+            <div style={styles.qOptions}>
+              {q.options.map((o) => {
+                const on = sel.includes(o.label)
+                return (
+                  <button
+                    key={o.label}
+                    style={{ ...styles.qOpt, ...(on ? styles.qOptOn : undefined) }}
+                    onClick={() => toggle(qi, o.label, multi)}
+                  >
+                    <span style={{ ...styles.qBox, borderRadius: multi ? 3 : '50%', ...(on ? styles.qBoxOn : undefined) }}>
+                      {on ? '✓' : ''}
+                    </span>
+                    <span>
+                      <span style={styles.qOptLabel}>{o.label}</span>
+                      {o.description && <span style={styles.qOptDesc}>{o.description}</span>}
+                    </span>
+                  </button>
+                )
+              })}
+              <input
+                style={styles.qOther}
+                type="text"
+                placeholder="Other… (type your own)"
+                value={other[qi] ?? ''}
+                onChange={(e) => setOther((s) => ({ ...s, [qi]: e.target.value }))}
+              />
+            </div>
+          </div>
+        )
+      })}
+      <button
+        style={{ ...styles.qSubmit, ...(canSubmit ? undefined : styles.qSubmitOff) }}
+        disabled={!canSubmit}
+        onClick={submit}
+      >
+        Submit answer
+      </button>
+    </div>
+  )
+}
 
 // Label for the `compacted` event's layer kind (ADR-039). Mirrors core's compactionKindLabel; inlined so the
 // webview bundle doesn't pull in the node-side @cascade/core runtime just for a string.
@@ -147,6 +226,7 @@ export function App() {
   const [status, setStatus] = useState<string | null>(null)
   const [recovering, setRecovering] = useState<{ attempt: number; reason: string } | null>(null)
   const [prompt, setPrompt] = useState<{ id: string; tool: string; detail: string } | null>(null)
+  const [question, setQuestion] = useState<{ id: string; questions: Question[] } | null>(null)
   const [busy, setBusy] = useState(false)
   const [mcp, setMcp] = useState<{ name: string; status: string; error?: string; toolNames: string[] }[] | null>(null)
   const [mem, setMem] = useState<{ core: string; archival: { id: string; text: string; ts: string }[]; hits?: { text: string; score: number }[] } | null>(null)
@@ -202,6 +282,12 @@ export function App() {
           // A write needs approval. The core loop is now PARKED awaiting respondPermission(id, …).
           setStatus(null)
           setPrompt({ id: event.id, tool: event.tool, detail: event.detail })
+          break
+        case 'question':
+          // The agent asked the user (ADR-043). The core loop is now PARKED awaiting respondQuestion(id, …).
+          setStatus(null)
+          setStreaming(null)
+          setQuestion({ id: event.id, questions: event.questions })
           break
         case 'toolStart':
           // A tool is running — drop any transient pre-tool text and add a card.
@@ -311,6 +397,7 @@ export function App() {
     vscode.postMessage({ type: 'abort' })
     setBusy(false)
     setStatus(null)
+    setQuestion(null) // abort() resolves a parked question with no answers — drop the card
   }
 
   function respond(decision: 'allow' | 'allow-always' | 'deny') {
@@ -319,11 +406,20 @@ export function App() {
     setPrompt(null) // optimistic; the core resumes and the tool card will follow
   }
 
+  function answer(answers: Answers) {
+    if (!question) return
+    vscode.postMessage({ type: 'answer', id: question.id, answers })
+    // Keep a read-only record in the transcript (like the web app) so the conversation stays coherent.
+    setItems((it) => [...it, { kind: 'question', questions: question.questions, answered: answers }])
+    setQuestion(null) // the core loop resumes with the answers
+  }
+
   function newChat() {
     setItems([])
     setStreaming(null)
     setStatus(null)
     setPrompt(null)
+    setQuestion(null)
     setBusy(false)
     vscode.postMessage({ type: 'reset' })
   }
@@ -482,6 +578,22 @@ export function App() {
             <div key={i} style={styles.compactMarker}>
               🗜 Context compacted — {it.text}
             </div>
+          ) : it.kind === 'question' ? (
+            // An answered AskUserQuestion — read-only record of what was asked and chosen.
+            <div key={i} style={styles.qAnswered}>
+              {it.questions.map((q, qi) => (
+                <div key={qi} style={qi > 0 ? { marginTop: 6 } : undefined}>
+                  <span style={styles.qChip}>{q.header}</span>
+                  <div style={styles.qAnsweredRow}>
+                    <span style={styles.qAnsweredCheck}>✓</span>
+                    <span>
+                      <span style={styles.qAnsweredQ}>{q.question} </span>
+                      <span style={styles.qAnsweredA}>{it.answered[q.question] || '—'}</span>
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : it.kind === 'tool' && it.display?.kind === 'todos' ? (
             // TodoWrite updates the SAME checklist — render only the latest card (skip superseded ones), so
             // it reads as one live list, not a 0/3 → 1/3 → 2/3 stack.
@@ -549,6 +661,7 @@ export function App() {
             </div>
           </div>
         )}
+        {question && <QuestionCard questions={question.questions} onSubmit={answer} />}
         {prompt && (
           <div style={styles.permCard}>
             <div style={styles.permTitle}>Allow Cascade to run this?</div>
@@ -731,6 +844,102 @@ const styles: Record<string, React.CSSProperties> = {
   },
   permAllow: { background: 'var(--vscode-button-background)', color: 'var(--vscode-button-foreground)', border: 'none' },
   permDeny: { color: 'var(--vscode-errorForeground)' },
+  // AskUserQuestion card (ADR-043) — blocks the loop until the user answers.
+  qCard: {
+    margin: '8px 0',
+    padding: '10px 12px',
+    borderRadius: 8,
+    border: '1px solid var(--vscode-focusBorder, var(--vscode-panel-border))',
+    background: 'var(--vscode-editorWidget-background)',
+  },
+  qTitle: { fontWeight: 600, fontSize: 12, marginBottom: 8, color: 'var(--vscode-textLink-foreground)' },
+  qDivider: { marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--vscode-panel-border)' },
+  qChip: {
+    fontSize: 10.5,
+    fontWeight: 600,
+    padding: '1px 6px',
+    borderRadius: 4,
+    background: 'var(--vscode-badge-background, rgba(255,255,255,0.08))',
+    color: 'var(--vscode-badge-foreground, inherit)',
+  },
+  qQuestion: { fontWeight: 600, margin: '6px 0 8px' },
+  qOptions: { display: 'flex', flexDirection: 'column', gap: 5 },
+  qOpt: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: 8,
+    padding: '6px 9px',
+    borderRadius: 6,
+    border: '1px solid var(--vscode-panel-border)',
+    background: 'transparent',
+    color: 'var(--vscode-foreground)',
+    cursor: 'pointer',
+    textAlign: 'left',
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+  },
+  qOptOn: {
+    border: '1px solid var(--vscode-focusBorder, var(--vscode-button-background))',
+    background: 'var(--vscode-list-activeSelectionBackground, rgba(90,140,255,0.12))',
+  },
+  qBox: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 14,
+    height: 14,
+    marginTop: 1,
+    flexShrink: 0,
+    fontSize: 10,
+    border: '1px solid var(--vscode-checkbox-border, var(--vscode-panel-border))',
+    background: 'var(--vscode-checkbox-background, transparent)',
+  },
+  qBoxOn: {
+    background: 'var(--vscode-button-background)',
+    color: 'var(--vscode-button-foreground)',
+    border: '1px solid var(--vscode-button-background)',
+  },
+  qOptLabel: { fontWeight: 600 },
+  qOptDesc: { display: 'block', fontSize: 11.5, opacity: 0.7 },
+  qOther: {
+    marginTop: 2,
+    padding: '6px 9px',
+    borderRadius: 6,
+    border: '1px solid var(--vscode-input-border, var(--vscode-panel-border))',
+    background: 'var(--vscode-input-background)',
+    color: 'var(--vscode-input-foreground)',
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+  },
+  qSubmit: {
+    marginTop: 10,
+    width: '100%',
+    padding: '5px 0',
+    borderRadius: 6,
+    border: 'none',
+    background: 'var(--vscode-button-background)',
+    color: 'var(--vscode-button-foreground)',
+    fontWeight: 600,
+    cursor: 'pointer',
+  },
+  qSubmitOff: {
+    background: 'var(--vscode-button-secondaryBackground, rgba(255,255,255,0.06))',
+    color: 'var(--vscode-disabledForeground, #888)',
+    cursor: 'default',
+  },
+  // Answered-question record (read-only, in the transcript)
+  qAnswered: {
+    margin: '8px 0',
+    padding: '8px 12px',
+    borderRadius: 8,
+    border: '1px solid var(--vscode-panel-border)',
+    background: 'var(--vscode-editorWidget-background)',
+    fontSize: 12.5,
+  },
+  qAnsweredRow: { display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 3 },
+  qAnsweredCheck: { color: 'var(--vscode-charts-green, #3a3)', flexShrink: 0 },
+  qAnsweredQ: { opacity: 0.7 },
+  qAnsweredA: { fontWeight: 600 },
   // Tool cards
   toolCard: {
     margin: '6px 0',

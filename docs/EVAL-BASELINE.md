@@ -140,3 +140,29 @@ Then update the curve table above from the scoreboards.
 > **Infra resolution (2026-07-03):** a system reboot cleared the 35B load crash — `qwen36-agentic` loaded on
 > the first attempt post-restart and swept its suite. Diagnosis confirmed: wedged driver/CUDA state, not a
 > model/config problem.
+
+## Rung 5 — ADR-038 wire enforcement, and what an honest window exposed (2026-07-04)
+
+Putting the pinned window ON THE WIRE (`options.num_ctx`, native `/api/chat`) made the 8k longctx fixtures
+run in a *real* 8k window for the first time — and the compactor, never before exercised under truth,
+failed three different ways. Each failure was traced, fixed, and locked with a replay test
+(`compactor.test.ts`); the fix ladder, in incident order:
+
+| gate | build | score | incident exposed |
+|---|---|---|---|
+| window-enforce-check | enforcement only | 10/12 | Grep `ENOTDIR` on file-as-`path` (fixed) + mask wiped a just-read changelog (6,983→341) |
+| window-gate-2 (killed) | + recency shield (keepRecent=5) | — | 5-wide shield held 21k standing over `hard` → Ollama front-truncated silently |
+| window-gate-2 | + survival mode at `hard` | 10/12 | weak summary lost the task — *"please share the task you'd like me to work on"* |
+| window-gate-3 | + [Original task] preserved | 8/12 | **backend degradation** (empty replies, stalls, one crash) — model reload cleared it |
+| window-gate-4 | same, fresh backend | **11/12, 0 regressions, exit 0** | steering nudge could still be summarized away (caught by the unit suite, not the gate) |
+| window-gate-5 | + [Latest user instruction] preserved | 9/12 | **overhead never counted**: system+tools+template ≈ 4k of the 8k window — wire showed `inputTokens: 8191/8192, outputTokens: 1` (front-truncation, one token to answer) |
+| window-gate-6 | + `overheadTokens` in every threshold; survival ceiling `min(hard, effectiveWindow)` | **11/12, 0 regressions, exit 0** | final push build (one mid-run backend crash-cascade required a model reload + rerun) |
+
+Compactor rules that came out of this (ADR-039 addendum): count-based recency shield; summarize only when
+it helps; survival at the ceiling; task + latest-instruction folded verbatim into every summary message;
+wire overhead (system + tool schemas + template) counted in every threshold.
+
+**Known weak spot (next rung candidate):** `delegate-scatter` — after survival masking, a weak model sees a
+wall of `[output masked — N chars elided]` stubs that name neither the target nor the recovery path, and
+answers "I'm ready to help" as if nothing happened. The stub should self-describe (tool + target + how to
+recover), and this fixture family is the ADR-050 delegation story anyway.

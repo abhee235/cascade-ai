@@ -29,6 +29,11 @@ export const DEFAULT_PROPORTIONAL_PCT = 0.7
 export const WARN_PCT_OFFSET = 0.1
 /** Fraction of the (effective) window kept verbatim as recent messages. */
 export const DEFAULT_KEEP_RECENT_RATIO = 0.25
+/** RECENCY SHIELD: eviction layers never touch the last N compactable tool results. The token-based
+ *  recent window alone fails when ONE big read exceeds it — it lands "older" the moment it arrives and
+ *  gets evicted before the model can use it (live incident: 8k window, changelog masked 6,983→341 right
+ *  after being read). */
+export const KEEP_RECENT_RESULTS = 5
 
 // A small window can't reserve a full 20k for the summary — cap the reserve at this fraction of the window.
 // This also guarantees `auto ≤ effectiveWindow` (proven in the ADR): reserve ≤ 0.25·window ⇒ effectiveWindow
@@ -74,6 +79,8 @@ export interface CompactionPlan {
   hard: number
   /** Keep this many of the most-recent tokens verbatim; older messages are compacted. */
   keepRecentTokens: number
+  /** Never evict the last N compactable tool results, regardless of the token boundary. */
+  keepRecentResults: number
   /** Max chars a single old tool_result may keep before it's masked. */
   toolResultMaxChars: number
   /** Which layers are enabled for this window size (cheapest first). */
@@ -130,6 +137,7 @@ export function planCompaction(input: PlanInput): CompactionPlan {
     auto,
     hard,
     keepRecentTokens: Math.floor(effectiveWindow * keepRecentRatio),
+    keepRecentResults: KEEP_RECENT_RESULTS,
     toolResultMaxChars: clamp(
       Math.floor(window * 4 * TOOL_RESULT_WINDOW_FRACTION),
       MIN_TOOL_RESULT_CHARS,

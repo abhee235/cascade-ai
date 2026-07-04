@@ -1,9 +1,16 @@
 # ADR-038 — Model-capability profile → adaptive runtime budgets (feeds CORE-PARITY A2 / A3 / A6)
 
-> **Status:** the load-bearing piece — **`num_ctx` auto-detection — is IMPLEMENTED** (`provider.detectModelLimits`
-> → Ollama `/api/show`, wired into the session's window resolution). The full `ModelProfile` (`nativeToolCalls`,
-> `parallelToolCalls`, …) and `deriveBudgets`/request-level `num_ctx` enforcement remain deferred; A2 (ADR-039)
-> already consumes the resolved window. This ADR defines the shared input A2/A3/A6 build against.
+> **Status:** **detection AND wire enforcement are IMPLEMENTED.** Detection: `provider.detectModelLimits` →
+> Ollama `/api/show`, wired into the session's window resolution. Enforcement: the session passes its
+> CONFIDENT limits (user-pinned or `/api/show`-detected — never static-map guesses) into every completion;
+> the Ollama provider routes those requests to the native `/api/chat` path and puts
+> `options.{num_ctx, num_predict, temperature}` on the wire (hosted `/v1` providers get `max_tokens` only).
+> Wire-level tests: `test/windowEnforcement.test.ts`. The full `ModelProfile` (`nativeToolCalls`,
+> `parallelToolCalls`, …) and `deriveBudgets` remain deferred; A2 (ADR-039) consumes the resolved window.
+>
+> **Enforcement fallout (measured, fixed):** making the pinned window REAL exposed that the ADR-039 mask layer
+> could wipe a just-read file at small windows (8k fixture went 8/8 → 0/3). Fixed with the count-based recency
+> shield + summarize-only-when-it-helps gate — see the ADR-039 addendum.
 >
 > **Correction (from the verification below, now reflected here):** discovery reads the Modelfile **`num_ctx`
 > parameter** — the ALLOCATED window — NOT the arch `context_length`, which is the trained CEILING (262144 for

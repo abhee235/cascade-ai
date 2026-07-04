@@ -40,7 +40,15 @@ export const GrepTool: Tool<z.infer<typeof inputSchema>> = {
       if (e instanceof ProjectPathError) return { content: e.message, isError: true }
       throw e
     }
-    const files = await fg(input.glob ?? '**/*', { cwd, onlyFiles: true, dot: false, ignore: IGNORE, absolute: true })
+    // Models pass a FILE as `path` constantly (ripgrep allows it; observed live: 6 identical ENOTDIR retries
+    // burned a task's budget). Accept it: a file path means "search just this file".
+    let files: string[]
+    const stat = await import('node:fs/promises').then((m) => m.stat(cwd).catch(() => null))
+    if (stat && stat.isFile()) {
+      files = [cwd]
+    } else {
+      files = await fg(input.glob ?? '**/*', { cwd, onlyFiles: true, dot: false, ignore: IGNORE, absolute: true })
+    }
 
     const out: string[] = []
     for (const file of files) {

@@ -27,6 +27,13 @@ export interface CompletionRequest {
   tools?: ToolSchema[]
   /** Sampling temperature (E1/eval: 0 for determinism). Omit ⇒ backend default. */
   temperature?: number
+  /** ADR-038 ENFORCEMENT: the ALLOCATED context window the caller is planning against. The provider must
+   *  put it on the wire (Ollama: options.num_ctx via the native path) — otherwise the compactor protects a
+   *  window the model may not actually have, and Ollama silently front-truncates the prompt (system prompt
+   *  lost mid-session, no error anywhere). Omit ⇒ backend default (hosted providers: fixed windows). */
+  contextWindow?: number
+  /** ADR-038: output-token cap (Ollama num_predict / OpenAI max_tokens). */
+  maxOutputTokens?: number
 }
 
 /** Token counts reported by the backend for one completion (E1 / ADR-040). Fields are optional because not

@@ -123,6 +123,43 @@ window (override → `contextWindowForModel` → default) and calls `planCompact
   Regression test asserts `recent[0].role === 'assistant'` and zero orphaned tool_results.
 - (Follow-up) live app: drive a small-window model to auto-compaction and confirm the loop shrinks history.
 
+## Addendum (2026-07-04): the recency shield — a measured incident, not a theory
+
+When ADR-038 enforcement made the pinned window REAL, the 8k fixture `longctx-changelog-version` collapsed
+from 8/8 to 0/3. The trace showed why: the model's FIRST turn read the changelog it needed; usage crossed
+`auto` (6,983 > 5,734) and the mask layer wiped the just-read file — `6,983 → 341` tokens — leaving the model
+nothing to answer from. The token-based `keepRecentTokens` window (1,536 @ 8k) cannot prevent this: one big
+fresh read exceeds it and lands "older" the moment it arrives. It is a known failure: clearing all results
+leaves the model with zero working context.
+
+Two rules were added ([compactor.ts] / compactionLayers.ts, regression-tested against the incident history):
+
+1. **Count-based recency shield** (`keepRecentResults = 5`, the common keep-recent count): mask / microcompact / snip
+   never evict the last N compactable tool results; the summarize boundary is capped at the first shielded
+   block. `collapse` stays unshielded (a newer read of the same target always survives — no working-set loss).
+   Under `force` (reactive overflow) the shield shrinks to 1 — survival wins, but the very last result always
+   lives (the common floor).
+2. **Summarize only when it helps**: over-`auto`-but-under-`hard` is a SOFT state. If the unshielded older
+   region is too small for a summary to bring usage back under `auto`, skip the LLM side-query and proceed
+   as-is — the next cycle (or a reactive force) reclaims once newer work rolls the shield forward. Before this
+   gate, the compactor destroyed context *for no relief* precisely when the working set was the whole window.
+3. **Survival mode at `hard`** (second incident, window-gate-2 delegate-prose): one 7-parallel-read turn hit
+   ~32k estimated in the 8k window; the 5-wide shield left 21k standing — over `hard`, so Ollama silently
+   front-truncated the prompt and the model lost its own history. Over `hard` (or reactive `force`) there is
+   no soft option: the shield shrinks to 1 and the compactor must reclaim.
+4. **Task + steering preserved verbatim across summarize** (third incident, window-gate-2 longctx-wire-modules):
+   a weak model's summary lost the task statement — its next reply was *"please share the task you'd like me
+   to work on"*; the same mechanism can eat a just-injected steering nudge before the model reads it. The
+   summary message now folds in `[Original task]` and `[Latest user instruction]` verbatim (header-dedup makes
+   repeat compaction idempotent). The mission is structural, never entrusted to a summarizer.
+5. **Overhead counts** (fourth incident, window-gate-5): the wire prompt = system prompt + tool schemas +
+   chat template + messages — ~4k tokens of overhead in an 8k window, HALF the budget, which the compactor
+   never counted. Measured on the wire: `inputTokens: 8191` of 8192 (Ollama front-truncation) and
+   `outputTokens: 1` — one token of room to answer. The loop now measures `overheadTokens` (system chars +
+   schema JSON chars, /4, + template pad) and every threshold compares `estimate(messages) + overhead`; the
+   survival ceiling is `min(hard, effectiveWindow)` so the output reserve is honored on backends where
+   `num_ctx` covers prompt AND output together (large windows unaffected — `hard < effectiveWindow` there).
+
 ## Follow-ups
 
 - Implement `mode: 'fresh-context'` for the ~8k extreme (pairs with the Ralph-loop idea).

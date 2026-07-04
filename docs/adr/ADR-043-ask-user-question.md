@@ -1,8 +1,8 @@
 # ADR-043 — AskUserQuestion: structured mid-task questions (CORE-PARITY §B: AskUserQuestionTool)
 
-> **Status:** accepted; **engine implemented + tested** (tool + protocol + scheduler park + session round-trip +
-> tier-sized description). **Deferred (named):** the frontend question UI (web card + extension) — the bounded
-> next step; the engine is verified headlessly.
+> **Status:** accepted; **fully implemented + tested** — engine (tool + protocol + scheduler park + session
+> round-trip + tier-sized description) AND both frontend UIs (web QuestionCard; extension QuestionCard +
+> `answer` bridge, 2026-07-04). Abort-while-parked race fixed at the session seam (see addendum).
 
 ## Context
 
@@ -59,9 +59,24 @@ is the same shape, reused.
 
 ## Follow-ups
 
-- **Frontend question UI** (web card with options + an always-present "Other" free-text; extension equivalent) →
-  `answer` inbound → `session.respondQuestion`. The server relays `question`/`answer` like it does `permission`.
+- ~~**Frontend question UI** (web card with options + an always-present "Other" free-text; extension equivalent) →
+  `answer` inbound → `session.respondQuestion`. The server relays `question`/`answer` like it does `permission`.~~
+  **DONE (2026-07-04):** web (QuestionCard + wsServer `answer`) and the extension (`QuestionCard` in `ui/App.tsx`,
+  `answer` inbound in `CascadeViewProvider`, answered read-only record in the transcript). Before the extension
+  bridge, a question in VS Code parked the loop with no UI able to answer — a guaranteed hang, since the tool is
+  a builtin advertised in every session. Verified by driving the built webview bundle in real Chrome (12 checks:
+  render, submit gating, radio/checkbox semantics, Other join, exact `answer` payload, record rendering,
+  new-chat clearing).
 - `preview` rendering (side-by-side option compare) — schema field is already there.
+
+## Addendum (2026-07-04): abort must observe the park — a race, not a drain
+
+`session.abort()` drained parked *permissions* but not parked *answers*: Stop during a question hung the loop
+forever, in every frontend. Draining `pendingAnswers` in `abort()` is NOT sufficient — the regression test
+caught a race: the scheduler yields the `question` event and only *then* awaits `ask.request(id)`; a consumer
+that calls `abort()` on receiving the event does so while the generator is still suspended at the yield, so the
+map is empty and the drain no-ops. The fix: `ask.request` itself watches the turn's abort signal (resolves `{}`
+immediately if already aborted, or on the `abort` event). The test is honest — it hangs without the fix.
 
 [builtins/AskUserQuestion.ts]: ../../packages/core/src/tools/builtins/AskUserQuestion.ts
 [scheduler.ts]: ../../packages/core/src/tools/scheduler.ts
