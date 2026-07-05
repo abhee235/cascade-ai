@@ -26,15 +26,27 @@ const LARGE_INPUT_TOOLS = new Set<string>(['Write', 'Edit', 'Bash'])
 const MASK_PREFIX = '[output masked'
 export const SUPERSEDED_MARKER =
   '[Superseded — a newer read/search of the same target appears later; this stale copy was cleared to save context.]'
-export const CLEARED_MARKER = '[Old tool result content cleared to save context.]'
+/** Prefix of a microcompact-cleared result (the full text is per-block: it names the tool + target). */
+export const CLEARED_MARKER = '[Old tool result cleared'
 
 /** True if a tool_result's content was already evicted by an earlier layer (mask/collapse/microcompact). */
 export function isClearedContent(content: string): boolean {
   return (
     content.startsWith(MASK_PREFIX) ||
     content === SUPERSEDED_MARKER ||
-    content === CLEARED_MARKER
+    content.startsWith(CLEARED_MARKER)
   )
+}
+
+/** Short "what was this" descriptor from a tool_use input — SELF-DESCRIBING STUBS. Measured
+ *  (delegate-scatter, three gates): a weak model shown six anonymous "[output masked — N chars elided]"
+ *  stubs concluded nothing had happened ("I'm ready to help. I see the project structure…"). A stub must
+ *  answer what was masked and how to get it back — the model can re-run the tool or delegate; it cannot
+ *  reconstruct an anonymous hole. */
+function targetOf(input: unknown): string {
+  const i = (input ?? {}) as Record<string, unknown>
+  const t = i.file_path ?? i.pattern ?? i.command ?? i.path ?? i.prompt
+  return typeof t === 'string' && t.length > 0 ? ` ${t.slice(0, 80)}` : ''
 }
 
 /**
@@ -91,15 +103,23 @@ const asBlocks = (m: Message): ContentBlock[] | null =>
 type ToolUseBlock = Extract<ContentBlock, { type: 'tool_use' }>
 type ToolResultBlock = Extract<ContentBlock, { type: 'tool_result' }>
 
-/** Map tool_use id → tool name across the whole history (results carry only the id). */
-function toolNameById(messages: Message[]): Map<string, string> {
-  const map = new Map<string, string>()
+/** Map tool_use id → the tool_use block across the whole history (results carry only the id; the eviction
+ *  stubs need the NAME and the input's target to self-describe). */
+function toolUseById(messages: Message[]): Map<string, ToolUseBlock> {
+  const map = new Map<string, ToolUseBlock>()
   for (const m of messages) {
     const blocks = asBlocks(m)
     if (!blocks) continue
-    for (const b of blocks) if (b.type === 'tool_use') map.set(b.id, b.name)
+    for (const b of blocks) if (b.type === 'tool_use') map.set(b.id, b)
   }
   return map
+}
+
+/** The self-describing eviction stub: what was evicted, and both recovery paths. */
+function describeEvicted(use: ToolUseBlock | undefined, prefix: string, chars?: number): string {
+  const what = use ? ` — ${use.name}${targetOf(use.input)}` : ''
+  const size = chars !== undefined ? `, ${chars} chars elided` : ''
+  return `${prefix}${what}${size}. Re-run the tool if you still need this content, or use a Subagent for bulk work.]`
 }
 
 /** A stable dedupe key for a read/search tool_use, or null if it isn't dedupable. */
@@ -172,6 +192,7 @@ export function collapseSuperseded(messages: Message[], olderCount: number): Mes
  * historical Phase-A behaviour, preserved as the `mask` layer.
  */
 export function maskObservations(messages: Message[], olderCount: number, maxToolChars = 2000, shield?: Set<string>): Message[] {
+  const uses = toolUseById(messages)
   let changed = false
   const out = messages.map((m, idx) => {
     if (idx >= olderCount) return m
@@ -182,7 +203,7 @@ export function maskObservations(messages: Message[], olderCount: number, maxToo
       if (b.type === 'tool_result' && shield?.has(b.tool_use_id)) return b // recency shield
       if (b.type === 'tool_result' && !isClearedContent(b.content) && b.content.length > maxToolChars) {
         touched = true
-        return { ...b, content: `[output masked — ${b.content.length} chars elided to save context]` }
+        return { ...b, content: describeEvicted(uses.get(b.tool_use_id), MASK_PREFIX, b.content.length) }
       }
       return b
     })
@@ -200,7 +221,7 @@ export function maskObservations(messages: Message[], olderCount: number, maxToo
  * tool NAME (COMPACTABLE_TOOLS) so load-bearing results (TodoWrite, Memory, MCP) are never touched.
  */
 export function microcompactToolResults(messages: Message[], olderCount: number, shield?: Set<string>): Message[] {
-  const names = toolNameById(messages)
+  const uses = toolUseById(messages)
   let changed = false
   const out = messages.map((m, idx) => {
     if (idx >= olderCount) return m
@@ -212,10 +233,10 @@ export function microcompactToolResults(messages: Message[], olderCount: number,
       if (
         b.type === 'tool_result' &&
         !isClearedContent(b.content) &&
-        COMPACTABLE_TOOLS.has(names.get(b.tool_use_id) ?? '')
+        COMPACTABLE_TOOLS.has(uses.get(b.tool_use_id)?.name ?? '')
       ) {
         touched = true
-        return { ...b, content: CLEARED_MARKER }
+        return { ...b, content: describeEvicted(uses.get(b.tool_use_id), CLEARED_MARKER) }
       }
       return b
     })

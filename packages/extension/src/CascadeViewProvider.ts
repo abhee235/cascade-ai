@@ -80,6 +80,8 @@ export class CascadeViewProvider implements vscode.WebviewViewProvider {
         mcpConnect: sdkConnect,
         embedModel: cfg.get<string>('embedModel') || undefined,
         autoMemory: cfg.get<boolean>('autoMemory', false),
+        checkCommand: cfg.get<string>('checkCommand') || undefined, // ADR-051: workspace-declared "done" check
+
         contextWindow: cfg.get<number>('contextWindow') || undefined,
         compactRatio: cfg.get<number>('compactRatio') || undefined,
         keepRecentRatio: cfg.get<number>('keepRecentRatio') || undefined,

@@ -47,7 +47,10 @@ describe('layer: microcompact (evict compactable tool results, keep load-bearing
       res('t1', 'todos updated'),
     ]
     const out = microcompactToolResults(msgs, 4)
-    expect(resultContent(out[1])).toBe(CLEARED_MARKER) // Grep result evicted
+    // Evicted — with a SELF-DESCRIBING stub (delegate-scatter: anonymous stubs read as "nothing happened").
+    expect(resultContent(out[1])).toContain(CLEARED_MARKER)
+    expect(resultContent(out[1])).toContain('Grep x') // names the tool and its target
+    expect(resultContent(out[1])).toContain('Re-run the tool') // and the recovery path
     expect(resultContent(out[3])).toBe('todos updated') // TodoWrite result preserved
   })
 
@@ -55,6 +58,22 @@ describe('layer: microcompact (evict compactable tool results, keep load-bearing
     const msgs: Message[] = [use('g1', 'Grep', { pattern: 'x' }), res('g1', 'grep output')]
     const out = microcompactToolResults(msgs, 0) // nothing is "older"
     expect(resultContent(out[1])).toBe('grep output')
+  })
+})
+
+describe('self-describing mask stubs (delegate-scatter rung)', () => {
+  it('a masked read names the tool, the file, the size, and both recovery paths', async () => {
+    const { maskObservations } = await import('../src/context/compactionLayers')
+    const msgs: Message[] = [use('r1', 'Read', { file_path: 'src/vault/part3.js' }), res('r1', 'v'.repeat(5000))]
+    const out = maskObservations(msgs, 2, 1000)
+    const stub = resultContent(out[1])
+    expect(stub).toContain('Read src/vault/part3.js')
+    expect(stub).toContain('5000 chars')
+    expect(stub).toContain('Re-run the tool')
+    expect(stub).toContain('Subagent')
+    // Idempotent: a described stub is recognized as already-cleared and never re-masked or re-described.
+    expect(resultContent(maskObservations(out, 2, 1000)[1])).toBe(stub)
+    expect(resultContent(microcompactToolResults(out, 2)[1])).toBe(stub)
   })
 })
 

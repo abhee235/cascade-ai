@@ -8,7 +8,7 @@
 // (an agent that edited the tests can't game the check) → run the task's check → append one row to
 // eval/runs/<label>/results.jsonl. The trace is the diagnosis artifact; the analyzer (E4) classifies failures.
 
-import { spawnSync } from 'node:child_process'
+import { execSync, spawnSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, appendFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -39,6 +39,37 @@ const label = args.label ?? `${new Date().toISOString().slice(0, 16).replace(/[:
 const runDir = join(ROOT, 'eval', 'runs', label)
 const tracesDir = join(runDir, 'traces')
 mkdirSync(tracesDir, { recursive: true })
+
+// ── single-runner lock ──────────────────────────────────────────────────────────────────────────────────
+// Two concurrent evals interleave rows/traces and fight over the GPU — observed live: an orphaned runner
+// survived a TaskStop (Windows kills the shell, not the tree) and double-wrote a 36-row "12-task" gate,
+// inflating every task's turns ~3×. PID-liveness handles stale locks from crashed runs.
+const LOCK = join(ROOT, 'eval', 'runs', '.eval.lock')
+const lockAlive = (pid: number): boolean => {
+	try {
+		process.kill(pid, 0)
+		return true
+	} catch {
+		return false
+	}
+}
+try {
+	const prev = Number(readFileSync(LOCK, 'utf8'))
+	if (prev && lockAlive(prev)) {
+		console.error(`another eval is already running (pid ${prev}) — two runs corrupt each other; aborting`)
+		process.exit(1)
+	}
+} catch {
+	/* no lock file — free to run */
+}
+writeFileSync(LOCK, String(process.pid))
+process.on('exit', () => {
+	try {
+		rmSync(LOCK, { force: true })
+	} catch {
+		/* best-effort */
+	}
+})
 
 interface TaskSpec {
 	id: string
@@ -130,6 +161,20 @@ async function waitForBackend(): Promise<void> {
 	}
 	console.error('\nbackend never came back — aborting the run (rows so far are preserved)')
 	process.exit(1)
+}
+
+// WATCHDOG (measured, 6 crashes in one day): a crashed runner often comes back DEGRADED — empty replies,
+// then more crashes — until the model is UNLOADED and freshly loaded (the manual remedy that worked twice
+// live). `ollama stop` unloads; the next waitForBackend() probe forces the fresh load. Best-effort.
+async function recycleModel(): Promise<void> {
+	if (args.provider !== 'ollama') return
+	process.stdout.write(' ♻ recycling model ')
+	try {
+		execSync(`ollama stop ${args.model}`, { stdio: 'ignore', timeout: 60_000 })
+	} catch {
+		/* daemon busy/gone — waitForBackend will handle it */
+	}
+	await new Promise((r) => setTimeout(r, 3_000))
 }
 
 // ── one task × one trial ─────────────────────────────────────────────────────────────────────────────────
@@ -238,9 +283,11 @@ for (const id of wanted) {
 		// The backend died mid-task (not the model's fault): wait for it to come back and retry ONCE.
 		// The crashed attempt's trace is kept (-r suffix distinguishes the retry's).
 		if (row.backendFailed) {
-			process.stdout.write(' 💥 backend crashed — retrying once ')
+			process.stdout.write(' 💥 backend crashed — recycling model & retrying once ')
+			await recycleModel() // a crashed runner comes back DEGRADED without a fresh load (watchdog)
 			await waitForBackend()
 			row = await runTrial(task, trial, 2)
+			if (row.backendFailed) await recycleModel() // don't let a poisoned runner leak into the next task
 		}
 		appendFileSync(join(runDir, 'results.jsonl'), `${JSON.stringify(row)}\n`)
 		rows.push(row)

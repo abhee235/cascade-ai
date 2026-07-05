@@ -108,6 +108,11 @@
           "default": 0.25,
           "description": "Fraction of the context window kept as verbatim recent messages during compaction (the rest is summarized)."
         },
+        "cascade.checkCommand": {
+          "type": "string",
+          "default": "",
+          "description": "The command that defines \"done\" for agent tasks in this workspace (e.g. `npm test`). When set, Cascade refuses premature completion until the model has run it (two reminders, then accepts). Empty = default behavior: a gentler single reminder that only fires after unverified file edits."
+        },
         "cascade.embedModel": {
           "type": "string",
           "default": "nomic-embed-text",

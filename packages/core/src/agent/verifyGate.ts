@@ -7,6 +7,8 @@
 // terminal branch, injects a single <system-reminder> user turn and continues. ONE nudge per submit — the
 // second terminal answer is accepted as-is (no infinite loops; "state why you can't verify" is a valid out).
 
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { ContentBlock, Message } from '../protocol'
 import type { ToolUse } from '../tools/runTool'
 
@@ -44,14 +46,45 @@ export function foldVerifyState(prev: boolean, toolUses: ToolUse[], results: Con
 	return edited
 }
 
-/** The nudge, appended as a user turn (same channel as the ADR-034 reminder — reaches the model, not the UI). */
-export function buildVerifyNudge(): Message {
+// ── ADR-051: gate hardening — evidence-driven, never tier-branched (inert without a resolved check) ────────
+
+/** The check that defines "done" for this session, when one is known.
+ *  `declared` = a frontend/eval explicitly passed it (the context stated done-means-check-passes);
+ *  false = resolved from the repo (package.json) — informative for the nudge text, but it must not change
+ *  WHEN the gate fires (chat over a repo with tests is still chat). */
+export interface CheckCommand {
+	command: string
+	declared: boolean
+}
+
+/** Resolve the project's canonical check from package.json `scripts.test` (npm's placeholder excluded).
+ *  Sync + once at session build; absent/unreadable ⇒ undefined (the gate keeps today's exact behavior). */
+export function resolveCheckCommand(cwd: string): string | undefined {
+	try {
+		const raw = readFileSync(join(cwd, 'package.json'), 'utf8')
+		const test = JSON.parse(raw)?.scripts?.test
+		if (typeof test === 'string' && test.length > 0 && !/no test specified/i.test(test)) return 'npm test'
+	} catch {
+		/* no package.json / malformed — no signal, gate stays exactly as before */
+	}
+	return undefined
+}
+
+/** The nudge, appended as a user turn (same channel as the ADR-034 reminder — reaches the model, not the UI).
+ *  ADR-051: when the check command is KNOWN, the nudge is a DIRECTIVE naming it (weak models execute
+ *  directives, not abstractions — measured); and it ends by re-anchoring to the task (the item-4 lesson:
+ *  a reminder that reads like conversation gets answered instead of obeyed). */
+export function buildVerifyNudge(check?: CheckCommand, noEdits = false): Message {
+	const what = noEdits
+		? 'You are finishing without having changed any files or run the project’s check.'
+		: 'You edited files but never ran any verification.'
+	const directive = check
+		? `Run \`${check.command}\` with the Bash tool NOW and report the result — a failing run is useful information; silence is not.`
+		: "Before finishing: run the project's tests (e.g. `node --test`, `npm test`, or the project's documented test command) and report the result — or state explicitly why verification is not possible here."
 	return {
 		role: 'user',
 		content:
-			'<system-reminder>You edited files but never ran any verification. Before finishing: run the ' +
-			"project's tests (e.g. `node --test`, `npm test`, or the project's documented test command) and " +
-			'report the result — or state explicitly why verification is not possible here. Then give your ' +
-			'final answer.</system-reminder>',
+			`<system-reminder>${what} ${directive} This is a background note, NOT a new request: do not reply to it — ` +
+			'run the check, then give your final answer on the ORIGINAL task.</system-reminder>',
 	}
 }

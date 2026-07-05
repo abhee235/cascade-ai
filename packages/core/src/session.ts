@@ -9,6 +9,7 @@ import type { ActivityEvent, ContentBlock, Message } from './protocol'
 import type { ModelProvider } from './llm/provider'
 import { runAgentLoop } from './agent/agentLoop'
 import { gatherProjectContext } from './agent/projectContext'
+import { resolveCheckCommand, type CheckCommand } from './agent/verifyGate'
 import type { PermissionController, PermissionMode, PermissionState } from './permissions/gate'
 import { NoopTracer, type Tracer } from './observability/tracer'
 import { join } from 'node:path'
@@ -63,6 +64,11 @@ export interface SessionOptions {
   /** ADR-049: refuse a terminal answer when files were edited but nothing verified them (one nudge turn,
    *  then accept). Default true. */
   verifyGate?: boolean
+  /** ADR-051: the command that defines "done" for this session (eval runner / web builder pass it). When
+   *  set, the verify gate names it in a DIRECTIVE nudge, allows two strikes, and holds even no-edit terminal
+   *  answers to it. When absent, the session may still resolve `npm test` from package.json for the nudge
+   *  TEXT — but firing semantics stay exactly ADR-049 (chat over a repo with tests is still chat). */
+  checkCommand?: string
   /** ADR-050: remind the model once to delegate when bulk reads dominate the window. Default true. */
   delegateNudge?: boolean
   /** ADR-036: load `.cascade/hooks.json` from the project (default true). Frontends MUST pass false when the
@@ -138,6 +144,14 @@ export function createSession(opts: SessionOptions): CascadeSession {
   // ADR-036: project hooks (.cascade/hooks.json) — loaded once; null (absent/invalid) = zero code path.
   // Skipped entirely when the frontend marks the cwd untrusted (loadProjectHooks: false — see SessionOptions).
   const hooksConfig = opts.loadProjectHooks === false ? undefined : (loadHooksConfig(opts.cwd) ?? undefined)
+  // ADR-051: the check that defines "done". Declared (frontend/eval) beats resolved (package.json); the
+  // distinction matters — only a DECLARED check hardens the gate's firing conditions (see verifyGate.ts).
+  const check: CheckCommand | undefined = opts.checkCommand
+    ? { command: opts.checkCommand, declared: true }
+    : (() => {
+        const resolved = resolveCheckCommand(opts.cwd)
+        return resolved ? { command: resolved, declared: false } : undefined
+      })()
   const todoStore = new TodoStore(join(opts.cwd, '.cascade', 'todos.json'))
 
   // MCP (Phase 9): build the hub from config and start connecting in the BACKGROUND (non-blocking) so
@@ -267,6 +281,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
           projectContext, // ADR-046: dir tree + git status (gathered once above)
           maxTurns: opts.maxTurns,
           verifyGate: opts.verifyGate, // ADR-049 (default on in the loop)
+          check, // ADR-051: known check command (declared by the frontend, or resolved from package.json)
           delegateNudge: opts.delegateNudge, // ADR-050 (default on in the loop)
           hooks: hooksConfig, // ADR-036
           modelLimits: confidentLimits.contextWindow || confidentLimits.maxOutputTokens ? confidentLimits : undefined, // ADR-038 enforcement

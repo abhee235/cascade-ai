@@ -195,3 +195,18 @@ a 600s task budget (baseline's 67s came from the pre-enforcement build silently 
 failures are now TIME, not confusion (t1 timed out mid-grind, still working correctly). The budget was
 calibrated for the cheating era; recalibrating it (or a compaction-latency rung, e.g. cheaper summaries) is
 a review-point decision.
+
+## Rung 7 — self-describing stubs + ADR-051 core + instrument hardening (2026-07-05)
+
+- **Self-describing eviction stubs** (delegate-scatter's diagnosis): masked/cleared results now name the
+  tool + target + both recovery paths. Measured (clean run): scatter 2/3 at N=3 (from ~never), prose ✅;
+  scatter still flips at N=1 — its full cure remains true delegation (ADR-050).
+- **ADR-051 core** (verify-gate hardening) shipped INERT: activates only when a check command is declared
+  (nothing declares one yet); measurement batched with the next eval per the new method.
+- **Instrument**: crash watchdog (model recycle — a crashed runner returns DEGRADED until unload/reload);
+  single-runner lock (an orphaned runner survived a TaskStop and double-wrote a 36-row "12-task" gate —
+  interleaved rows, 3× turn inflation from GPU contention; locks + PID-liveness now make that impossible);
+  changelog budget 600→900s (honest-window physics).
+- **Gate**: 10/12; the flagged changelog ❌ is the unchanged known-marginal (≈50% before and after; trace =
+  the oversized-first-bite signature, 8,191/8,192 + 1 output token). Root cause queued as the NEXT BATCH:
+  ADR-052 window-aware Read bites + overhead-estimate calibration from real `prompt_eval_count`.

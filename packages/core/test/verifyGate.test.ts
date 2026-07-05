@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { runAgentLoop, type LoopDeps } from '../src/agent/agentLoop'
-import { foldVerifyState, isVerifyCommand } from '../src/agent/verifyGate'
+import { foldVerifyState, isVerifyCommand, resolveCheckCommand } from '../src/agent/verifyGate'
 import type { Message } from '../src/protocol'
 import { createFakeProvider, textDelta, toolUse, done, type FakeProvider } from './fakeProvider'
 
@@ -71,6 +71,65 @@ describe('verify gate (ADR-049) — through the real loop', () => {
 	})
 })
 
+describe('verify gate hardening (ADR-051) — evidence-driven, inert for chat', () => {
+	it('DECLARED check + skipped verification: directive nudge names the command, TWO strikes, then accepts', async () => {
+		const provider = createFakeProvider([
+			[toolUse('w1', 'Write', { file_path: 'out.txt', content: 'x' }), done('tool_use')],
+			[textDelta('Done!'), done('end_turn')], // strike 1
+			[textDelta('Really done!'), done('end_turn')], // strike 2 (weak models ignore single nudges — measured)
+			[textDelta('I cannot run tests here.'), done('end_turn')], // accepted after the budget
+		])
+		const messages: Message[] = [{ role: 'user', content: 'do the task' }]
+		await drain(runAgentLoop(messages, deps(provider, { check: { command: 'node --test', declared: true } })))
+		expect(provider.calls.length).toBe(4)
+		expect(historyText(messages)).toContain('Run `node --test` with the Bash tool NOW') // directive, not abstraction
+		expect(historyText(messages)).toContain('ORIGINAL task') // re-anchored (the item-4 lesson)
+	})
+
+	it('DECLARED check holds even NO-EDIT terminals to it (eval/builder declared done-means-check-passes)', async () => {
+		const provider = createFakeProvider([
+			[textDelta('Everything looks correct already.'), done('end_turn')], // no edits, no check → gate objects
+			[toolUse('b1', 'Bash', { command: 'node --test' }), done('tool_use')], // the nudge works: check runs
+			[textDelta('Tests pass; nothing to change.'), done('end_turn')],
+		])
+		const messages: Message[] = [{ role: 'user', content: 'fix the bug if any' }]
+		await drain(runAgentLoop(messages, deps(provider, { check: { command: 'node --test', declared: true } })))
+		expect(historyText(messages)).toContain('without having changed any files')
+		expect(provider.calls.length).toBe(3)
+	})
+
+	it('resolved-but-not-declared (package.json): no-edit Q&A untouched; edit-nudge names the command but stays ONE strike', async () => {
+		const check = { command: 'npm test', declared: false }
+		// Q&A: must not fire at all — chat over a repo with tests is still chat (no-overfitting rule).
+		const qa = createFakeProvider([[textDelta('Paris.'), done('end_turn')]])
+		const qaMsgs: Message[] = [{ role: 'user', content: 'capital of France?' }]
+		await drain(runAgentLoop(qaMsgs, deps(qa, { check })))
+		expect(qa.calls.length).toBe(1)
+		// Edits: fires as ADR-049 (once), but the TEXT now names the resolved command.
+		const ed = createFakeProvider([
+			[toolUse('w1', 'Write', { file_path: 'out.txt', content: 'x' }), done('tool_use')],
+			[textDelta('Done!'), done('end_turn')], // strike 1 (and only)
+			[textDelta('No tests needed.'), done('end_turn')], // accepted — strikes stay 1 without declaration
+		])
+		const edMsgs: Message[] = [{ role: 'user', content: 'write it' }]
+		await drain(runAgentLoop(edMsgs, deps(ed, { check })))
+		expect(ed.calls.length).toBe(3)
+		expect(historyText(edMsgs)).toContain('Run `npm test` with the Bash tool NOW')
+	})
+
+	it('a strong model that runs the check unprompted never sees the gate (declared or not)', async () => {
+		const provider = createFakeProvider([
+			[toolUse('w1', 'Write', { file_path: 'out.txt', content: 'x' }), done('tool_use')],
+			[toolUse('b1', 'Bash', { command: 'npm test' }), done('tool_use')],
+			[textDelta('Done, verified.'), done('end_turn')],
+		])
+		const messages: Message[] = [{ role: 'user', content: 'task' }]
+		await drain(runAgentLoop(messages, deps(provider, { check: { command: 'npm test', declared: true } })))
+		expect(provider.calls.length).toBe(3) // zero added turns — the gate is inert when behavior is already right
+		expect(historyText(messages)).not.toContain('system-reminder>You')
+	})
+})
+
 describe('verify gate — pure helpers', () => {
 	it('isVerifyCommand matches the runners incl. run-tests.mjs; ignores non-Bash and non-test commands', () => {
 		expect(isVerifyCommand({ id: '1', name: 'Bash', input: { command: 'node --test' } })).toBe(true)
@@ -89,5 +148,16 @@ describe('verify gate — pure helpers', () => {
 		const test = { id: 't', name: 'Bash', input: { command: 'npm test' } }
 		const testResult = [{ type: 'tool_result' as const, tool_use_id: 't', content: 'FAIL', isError: true }]
 		expect(foldVerifyState(true, [test], testResult)).toBe(false) // running a RED suite still counts as verifying
+	})
+
+	it('resolveCheckCommand: real test script → npm test; npm placeholder or no package.json → undefined', () => {
+		const { writeFileSync } = require('node:fs') as typeof import('node:fs')
+		const withTest = mkdtempSync(join(tmpdir(), 'vres-'))
+		writeFileSync(join(withTest, 'package.json'), JSON.stringify({ scripts: { test: 'vitest run' } }))
+		expect(resolveCheckCommand(withTest)).toBe('npm test')
+		const placeholder = mkdtempSync(join(tmpdir(), 'vres-'))
+		writeFileSync(join(placeholder, 'package.json'), JSON.stringify({ scripts: { test: 'echo "Error: no test specified" && exit 1' } }))
+		expect(resolveCheckCommand(placeholder)).toBeUndefined()
+		expect(resolveCheckCommand(mkdtempSync(join(tmpdir(), 'vres-')))).toBeUndefined() // no package.json
 	})
 })

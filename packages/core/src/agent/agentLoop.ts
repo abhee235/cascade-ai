@@ -18,7 +18,7 @@ import { streamWithRecovery, type RecoveryOptions } from '../llm/resilience'
 import type { ToolUse } from '../tools/runTool'
 import { scheduleTools } from '../tools/scheduler'
 import { buildTodoReminder, shouldRemindTodos, type TodoReminderConfig } from './todoReminder'
-import { buildVerifyNudge, foldVerifyState } from './verifyGate'
+import { buildVerifyNudge, foldVerifyState, isVerifyCommand } from './verifyGate'
 import { buildDelegateNudgeText, foldReadPressure, READ_PRESSURE_FRACTION, sawSubagent } from './delegateNudge'
 
 export interface LoopDeps {
@@ -45,6 +45,10 @@ export interface LoopDeps {
   /** ADR-049: refuse a terminal answer when files were edited but nothing verified them (one nudge turn,
    *  then accept). Default ON — it only ever fires when unverified edits exist. Set false to opt out. */
   verifyGate?: boolean
+  /** ADR-051: the check that defines "done" for this session (eval/builder pass it; the session may resolve
+   *  one from package.json). With a check known, the nudge NAMES the command and the gate allows two strikes;
+   *  a DECLARED check also holds no-edit terminals to it. Absent ⇒ ADR-049 behavior exactly. */
+  check?: import('./verifyGate').CheckCommand
   /** ADR-050 rung 2: when bulk reads have eaten a large share of the window and no delegation happened,
    *  remind the model ONCE to send explore subagents instead. Default ON; needs a known window (compact
    *  deps) and the Subagent tool in the registry, so children/chat-only sessions never see it. */
@@ -128,9 +132,16 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   const maxTurns = deps.maxTurns ?? 10
   let turn = 0
   // ADR-049 verification gate: `editedSinceVerify` = a file-mutating tool succeeded and no test command has
-  // run since. At the terminal branch we nudge ONCE per submit, then accept the next answer unconditionally.
+  // run since. At the terminal branch we nudge, then (after the strike budget) accept unconditionally.
+  // ADR-051: with a known check the budget is 2 strikes (weak models ignore single nudges — measured) and a
+  // DECLARED check also holds no-edit terminals to it (`verifiedEver`); without one, exact ADR-049 behavior.
   let editedSinceVerify = false
-  let verifyNudged = false
+  let verifyNudges = 0
+  let verifiedEver = false
+  // Two strikes ONLY for a DECLARED check (eval/builder said done-means-check-passes). A package.json-
+  // resolved check improves the nudge TEXT but never the firing semantics — chat stays one-nudge (the
+  // no-overfitting rule: resolved-from-repo must not make the gate pushier for everyday strong-model use).
+  const verifyStrikes = deps.check?.declared ? 2 : 1
   // ADR-050 delegation nudge: cumulative bulk-read result tokens this submit; fires once when they cross
   // READ_PRESSURE_FRACTION of the window without any Subagent use. Window comes from the compaction plan.
   let readPressureTokens = 0
@@ -238,14 +249,15 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     if (text) display.push({ type: 'text', text })
     if (display.length) yield { type: 'message', message: { role: 'assistant', content: display } }
 
-    // TERMINAL — no tool calls → done. Unless the verification gate objects (ADR-049): files were edited
-    // but nothing verified them → inject ONE nudge turn and loop; the next terminal answer is accepted
-    // unconditionally (the model may legitimately answer "no tests exist here").
+    // TERMINAL — no tool calls → done. Unless the verification gate objects (ADR-049/051): unverified
+    // edits exist, or a DECLARED check was never run → inject a nudge turn and loop; after the strike
+    // budget the answer is accepted unconditionally (the model may legitimately say "no tests exist here").
     if (toolUses.length === 0) {
-      if (deps.verifyGate !== false && editedSinceVerify && !verifyNudged && turn + 1 < maxTurns) {
-        verifyNudged = true
+      const unverified = editedSinceVerify || (deps.check?.declared === true && !verifiedEver)
+      if (deps.verifyGate !== false && unverified && verifyNudges < verifyStrikes && turn + 1 < maxTurns) {
+        verifyNudges++
         tracer.event({ t: 'verify_gate', turn })
-        messages.push(buildVerifyNudge())
+        messages.push(buildVerifyNudge(deps.check, !editedSinceVerify))
         yield { type: 'status', text: 'Asking the agent to verify its changes…' }
         turn++
         continue
@@ -261,6 +273,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     const results = yield* scheduleTools(toolUses, ctx)
     messages.push({ role: 'user', content: results }) // tool_results become the next turn's input
     editedSinceVerify = foldVerifyState(editedSinceVerify, toolUses, results) // ADR-049 gate state
+    if (toolUses.some(isVerifyCommand)) verifiedEver = true // ADR-051: a declared check demands ≥1 real run
 
     // ADR-050 rung 2: harness-detected delegation reminder. Recognition ("I should delegate") is
     // meta-cognition weak/mid models don't do — so the LOOP watches bulk-read pressure and reminds ONCE.
