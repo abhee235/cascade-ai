@@ -1,0 +1,52 @@
+{
+  "projectId": "c4e6237b-9baa-4ef8-83ab-d32ed06958db",
+  "shape": "package",
+  "pkg": "@cascade/web",
+  "globalName": "CascadeWebUI",
+  "entry": ".design-sync/ds-entry.ts",
+  "tsconfig": "tsconfig.json",
+  "buildCmd": "node .design-sync/build-css.mjs",
+  "readmeHeader": ".design-sync/conventions.md",
+  "cssEntry": ".design-sync/.cache/ds-styles.css",
+  "provider": { "component": "TooltipProvider" },
+  "overrides": {
+    "Dialog": { "cardMode": "single", "viewport": "540x460", "primaryStory": "RenameProject" },
+    "Sheet": { "cardMode": "single", "viewport": "760x460", "primaryStory": "RightDrawer" },
+    "Select": { "cardMode": "single", "viewport": "380x440", "primaryStory": "Open" },
+    "DropdownMenu": { "cardMode": "single", "viewport": "380x440", "primaryStory": "Menu" },
+    "Tooltip": { "cardMode": "single", "viewport": "360x220", "primaryStory": "OnButton" },
+    "Sidebar": { "cardMode": "single", "viewport": "780x480", "primaryStory": "Workspace" }
+  },
+  "componentSrcMap": {
+    "Button": "src/components/ui/button.tsx",
+    "Command": "src/components/ui/command.tsx",
+    "Dialog": "src/components/ui/dialog.tsx",
+    "DropdownMenu": "src/components/ui/dropdown-menu.tsx",
+    "Input": "src/components/ui/input.tsx",
+    "ScrollArea": "src/components/ui/scroll-area.tsx",
+    "Select": "src/components/ui/select.tsx",
+    "Separator": "src/components/ui/separator.tsx",
+    "Sheet": "src/components/ui/sheet.tsx",
+    "Sidebar": "src/components/ui/sidebar.tsx",
+    "Skeleton": "src/components/ui/skeleton.tsx",
+    "Tabs": "src/components/ui/tabs.tsx",
+    "Textarea": "src/components/ui/textarea.tsx",
+    "Tooltip": "src/components/ui/tooltip.tsx"
+  },
+  "dtsPropsFor": {
+    "Button": "variant?: \"default\" | \"destructive\" | \"outline\" | \"secondary\" | \"ghost\" | \"link\";\n  size?: \"default\" | \"xs\" | \"sm\" | \"lg\" | \"icon\" | \"icon-xs\" | \"icon-sm\" | \"icon-lg\";\n  asChild?: boolean;\n  disabled?: boolean;\n  type?: \"button\" | \"submit\" | \"reset\";\n  className?: string;\n  onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void;\n  children?: React.ReactNode;",
+    "Input": "type?: React.HTMLInputTypeAttribute;\n  placeholder?: string;\n  value?: string;\n  defaultValue?: string;\n  disabled?: boolean;\n  readOnly?: boolean;\n  required?: boolean;\n  name?: string;\n  className?: string;\n  onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;",
+    "Textarea": "placeholder?: string;\n  value?: string;\n  defaultValue?: string;\n  rows?: number;\n  disabled?: boolean;\n  readOnly?: boolean;\n  required?: boolean;\n  name?: string;\n  className?: string;\n  onChange?: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;",
+    "Skeleton": "/** Placeholder loading block; size it with className (e.g. \"h-4 w-32\"). */\n  className?: string;\n  children?: React.ReactNode;",
+    "Separator": "orientation?: \"horizontal\" | \"vertical\";\n  decorative?: boolean;\n  className?: string;",
+    "Dialog": "/** Modal dialog root. Compose with DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose. */\n  open?: boolean;\n  defaultOpen?: boolean;\n  onOpenChange?: (open: boolean) => void;\n  modal?: boolean;\n  children?: React.ReactNode;",
+    "Sheet": "/** Side drawer (Dialog-based) root. Compose with SheetTrigger, SheetContent (side=\"top\"|\"right\"|\"bottom\"|\"left\"), SheetHeader, SheetTitle, SheetDescription, SheetFooter, SheetClose. */\n  open?: boolean;\n  defaultOpen?: boolean;\n  onOpenChange?: (open: boolean) => void;\n  modal?: boolean;\n  children?: React.ReactNode;",
+    "DropdownMenu": "/** Root. Compose with DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuCheckboxItem, DropdownMenuRadioGroup/RadioItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuSub. */\n  open?: boolean;\n  defaultOpen?: boolean;\n  onOpenChange?: (open: boolean) => void;\n  modal?: boolean;\n  dir?: \"ltr\" | \"rtl\";\n  children?: React.ReactNode;",
+    "Select": "/** Root. Compose with SelectTrigger + SelectValue, SelectContent, SelectItem, SelectGroup, SelectLabel, SelectSeparator. */\n  value?: string;\n  defaultValue?: string;\n  onValueChange?: (value: string) => void;\n  open?: boolean;\n  defaultOpen?: boolean;\n  onOpenChange?: (open: boolean) => void;\n  disabled?: boolean;\n  required?: boolean;\n  name?: string;\n  dir?: \"ltr\" | \"rtl\";\n  children?: React.ReactNode;",
+    "Tooltip": "/** Root (wrap the app/preview in TooltipProvider). Compose with TooltipTrigger and TooltipContent. */\n  open?: boolean;\n  defaultOpen?: boolean;\n  onOpenChange?: (open: boolean) => void;\n  delayDuration?: number;\n  disableHoverableContent?: boolean;\n  children?: React.ReactNode;",
+    "Tabs": "/** Root. Compose with TabsList + TabsTrigger (value=...) and TabsContent (value=...). */\n  value?: string;\n  defaultValue?: string;\n  onValueChange?: (value: string) => void;\n  orientation?: \"horizontal\" | \"vertical\";\n  dir?: \"ltr\" | \"rtl\";\n  activationMode?: \"automatic\" | \"manual\";\n  className?: string;\n  children?: React.ReactNode;",
+    "ScrollArea": "/** Scrollable viewport. Put content as children; pair with ScrollBar for a styled bar. */\n  type?: \"auto\" | \"always\" | \"scroll\" | \"hover\";\n  scrollHideDelay?: number;\n  dir?: \"ltr\" | \"rtl\";\n  className?: string;\n  children?: React.ReactNode;",
+    "Command": "/** Command palette (cmdk). Compose with CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem, CommandShortcut; CommandDialog wraps it in a Dialog. */\n  value?: string;\n  onValueChange?: (value: string) => void;\n  label?: string;\n  shouldFilter?: boolean;\n  filter?: (value: string, search: string, keywords?: string[]) => number;\n  loop?: boolean;\n  className?: string;\n  children?: React.ReactNode;",
+    "Sidebar": "/** App sidebar. MUST be rendered inside SidebarProvider (which also exports useSidebar). Compose with SidebarHeader, SidebarContent, SidebarGroup, SidebarMenu/SidebarMenuItem/SidebarMenuButton, SidebarFooter, SidebarTrigger, SidebarInset. */\n  side?: \"left\" | \"right\";\n  variant?: \"sidebar\" | \"floating\" | \"inset\";\n  collapsible?: \"offcanvas\" | \"icon\" | \"none\";\n  className?: string;\n  children?: React.ReactNode;"
+  }
+}
