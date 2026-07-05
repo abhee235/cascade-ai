@@ -17,6 +17,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { createProvider, createSession, JsonlTracer, type ModelProvider } from '@cascade/core'
+import { BUILDER_BEHAVIOR } from '../../packages/server/src/projectManager'
+import { fanout, OtelTracer } from './otelTracer.mts'
 
 const { values: args } = parseArgs({
 	options: {
@@ -24,6 +26,7 @@ const { values: args } = parseArgs({
 		label: { type: 'string' },
 		scenarios: { type: 'string' },
 		verify: { type: 'boolean', default: false },
+		keep: { type: 'boolean', default: false }, // keep the workdir after the run (replay/inspection)
 		provider: { type: 'string', default: 'ollama' },
 		'base-url': { type: 'string' },
 		temperature: { type: 'string', default: '0' },
@@ -43,8 +46,16 @@ if (!existsSync(SHARED_DEPS)) {
 interface Scenario {
 	id: string
 	template: string
-	prompt: string
+	/** Single-shot prompt (v1 scenarios)… */
+	prompt?: string
+	/** …or an ITERATIVE session: each prompt is a follow-up on the SAME session (history carries over —
+	 *  this is what exercises edits-to-existing-code, the todo list, compaction growth, and the verify
+	 *  gate per round; the real product experience is iterative, not one-shot). */
+	prompts?: string[]
 	budgets: { maxTurns: number; timeoutMs: number }
+	/** Pin the window (like Tier-1 fixtures): a scenario can FORCE repeated context fills so compaction is
+	 *  exercised many times over a long iterative session (user requirement: 5–6+ fills, every layer seen). */
+	session?: { contextWindow?: number; maxOutputTokens?: number }
 }
 
 const allIds = readdirSync(SCENARIOS_DIR).filter((d) => existsSync(join(SCENARIOS_DIR, d, 'scenario.json')))
@@ -52,7 +63,11 @@ const wanted = args.scenarios ? args.scenarios.split(',').map((s) => s.trim()) :
 
 /** Working copy: pristine template files + junction to the shared node_modules (fast, offline, disposable). */
 function makeWorkdir(id: string): string {
-	const work = mkdtempSync(join(tmpdir(), `cascade-builder-${id}-`))
+	// Repo-local, NOT %TEMP%: Windows Storage Sense swept a live run's template files out from under the
+	// session at 96% disk (shop-iterate-1 — package.json/node_modules vanished mid-round; the model rebuilt
+	// the scaffold from memory). The OS never cleans repo dirs; eval/.work is gitignored.
+	mkdirSync(join(ROOT, 'eval', '.work'), { recursive: true })
+	const work = mkdtempSync(join(ROOT, 'eval', '.work', `builder-${id}-`))
 	cpSync(TEMPLATE, work, { recursive: true })
 	symlinkSync(SHARED_DEPS, join(work, 'node_modules'), 'junction')
 	return work
@@ -122,14 +137,24 @@ for (const id of wanted) {
 	process.stdout.write(`▶ ${id} `)
 
 	const provider = withTemperature(createProvider({ provider: args.provider!, model: args.model!, baseUrl: args['base-url'] }), Number(args.temperature))
+	// ADR-053: with an OTLP endpoint configured, fan the trace out to the viewer (Phoenix/Langfuse) live.
+	const otelEndpoint = process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+	const otel = otelEndpoint ? new OtelTracer({ endpoint: otelEndpoint, service: `${label}:${id}`, attributes: { 'cascade.model': args.model! } }) : undefined
+
+	// FIDELITY: identical to the product's builder session (projectManager.ts) — same behavior instructions,
+	// same declared check — so forensics on a bench trace transfer 1:1 to the real product experience.
 	const session = createSession({
 		cwd: work,
 		provider,
 		model: args.model!,
 		mode: 'bypass',
-		tracer: new JsonlTracer(tracePath),
+		tracer: otel ? fanout(new JsonlTracer(tracePath), otel) : new JsonlTracer(tracePath),
 		autoMemory: false,
 		maxTurns: scenario.budgets.maxTurns,
+		extraInstructions: BUILDER_BEHAVIOR,
+		checkCommand: 'npm run build',
+		contextWindow: scenario.session?.contextWindow,
+		maxOutputTokens: scenario.session?.maxOutputTokens,
 	})
 	const t0 = Date.now()
 	let timedOut = false
@@ -137,23 +162,30 @@ for (const id of wanted) {
 		timedOut = true
 		session.abort()
 	}, scenario.budgets.timeoutMs)
+	const prompts = scenario.prompts ?? [scenario.prompt!]
 	try {
-		for await (const ev of session.submit(scenario.prompt)) {
-			if (ev.type === 'toolStart') process.stdout.write('.')
-			else if (ev.type === 'question') session.respondQuestion(ev.id, Object.fromEntries(ev.questions.map((q) => [q.question, q.options[0]?.label ?? 'Other'])))
-			else if (ev.type === 'permission') session.respondPermission(ev.id, 'allow')
+		for (let i = 0; i < prompts.length; i++) {
+			if (timedOut) break
+			if (i > 0) process.stdout.write('|') // stage separator: one bar per follow-up prompt
+			for await (const ev of session.submit(prompts[i]!)) {
+				if (ev.type === 'toolStart') process.stdout.write('.')
+				else if (ev.type === 'question') session.respondQuestion(ev.id, Object.fromEntries(ev.questions.map((q) => [q.question, q.options[0]?.label ?? 'Other'])))
+				else if (ev.type === 'permission') session.respondPermission(ev.id, 'allow')
+			}
 		}
 	} catch {
 		/* abort may throw; the row records timedOut */
 	} finally {
 		clearTimeout(timer)
 		await session.dispose().catch(() => {})
+		await otel?.shutdown().catch(() => {}) // flush spans before the next scenario / exit
 	}
 	const wallMs = Date.now() - t0
 	const check = runCheck(id, work)
-	cleanup(work)
+	if (args.keep) console.log(`\n   workdir kept for replay → ${work}`)
+	else cleanup(work)
 
-	const row = { ts: new Date().toISOString(), label, model: args.model, scenario: id, solved: check.ok, timedOut, wallMs, traceFile: `${id}.jsonl` }
+	const row = { ts: new Date().toISOString(), label, model: args.model, scenario: id, solved: check.ok, timedOut, wallMs, traceFile: `${id}.jsonl`, ...(args.keep ? { workdir: work } : {}) }
 	appendFileSync(join(runDir, 'results.jsonl'), `${JSON.stringify(row)}\n`)
 	console.log(` ${check.ok ? '✅' : timedOut ? '⏱ timeout' : '❌'}  ${Math.round(wallMs / 1000)}s${check.ok ? '' : `\n   ${check.output.split('\n').filter(Boolean).slice(-2).join(' | ').slice(0, 200)}`}`)
 }

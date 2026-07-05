@@ -43,8 +43,9 @@ export interface ProjectManagerOptions {
 
 /** Builder behavior injected ahead of every project's AI rules (as generic `extraInstructions`). The core
  *  base prompt is concise-chat-tuned, which makes the model explore then stop; the builder needs the opposite:
- *  keep using tools until the whole app is actually built. Kept here (server/wrapper), not in headless core. */
-const BUILDER_BEHAVIOR = [
+ *  keep using tools until the whole app is actually built. Kept here (server/wrapper), not in headless core.
+ *  Exported so the Tier-3 builder bench runs sessions IDENTICAL to the product's (forensic fidelity). */
+export const BUILDER_BEHAVIOR = [
   'You are an autonomous app builder operating in a sandboxed project. Your job is to BUILD, not to chat.',
   'When asked to build or change the app:',
   '- Complete the ENTIRE request in this turn. Create or edit every file needed, one tool call at a time, until it is fully done.',
@@ -52,6 +53,9 @@ const BUILDER_BEHAVIOR = [
   '- Keep going tool-by-tool (write a file, then the next…). Do not ask for confirmation; you are sandboxed and pre-authorized.',
   '- Only end your turn when the feature is fully implemented and the app still runs (`npm run dev` must work).',
   '- Be thorough over brief: prefer many correct file edits over a short summary. Ignore any instinct to keep the response short.',
+  // Measured (shop-iterate-1): one ever-growing App.tsx crossed the read cap by round 2 — every later edit
+  // fought windowed reads and stale views. Many small files keep every read/edit cheap and precise.
+  '- ARCHITECTURE: split the app into small components (src/components/*.tsx, one per concern) and keep every file under ~150 lines. Never let one file grow without bound — extract components as you go.',
 ].join('\n')
 
 /** name → a filesystem-safe slug (so dirs are readable); id keeps them unique. */

@@ -21,3 +21,6 @@ eval/runs/
 
 # Tier-2 external benchmarks (PLAN-eval): cloned suites + generated tasks + shared deps — never committed
 eval/external/
+
+# Eval/builder working copies (ADR-053 forensics: repo-local so OS temp-cleanup can never sweep a live run)
+eval/.work/

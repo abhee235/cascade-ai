@@ -1,0 +1,14 @@
+{
+	"id": "builder-shop-iterate",
+	"template": "react",
+	"prompts": [
+		"Build a small e-commerce storefront called 'Cascade Shop'. Requirements: (1) A hardcoded catalog of at least 6 products, each with a name, a price, a one-line description, and an emoji as its image. (2) A catalog view: a responsive grid of product cards, each showing the emoji, name, price, and an 'Add to cart' button. (3) Clicking a product card opens a product detail view (large emoji, name, price, description, 'Add to cart', and a way back to the catalog). (4) A cart view: line items with name, unit price, a quantity stepper (+ / −), a 'Remove' button per line, and the order total. (5) A header with the shop name and a cart button showing a live item-count badge. (6) A 'Checkout' button in the cart that shows a form (name, email, address — all required with basic validation) and, on submit, a confirmation message that includes the order total. Use client-side state and view switching only (no router, no new dependencies), style with Tailwind, and keep `npm run build` passing.",
+		"Add a wishlist: a heart toggle on every product card and on the detail view, a 'Wishlist' view reachable from a header button (with its own count badge), and a 'Move to cart' button on each wishlist item that adds it to the cart and removes it from the wishlist.",
+		"Add product search and category filtering to the catalog: give every product a category, add a search input with the exact placeholder 'Search products…' that filters by name as you type, and a filter bar of category chips (plus an 'All' chip) that narrows the grid. Search and filter must combine.",
+		"Add a dark/light theme toggle button in the header. Persist the chosen theme in localStorage and restore it on load; default to dark. The whole app must restyle, not just the header.",
+		"Three fixes: (1) reducing a cart line's quantity to zero must remove the line entirely, (2) the 'Checkout' button must be disabled when the cart is empty, and (3) every price shown anywhere in the app must be formatted with exactly two decimals.",
+		"Add an 'Orders' view: after a successful checkout, store the order (line items, total, timestamp) in client-side state, clear the cart, and show past orders under an 'Orders' header button — each order expandable to reveal its line items and total. Then run the production build and confirm everything passes."
+	],
+	"budgets": { "maxTurns": 40, "timeoutMs": 3600000 },
+	"session": { "contextWindow": 16384 }
+}

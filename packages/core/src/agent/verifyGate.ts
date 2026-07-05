@@ -19,11 +19,14 @@ const FILE_MUTATING_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit
  *  plus the common runners; word-boundary `tests?` also catches `run-tests.mjs` / `npm run test:x`. */
 const VERIFY_COMMAND = /\btests?\b|--test|vitest|jest|mocha|pytest|tsc\b|npm +t\b/i
 
-/** Did this tool call RUN verification? (Running is what counts — a failing suite feeds back on its own.) */
-export function isVerifyCommand(tu: ToolUse): boolean {
+/** Did this tool call RUN verification? The generic runner names, PLUS the session's own declared check —
+ *  measured (shop-forensics-1): the check was `npm run build`, the model ran it UNPROMPTED, and the gate
+ *  failed to recognize its own declared command, burning three redundant nudge turns. */
+export function isVerifyCommand(tu: ToolUse, checkCommand?: string): boolean {
 	if (tu.name !== 'Bash') return false
 	const cmd = (tu.input as { command?: string } | null)?.command
-	return typeof cmd === 'string' && VERIFY_COMMAND.test(cmd)
+	if (typeof cmd !== 'string') return false
+	return VERIFY_COMMAND.test(cmd) || (checkCommand !== undefined && cmd.includes(checkCommand))
 }
 
 /**
@@ -32,7 +35,7 @@ export function isVerifyCommand(tu: ToolUse): boolean {
  * - ANY verify-command run clears it (even a red suite — its output feeds back and drives the next edit,
  *   so the loop is doing its job; the gate only exists to force the run to HAPPEN).
  */
-export function foldVerifyState(prev: boolean, toolUses: ToolUse[], results: ContentBlock[]): boolean {
+export function foldVerifyState(prev: boolean, toolUses: ToolUse[], results: ContentBlock[], checkCommand?: string): boolean {
 	const okById = new Map(results.map((r) => [r.type === 'tool_result' ? r.tool_use_id : '', r.type === 'tool_result' && !r.isError]))
 	let edited = prev
 	for (const tu of toolUses) {
@@ -41,7 +44,7 @@ export function foldVerifyState(prev: boolean, toolUses: ToolUse[], results: Con
 	// Clear AFTER setting: an edit and a test run in the SAME batch means the test ran against the new state
 	// (writes are serialized before subsequent reads in the scheduler; good enough at this granularity).
 	for (const tu of toolUses) {
-		if (isVerifyCommand(tu)) edited = false
+		if (isVerifyCommand(tu, checkCommand)) edited = false
 	}
 	return edited
 }

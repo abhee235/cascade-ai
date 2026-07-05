@@ -179,7 +179,9 @@ async function recycleModel(): Promise<void> {
 
 // ── one task × one trial ─────────────────────────────────────────────────────────────────────────────────
 async function runTrial(task: TaskSpec, trial: number, attempt = 1) {
-	const work = mkdtempSync(join(tmpdir(), `cascade-eval-${task.id}-`))
+	// Repo-local, NOT %TEMP% (Windows Storage Sense swept a live builder run at 96% disk — see builder.mts).
+	mkdirSync(join(ROOT, 'eval', '.work'), { recursive: true })
+	const work = mkdtempSync(join(ROOT, 'eval', '.work', `eval-${task.id}-`))
 	// A backend-crash retry gets its OWN trace file (JsonlTracer appends — reusing the name would interleave
 	// two attempts). The row carries `traceFile` so the analyzer always reads the right one.
 	const traceFile = `${task.id}-t${trial}${attempt > 1 ? `-r${attempt - 1}` : ''}.jsonl`

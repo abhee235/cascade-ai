@@ -287,8 +287,8 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     // the toolStart/toolResult activity and returns the tool_result blocks in original order.
     const results = yield* scheduleTools(toolUses, ctx)
     messages.push({ role: 'user', content: results }) // tool_results become the next turn's input
-    editedSinceVerify = foldVerifyState(editedSinceVerify, toolUses, results) // ADR-049 gate state
-    if (toolUses.some(isVerifyCommand)) verifiedEver = true // ADR-051: a declared check demands ≥1 real run
+    editedSinceVerify = foldVerifyState(editedSinceVerify, toolUses, results, deps.check?.command) // ADR-049 gate state
+    if (toolUses.some((tu) => isVerifyCommand(tu, deps.check?.command))) verifiedEver = true // ADR-051: a declared check demands ≥1 real run
 
     // ADR-050 rung 2: harness-detected delegation reminder. Recognition ("I should delegate") is
     // meta-cognition weak/mid models don't do — so the LOOP watches bulk-read pressure and reminds ONCE.

@@ -1,3 +1,4 @@
+import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -29,6 +30,7 @@ const locStamp = ({ types: t }: any) => ({
 
 export default defineConfig(({ command }) => ({
   plugins: [react({ babel: { plugins: command === 'serve' ? [locStamp] : [] } }), tailwindcss()],
+  resolve: { alias: { '@': resolve(root, 'src') } }, // shadcn/ui convention (ADR-054)
   server: {
     host: true,
     // The project dir is a host bind-mount; native fs events don't cross it, so poll for edits.

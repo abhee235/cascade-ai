@@ -128,6 +128,20 @@ describe('verify gate hardening (ADR-051) — evidence-driven, inert for chat', 
 		expect(provider.calls.length).toBe(3) // zero added turns — the gate is inert when behavior is already right
 		expect(historyText(messages)).not.toContain('system-reminder>You')
 	})
+
+	it('running the DECLARED check counts as verifying even when it matches no generic runner name', async () => {
+		// Measured (shop-forensics-1): check = `npm run build`; the model ran it UNPROMPTED at turn 2, and the
+		// gate still fired twice — its detector only knew test-runner names, not the session's own command.
+		const provider = createFakeProvider([
+			[toolUse('w1', 'Write', { file_path: 'src/App.tsx', content: 'x' }), done('tool_use')],
+			[toolUse('b1', 'Bash', { command: 'npm run build 2>&1' }), done('tool_use')], // the declared check, unprompted
+			[textDelta('Build passes. Done.'), done('end_turn')],
+		])
+		const messages: Message[] = [{ role: 'user', content: 'build the shop' }]
+		await drain(runAgentLoop(messages, deps(provider, { check: { command: 'npm run build', declared: true } })))
+		expect(provider.calls.length).toBe(3) // no redundant nudge turns
+		expect(historyText(messages)).not.toContain('system-reminder>You')
+	})
 })
 
 describe('verify gate — pure helpers', () => {
