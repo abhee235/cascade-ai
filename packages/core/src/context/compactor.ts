@@ -37,6 +37,16 @@ export {
   type CompactionKind,
 } from './compactionLayers'
 
+/** ADR-052 companion — MEASURED wire overhead. The backend reports the REAL prompt size after every call
+ *  (`prompt_eval_count`); the difference vs our chars/4 message estimate IS everything the wire adds
+ *  (system + tool schemas + chat template + estimate error). Measured incident: static estimate said
+ *  6.4k, the wire said 8,191/8,192 — the model got ONE output token. EMA smooths run-to-run jitter;
+ *  floor 0 (an overcounting estimate must not produce negative overhead). */
+export function measureWireOverhead(prev: number | undefined, realInputTokens: number, sentEstimate: number): number {
+  const measured = Math.max(0, realInputTokens - sentEstimate)
+  return prev === undefined ? measured : Math.round(prev * 0.5 + measured * 0.5)
+}
+
 /** Rough token estimate (chars/4) over serialized content — no tokenizer dependency. */
 export function estimateTokens(messages: Message[]): number {
   let chars = 0

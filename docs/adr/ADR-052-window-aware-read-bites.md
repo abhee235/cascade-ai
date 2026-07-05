@@ -1,7 +1,13 @@
 # ADR-052 — Window-aware Read bites (one bite must never exceed the plate)
 
-> **Status:** DRAFT — design agreed 2026-07-04; implementation queued in the next batch (per the new
-> batch-then-eval method). Root cause of the survival-wipe cascade, traced across every longctx failure.
+> **Status:** implemented + **measured** (2026-07-05, batch 7). `ToolContext.readCapChars` derived from the
+> plan (`min(50k, max(6k, effectiveWindow))` chars ≈ one read ≤ ~25% of the effective window); Read refuses
+> over-cap whole-file AND over-cap explicit ranges with a TEACHING error (exact offset/limit for THIS file,
+> plus the Subagent path); big windows keep the flat 50k (no-overfitting). Companion: wire-overhead
+> calibration (`measureWireOverhead` — real `prompt_eval_count` minus the message estimate, EMA) replaces
+> the static guess that ran 1.8k tokens short at the fatal margin. Measured: the strong gate scored
+> **12/12 — the first perfect gate** — with changelog SURVIVING its grind (15 turns, 5 compactions, 803s)
+> instead of dying at the silent-truncation wall.
 
 ## Context — the measured failure
 

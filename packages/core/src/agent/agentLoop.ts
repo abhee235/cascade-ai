@@ -13,7 +13,7 @@ import type { PermissionController } from '../permissions/gate'
 import { NoopTracer, type Tracer } from '../observability/tracer'
 import { createRegistry, registryOf, type ToolRegistry } from '../tools/toolRegistry'
 import { buildSystemPrompt } from './systemPrompt'
-import { compactIfNeeded, estimateTokens, type CompactDeps } from '../context/compactor'
+import { compactIfNeeded, estimateTokens, measureWireOverhead, type CompactDeps } from '../context/compactor'
 import { streamWithRecovery, type RecoveryOptions } from '../llm/resilience'
 import type { ToolUse } from '../tools/runTool'
 import { scheduleTools } from '../tools/scheduler'
@@ -95,7 +95,11 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   // ADR-037: one window tier for the whole loop — sizes the system prompt AND the tool descriptions. Explicit
   // deps.tier (subagents inherit the parent's) → the compaction plan's tier → 'full'.
   const tier = deps.tier ?? deps.compact?.plan.tier ?? 'full'
-  const ctx: ToolContext = { cwd: deps.cwd, abortSignal: deps.signal, permission: deps.permission, tracer, registry, archival: deps.archival, depth, sandbox: deps.sandbox, readFileState: deps.readFileState, todoStore: deps.todoStore, ask: deps.ask, hooks: deps.hooks }
+  // ADR-052: window-derived Read cap — one bite must never exceed the plate. Budget: a single read may span
+  // ~25% of the effective window; at ~4 chars/token that is numerically effectiveWindow in CHARS. 8k window →
+  // ~6k chars (~1.5k tok); 32k → ~24k chars; big windows hit the 50k ceiling → unchanged (no-overfitting rule).
+  const readCapChars = deps.compact ? Math.min(50_000, Math.max(6_000, deps.compact.plan.effectiveWindow)) : undefined
+  const ctx: ToolContext = { cwd: deps.cwd, abortSignal: deps.signal, permission: deps.permission, tracer, registry, archival: deps.archival, depth, sandbox: deps.sandbox, readFileState: deps.readFileState, todoStore: deps.todoStore, ask: deps.ask, hooks: deps.hooks, readCapChars }
   // Subagent delegation (ADR-017): inject a spawn closure (avoids an import cycle). Absent at the depth cap.
   // The child runs a NESTED runAgentLoop with its OWN messages + a filtered tool set (never Subagent → no
   // recursion; read-only subset for `explore`). Only its final text returns — its steps stay in its context.
@@ -147,6 +151,9 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   let readPressureTokens = 0
   let delegateNudged = false
   let subagentUsed = false
+  // Wire-overhead calibration (ADR-052 companion): real prompt tokens minus our message estimate, EMA'd.
+  // Undefined until the backend reports usage once; the static chars/4 overhead estimate is the floor.
+  let wireOverhead: number | undefined
 
   while (true) {
     let text = ''
@@ -157,9 +164,12 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     // The WIRE prompt carries more than `messages`: system prompt + tool schemas + chat template. Measure it
     // so compaction thresholds reflect what actually travels — in an 8k window the overhead is ~half the
     // budget, and ignoring it meant Ollama front-truncated the prompt before the compactor ever triggered
-    // (measured: inputTokens 8191 of 8192, ONE token of output room). The +256 pad covers the template.
+    // (measured: inputTokens 8191 of 8192, ONE token of output room). The static chars/4 estimate is the
+    // FLOOR; once the backend has reported a real prompt size, the MEASURED overhead (real − estimate,
+    // which also captures our estimate's own error) takes over — self-correcting at the margin.
     const systemNow = buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext })
-    const overheadTokens = Math.ceil((systemNow.length + JSON.stringify(registry.schemas(tier)).length) / 4) + 256
+    const staticOverhead = Math.ceil((systemNow.length + JSON.stringify(registry.schemas(tier)).length) / 4) + 256
+    const overheadTokens = Math.max(staticOverhead, wireOverhead ?? 0)
 
     // Compaction (ADR-012): BEFORE each model call, if history nears the window, mask old tool output and/or
     // summarize the older half. We splice in place so the session's history reference stays valid; the raw
@@ -187,6 +197,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     }
 
     yield { type: 'status', text: 'Thinking…' }
+    const sentEstimate = estimateTokens(messages) // for wire-overhead calibration once real usage arrives
     // FORENSICS: record the FULL request we're about to send — the #1 thing you need when an answer
     // is wrong ("did the model even see the tool_result / the right system prompt?"). — ADR-023.
     tracer.event({ t: 'model_request', turn, system: systemNow, tools: registry.list().map((t) => t.name), messages })
@@ -227,11 +238,15 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
         text += ev.text
         yield { type: 'text_delta', text: ev.text }
       } else if (ev.type === 'tool_use') {
-        toolUses.push({ id: ev.id, name: ev.name, input: ev.input })
+        toolUses.push({ id: ev.id, name: ev.name, input: ev.input, repaired: ev.repaired })
       } else if (ev.type === 'done' && ev.usage) {
         usage = ev.usage // backend-reported prompt/output token counts (undefined when not reported)
       }
     }
+
+    // Calibrate: the backend just told us the REAL prompt size — remember what the wire adds beyond our
+    // message estimate, so the next compaction decision compares against reality, not the chars/4 guess.
+    if (usage?.inputTokens) wireOverhead = measureWireOverhead(wireOverhead, usage.inputTokens, sentEstimate)
 
     tracer.event({ t: 'model_response', turn, text, thinking, toolUses, usage })
 

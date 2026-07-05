@@ -17,7 +17,7 @@ export type TraceEvent =
   | { t: 'model_request'; turn: number; system: string; tools: string[]; messages: Message[] }
   | { t: 'model_response'; turn: number; text: string; thinking: string; toolUses: { id: string; name: string; input: unknown }[]; usage?: { inputTokens?: number; outputTokens?: number } } // usage: E1/ADR-040 — backend-reported token counts for this call
   | { t: 'permission'; id: string; tool: string; decision: string; asked: boolean } // asked=true ⇒ a prompt was shown
-  | { t: 'tool_call'; id: string; name: string; input: unknown }
+  | { t: 'tool_call'; id: string; name: string; input: unknown; repaired?: boolean }
   | { t: 'tool_result'; id: string; name: string; ok: boolean; ms: number; content: string }
   | { t: 'compaction'; kind: string; tokensBefore: number; tokensAfter: number; forced: boolean } // E1/ADR-039: which layer fired + what it reclaimed (estimates)
   | { t: 'verify_gate'; turn: number } // ADR-049: terminal answer refused — edits happened, nothing verified them; nudge injected

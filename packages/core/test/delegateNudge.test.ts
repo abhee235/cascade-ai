@@ -18,11 +18,12 @@ function capturingTracer(): Tracer & { events: TraceEvent[] } {
 	return { events, event: (e) => void events.push(e) }
 }
 
-/** A temp project with one big file (≈6k chars — crosses 35% of a 2000-token window in one Read). */
+/** A temp project with one big file (≈4.6k chars — crosses 35% of a 2000-token window in one Read, while
+ *  still fitting under the ADR-052 read-bite floor of 6k chars so the Read itself succeeds). */
 function bigFileProject(): { dir: string; file: string } {
 	const dir = mkdtempSync(join(tmpdir(), 'dnudge-'))
 	const file = join(dir, 'big.txt')
-	writeFileSync(file, 'lorem ipsum dolor sit amet '.repeat(230))
+	writeFileSync(file, 'lorem ipsum dolor sit amet '.repeat(170))
 	return { dir, file }
 }
 

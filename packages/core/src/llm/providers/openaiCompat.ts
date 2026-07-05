@@ -257,7 +257,8 @@ export class OpenAICompatProvider implements ModelProvider {
     // the model what it actually sent — the old `catch { input = {} }` produced "missing required file_path"
     // lies that weak models retried verbatim (item 4a / ADR-048).
     for (const [idx, c] of toolCalls) {
-      yield { type: 'tool_use', id: c.id || `call_${idx}`, name: c.name, input: parseToolArgs(c.args).input }
+      const parsed = parseToolArgs(c.args)
+      yield { type: 'tool_use', id: c.id || `call_${idx}`, name: c.name, input: parsed.input, ...(parsed.via === 'repaired' ? { repaired: true } : {}) }
     }
     // ADR-047: prose fallback — ONLY when the native channel produced nothing. Weak models (llama3.2:3b,
     // measured 0/10 for exactly this) write their calls as ```json text; rescue the FIRST advertised-tool
@@ -321,7 +322,8 @@ export class OpenAICompatProvider implements ModelProvider {
             nativeCalls++
             // Usually an object already; some model templates deliver a STRING (occasionally malformed) —
             // parseToolArgs repairs or carries it honestly (item 4a).
-            yield { type: 'tool_use', id: tc.id || `call_${toolIdx++}`, name: tc.function?.name ?? '', input: parseToolArgs(tc.function?.arguments).input }
+            const parsed = parseToolArgs(tc.function?.arguments)
+            yield { type: 'tool_use', id: tc.id || `call_${toolIdx++}`, name: tc.function?.name ?? '', input: parsed.input, ...(parsed.via === 'repaired' ? { repaired: true } : {}) }
           }
         }
         if (obj.done) {

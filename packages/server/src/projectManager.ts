@@ -86,6 +86,9 @@ export class ProjectManager {
           // ADR-036 SAFETY: the project dir is MODEL-WRITABLE, but hook commands spawn on the HOST — never
           // load a hooks.json the builder itself could have written (sandbox escape at the next open()).
           loadProjectHooks: false,
+          // ADR-051: a builder project is "done" when it compiles — declare it, so the verify gate holds the
+          // model to `npm run build` by name instead of accepting "I created all the files" on faith.
+          checkCommand: 'npm run build',
         }))
     this.load()
   }

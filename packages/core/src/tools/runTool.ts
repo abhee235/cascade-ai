@@ -14,6 +14,8 @@ export interface ToolUse {
   id: string
   name: string
   input: unknown
+  /** Item 4a observability: the provider had to JSON-repair the arguments (traced, so repair frequency is measurable). */
+  repaired?: boolean
 }
 
 export async function executeTool(

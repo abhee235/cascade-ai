@@ -57,7 +57,7 @@ export interface CompletionResult {
 export type StreamEvent =
   | { type: 'text_delta'; text: string } // a chunk of the answer
   | { type: 'thinking_delta'; thinking: string } // a chunk of reasoning (e.g. Ollama delta.reasoning)
-  | { type: 'tool_use'; id: string; name: string; input: unknown } // a COMPLETE tool call (args accumulated + parsed)
+  | { type: 'tool_use'; id: string; name: string; input: unknown; repaired?: boolean } // a COMPLETE tool call; repaired = the args needed the item-4a JSON ladder (traced for measurement)
   | { type: 'retry'; attempt: number; delayMs: number; reason: string } // synthetic: streamWithRecovery is retrying (resets partial output)
   | { type: 'done'; stopReason: 'end_turn' | 'max_tokens' | 'tool_use'; usage?: TokenUsage } // usage: E1/ADR-040
 

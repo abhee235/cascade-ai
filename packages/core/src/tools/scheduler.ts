@@ -180,7 +180,7 @@ export async function* scheduleTools(
     //       nothing runs between our pending-check and the await that registers `wake`. ──
     for (const tu of toRun) {
       yield { type: 'toolStart', id: tu.id, name: tu.name, summary: summary(tu, registry) }
-      tracer.event({ t: 'tool_call', id: tu.id, name: tu.name, input: tu.input }) // full input, untruncated
+      tracer.event({ t: 'tool_call', id: tu.id, name: tu.name, input: tu.input, ...(tu.repaired ? { repaired: true } : {}) }) // full input, untruncated
     }
     // Think of this as a receptionist (this loop) sorting mail (`queue`) that workers (the tools) drop in.
     const queue: { id: string; chunk: string }[] = [] // mailbox: progress chunks waiting to be yielded

@@ -200,6 +200,9 @@ async function runTrial(task: TaskSpec, trial: number, attempt = 1) {
 		maxTurns: task.budgets.maxTurns,
 		contextWindow: task.session?.contextWindow,
 		maxOutputTokens: task.session?.maxOutputTokens,
+		// ADR-051: every eval task DEFINES done as "this check passes" — declare it, so the verify gate can
+		// hold the model to it by name (directive nudge, two strikes, no-edit terminals included).
+		checkCommand: task.check,
 	})
 
 	const t0 = Date.now()

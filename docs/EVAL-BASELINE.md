@@ -210,3 +210,20 @@ a review-point decision.
 - **Gate**: 10/12; the flagged changelog ❌ is the unchanged known-marginal (≈50% before and after; trace =
   the oversized-first-bite signature, 8,191/8,192 + 1 output token). Root cause queued as the NEXT BATCH:
   ADR-052 window-aware Read bites + overhead-estimate calibration from real `prompt_eval_count`.
+
+## Rung 8 — batch 7: Read bites + check-command wiring + calibration (2026-07-05)
+
+The first batch under the batch-then-eval method (5 changes, unit tests only in between, ONE eval at the
+end). New weak tier: **hermes3:8b** (user's 7B rule — the 3B floor never moved; an 8B can).
+
+- **Strong gate (`batch7-gate`): 12/12 — the FIRST PERFECT GATE**, both delegate tasks included. Zero
+  regressions, zero added turns on clean tasks; changelog SOLVED by surviving its grind (15 turns,
+  5 compactions, 803s under the 900s budget) — Read bites + wire-overhead calibration ended the
+  silent-truncation deaths.
+- **Weak A/B (`hermes-baseline` → `hermes-batch7`)**: solves flat 1/10 → 1/10, but the classes moved the
+  way ADR-051 designed: `false_done` **6 → 2**, `no_tool_use` 2 → 0, → `wrong_code` 0 → 5. The harness
+  converted invisible failure (silent "done") into visible failure (ran the declared check, saw red).
+  `wrong_code` is the capability wall we deliberately do not fake past.
+- Next candidates (review point): delegation for scatter-class tasks (ADR-050 revisit — the strong model
+  now delegates; the weak one still needs the story), and whether `wrong_code` at 8B merits a rung
+  (e.g. red-test output shaping) or is simply the model's ceiling.

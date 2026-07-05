@@ -51,6 +51,9 @@ export interface ToolContext {
   ask?: AskController
   /** ADR-036: project hook config (.cascade/hooks.json), loaded once by the session. Absent = no hooks. */
   hooks?: import('../hooks/hookRunner').HooksConfig
+  /** ADR-052: window-derived cap (chars) on a single Read result — one bite must never exceed the plate.
+   *  Set by the loop from the compaction plan; absent ⇒ the flat 50k default (big-window behavior). */
+  readCapChars?: number
   /** Phase 12: delegate a subtask to a nested agent loop (own context + tool subset) → returns its final
    *  text. Injected by the loop (avoids an import cycle); absent at/over the depth cap. */
   spawnSubagent?(opts: { prompt: string; readOnly?: boolean }): Promise<string>

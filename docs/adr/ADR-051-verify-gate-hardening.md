@@ -1,10 +1,11 @@
 # ADR-051 — Verify-gate hardening for the weak tier (the false_done wall)
 
-> **Status:** core **implemented** (2026-07-05): `CheckCommand` (declared vs resolved), directive nudge
-> naming the exact command, two strikes for declared checks, no-edit terminals held to declared checks;
-> 11 unit tests incl. the inert-path and strong-model-zero-turns assertions. Shipped DORMANT — nothing
-> declares a check yet; the eval-runner + builder wiring and the 7B before/after measurement ride the
-> next batch (per the batch-then-eval method).
+> **Status:** implemented + **measured** (2026-07-05, batch 7). hermes3:8b A/B on 10 tasks: solves flat
+> (1/10 → 1/10) but the CLASS SHIFT is the designed outcome — `false_done` **6 → 2**, `no_tool_use` 2 → 0,
+> converting into `wrong_code` 0 → 5: the model now RUNS the declared check and sees it fail instead of
+> silently claiming success. `wrong_code` is the model-capability wall the harness deliberately does not
+> fake past. Strong tier: **12/12, zero added turns** (the inert-path proof, measured). Consumers wired:
+> eval runner (task.check), web builder (`npm run build`), VS Code setting (`cascade.checkCommand`).
 
 ## Context — the measurement that names this rung
 

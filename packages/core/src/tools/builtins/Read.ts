@@ -53,11 +53,26 @@ export const ReadTool: Tool<z.infer<typeof inputSchema>> = {
       const end = input.limit !== undefined ? start + input.limit : lines.length
       const body = lines.slice(start, end).join('\n')
 
-      // Whole-file read that's too big → don't silently truncate (hides everything past the cut); make the
-      // model read in windows. With offset/limit set, the slice is the model's explicit choice — allow it.
-      if (!ranged && raw.length > MAX_CHARS) {
+      // ADR-052: one bite must never exceed the plate. The cap is window-derived (ctx.readCapChars, from the
+      // compaction plan) — on big windows it stays the flat 50k, so nothing changes there; on an 8k window a
+      // whole-file read that would overflow the usable budget errors INSTEAD of blowing the window (measured:
+      // a single 19k-char "legal" read started every longctx failure — overflow → compaction amputates the
+      // read → the model re-reads → repeat until the clock dies). The error TEACHES the exact next call.
+      const cap = ctx.readCapChars ?? MAX_CHARS
+      if (body.length > cap) {
+        // Suggested window: lines that fit in ~80% of the cap, from THIS file's real average line length
+        // (+7 chars/line for the "N→" prefix). Floor keeps the suggestion useful even for long-line files.
+        const avgLine = raw.length / Math.max(1, lines.length) + 7
+        const fit = Math.max(20, Math.floor((cap * 0.8) / avgLine))
+        const windowNote = ranged
+          ? `Your offset/limit selects ~${Math.round(body.length / 1000)}k chars — more than fits.`
+          : `The whole file is ${lines.length} lines (~${Math.round(raw.length / 1000)}k chars) — more than fits in your context.`
         return {
-          content: `File ${input.file_path} is large (${lines.length} lines, ~${Math.round(raw.length / 1000)}k chars). Read it in parts with the offset and limit parameters (e.g. offset: 1, limit: 400).`,
+          content:
+            `${windowNote} Read ${input.file_path} in parts of about ${fit} lines: ` +
+            `Read {file_path: "${input.file_path}", offset: ${ranged ? Math.max(1, start + 1) : 1}, limit: ${fit}}, ` +
+            `then continue with offset: ${(ranged ? Math.max(1, start + 1) : 1) + fit}. ` +
+            'For bulk exploration across many files, use a Subagent instead — only its findings enter your context.',
           isError: true,
         }
       }
@@ -71,7 +86,8 @@ export const ReadTool: Tool<z.infer<typeof inputSchema>> = {
       }
 
       const numbered = addLineNumbers(body, start + 1)
-      return { content: numbered.length > MAX_CHARS ? `${numbered.slice(0, MAX_CHARS)}\n…[truncated — use a smaller limit]` : numbered }
+      // The cap above bounds `body`; the prefix can still nudge `numbered` past a FLAT cap — trim as before.
+      return { content: numbered.length > cap * 1.2 ? `${numbered.slice(0, cap)}\n…[truncated — use a smaller limit]` : numbered }
     } catch (err) {
       // Return the error AS the result (not a throw) so the model can self-correct.
       return {

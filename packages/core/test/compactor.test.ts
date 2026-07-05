@@ -5,6 +5,7 @@ import {
   turnAlignedBoundary,
   maskObservations,
   compactIfNeeded,
+  measureWireOverhead,
   planCompaction,
   type CompactionPlan,
 } from '../src/context/compactor'
@@ -154,6 +155,15 @@ describe('compactor — compactIfNeeded (plan-driven, ADR-039)', () => {
     expect(kind).toBe('summarized')
     expect(messages[0].content).toContain('FORCED SUMMARY')
   })
+})
+
+describe('measureWireOverhead — calibrate estimates against the backend\'s real prompt size', () => {
+	it('first measurement taken whole; later ones EMA; overcounting estimates floor at 0', () => {
+		// The live incident: est said 4,385, the wire said 8,191 — the wire adds ~3.8k we must not ignore.
+		expect(measureWireOverhead(undefined, 8191, 4385)).toBe(3806)
+		expect(measureWireOverhead(3806, 8000, 5000)).toBe(Math.round(3806 * 0.5 + 3000 * 0.5))
+		expect(measureWireOverhead(3806, 1000, 5000)).toBe(Math.round(3806 * 0.5)) // real < est ⇒ measured floors at 0
+	})
 })
 
 describe('compactor — recency shield (live-incident regression)', () => {
