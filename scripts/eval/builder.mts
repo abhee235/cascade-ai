@@ -155,6 +155,9 @@ for (const id of wanted) {
 		checkCommand: 'npm run build',
 		contextWindow: scenario.session?.contextWindow,
 		maxOutputTokens: scenario.session?.maxOutputTokens,
+		// ADR-055/056 fidelity: same skills + named agents as the product's builder sessions.
+		skillDirs: [join(ROOT, 'packages', 'server', 'skills', 'builder'), join(work, '.cascade', 'skills')],
+		agentDirs: [join(ROOT, 'packages', 'server', 'agents', 'builder'), join(work, '.cascade', 'agents')],
 	})
 	const t0 = Date.now()
 	let timedOut = false

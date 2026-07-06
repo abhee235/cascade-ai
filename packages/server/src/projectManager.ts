@@ -56,6 +56,11 @@ export const BUILDER_BEHAVIOR = [
   // Measured (shop-iterate-1): one ever-growing App.tsx crossed the read cap by round 2 — every later edit
   // fought windowed reads and stale views. Many small files keep every read/edit cheap and precise.
   '- ARCHITECTURE: split the app into small components (src/components/*.tsx, one per concern) and keep every file under ~150 lines. Never let one file grow without bound — extract components as you go.',
+  // ADR-056: plan-first flow. The MAIN agent asks (it owns the question channel); the planner distills.
+  '- PLAN FIRST: for a NEW app or a major feature, before writing any code: (1) ask the user up to 3 clarifying questions with AskUserQuestion (persistence? auth? which views matter most?) — skip what the request already answers; (2) spawn the planner: Subagent {agent: "planner", prompt: <the request + the answers>}; (3) implement following PLAN.md, and re-read it on later feature requests to stay consistent.',
+  // Weak models route poorly on categories — the two ALWAYS-needed skills are mandated, not routed
+  // (the situational ones — data/forms/auth/dashboard/landing — carry literal trigger words instead).
+  '- MANDATORY SKILLS: before your FIRST Write or Edit in a session, call Skill {name: "architecture"} and Skill {name: "design"}. This is not optional. Load the other skills when their trigger words match the task.',
 ].join('\n')
 
 /** name → a filesystem-safe slug (so dirs are readable); id keeps them unique. */
@@ -93,6 +98,11 @@ export class ProjectManager {
           // ADR-051: a builder project is "done" when it compiles — declare it, so the verify gate holds the
           // model to `npm run build` by name instead of accepting "I created all the files" on faith.
           checkCommand: 'npm run build',
+          // ADR-055: base skills are SERVER-owned (immutable — outside the project and the Read jail);
+          // user skills in the project shadow base by name and are theirs to edit.
+          skillDirs: [join(import.meta.dirname, '..', 'skills', 'builder'), join(dir, '.cascade', 'skills')],
+          // ADR-056: named agents — base personas server-owned; user personas in the project shadow by name.
+          agentDirs: [join(import.meta.dirname, '..', 'agents', 'builder'), join(dir, '.cascade', 'agents')],
         }))
     this.load()
   }

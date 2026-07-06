@@ -16,6 +16,10 @@ const inputSchema = z.object({
     .enum(['general-purpose', 'explore'])
     .optional()
     .describe('explore = read-only investigation (Read/Glob/Grep/MemorySearch), returns findings. general-purpose = full tools. Default general-purpose.'),
+  agent: z
+    .string()
+    .optional()
+    .describe('ADR-056: spawn a NAMED agent from the Agents list in your instructions (e.g. "planner") — it runs with its own specialized instructions and tool set. Omit for a plain subagent.'),
 })
 
 // ADR-050: the old description said WHAT delegation is but never WHEN — and measured across ~60 eval tasks
@@ -38,7 +42,7 @@ export const SubagentTool: Tool<z.infer<typeof inputSchema>> = {
   name: 'Subagent',
   description: (tier) => (tier === 'full' ? DESCRIPTION_FULL : tier === 'lean' ? DESCRIPTION_LEAN : DESCRIPTION_MINIMAL),
   inputSchema,
-  activitySummary: (input) => `Subagent (${input.subagent_type ?? 'general-purpose'}): ${input.description}`,
+  activitySummary: (input) => `Subagent (${input.agent ?? input.subagent_type ?? 'general-purpose'}): ${input.description}`,
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
 
@@ -48,7 +52,7 @@ export const SubagentTool: Tool<z.infer<typeof inputSchema>> = {
     }
     try {
       const readOnly = READ_ONLY_TYPES.has(input.subagent_type ?? 'general-purpose')
-      const result = await ctx.spawnSubagent({ prompt: input.prompt, readOnly })
+      const result = await ctx.spawnSubagent({ prompt: input.prompt, readOnly, agent: input.agent })
       return { content: result }
     } catch (e) {
       // Don't crash the parent — return the failure so the model can adapt.

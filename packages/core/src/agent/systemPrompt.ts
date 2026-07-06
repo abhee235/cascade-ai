@@ -35,6 +35,9 @@ export interface SystemPromptInput {
    *  gatherProjectContext and sized to the tier. Injected so a weak model doesn't burn turns rediscovering
    *  the layout (or hallucinating paths). Main agent only — subagents get a focused task, not the whole tree. */
   projectContext?: string
+  /** ADR-055: the skills INDEX (pre-rendered by skillsPromptSection — one line each, frontmatter-only
+   *  token cost). Bodies load on demand via the Skill tool; this section teaches the model to reach for it. */
+  skillsSection?: string
 }
 
 // ── Sections (each returns markdown; some collapse or drop at smaller tiers) ─────────────────────────────────
@@ -119,7 +122,7 @@ function environment(cwd: string, sandboxRoot?: string): string {
   ].join('\n')
 }
 
-export function buildSystemPrompt({ cwd, sandboxRoot, tier = 'full', subagent = false, recalled, extraInstructions, projectContext }: SystemPromptInput): string {
+export function buildSystemPrompt({ cwd, sandboxRoot, tier = 'full', subagent = false, recalled, extraInstructions, projectContext, skillsSection }: SystemPromptInput): string {
   const agentNote = subagent ? subagentNote() : null // G8: inserted right after intro at every tier
   let sections: (string | null)[]
   if (tier === 'minimal') {
@@ -140,6 +143,9 @@ export function buildSystemPrompt({ cwd, sandboxRoot, tier = 'full', subagent = 
   // ADR-046: gathered project facts (dir tree + git status). Pre-sized to the tier; kept out of the compactable
   // history so the layout is always available. Subagents don't get it (they run a focused, delegated task).
   if (projectContext && !subagent) prompt += `\n\n${projectContext}`
+  // ADR-055: the skills index — teaches the model what curated knowledge exists and to Skill-call it
+  // BEFORE building in that area. Bodies are loaded on demand (progressive disclosure), never inlined here.
+  if (skillsSection) prompt += `\n\n${skillsSection}`
   // Proactive retrieval: relevant archival memories for this turn (lower trust than core — the model should
   // verify, since they're retrieved by similarity).
   if (recalled) {

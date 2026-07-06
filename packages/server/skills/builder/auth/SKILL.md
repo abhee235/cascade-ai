@@ -1,3 +1,8 @@
+---
+name: auth
+description: Mock login/signup with localStorage sessions, header account menu, and friendly view guarding. No backend — honestly presented.
+whenToUse: Load when the task mentions ANY of: login, log in, sign up, signup, register, account, profile, log out, user session, protected page, only for logged-in users.
+---
 # Auth (mock) — accounts without a backend
 
 There is NO backend. Auth is a client-side mock that demonstrates the full UX honestly.

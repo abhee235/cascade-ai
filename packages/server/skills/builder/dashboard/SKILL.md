@@ -1,3 +1,8 @@
+---
+name: dashboard
+description: Dashboard layouts: stat cards computed from real data, sortable kit tables with row actions, bar-style visuals without a chart library.
+whenToUse: Load when the task mentions ANY of: dashboard, admin, panel, stats, metrics, KPIs, overview page, table of records, orders list, reports, analytics.
+---
 # Dashboards — stats, tables, admin layouts
 
 ## Page skeleton

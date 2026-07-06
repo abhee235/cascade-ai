@@ -1,3 +1,8 @@
+---
+name: data
+description: Seed catalogs, computed totals/counts, combined search plus filter, and the localStorage persistence hook.
+whenToUse: Load when the task mentions ANY of: products, items, catalog, list of X, search, filter, sort, total, count, price, quantity, save, persist, remember after refresh.
+---
 # Data — catalogs, persistence, derived values (client-side patterns)
 
 ## Seed data lives in `src/lib/data.ts`, typed in `src/lib/types.ts`

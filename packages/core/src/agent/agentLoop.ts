@@ -20,6 +20,7 @@ import { scheduleTools } from '../tools/scheduler'
 import { buildTodoReminder, shouldRemindTodos, type TodoReminderConfig } from './todoReminder'
 import { buildVerifyNudge, foldVerifyState, isVerifyCommand } from './verifyGate'
 import { buildDelegateNudgeText, foldReadPressure, READ_PRESSURE_FRACTION, sawSubagent } from './delegateNudge'
+import { agentChildInstructions } from './agentDefs'
 
 export interface LoopDeps {
   provider: ModelProvider
@@ -61,10 +62,16 @@ export interface LoopDeps {
   /** ADR-037: window tier sizing the system prompt + tool descriptions. Defaults to the compaction plan's tier
    *  (one source of truth); set explicitly for loops without compaction (e.g. subagents inherit the parent's). */
   tier?: import('../llm/contextWindows').WindowTier
+  /** ADR-055: pre-rendered skills index for the system prompt (bodies load via the Skill tool). */
+  skillsSection?: string
+  /** ADR-055: the loaded skills — needed by named agents to PRELOAD skill bodies into child prompts. */
+  skills?: import('../skills/skills').Skill[]
+  /** ADR-056: named agent definitions the Subagent tool can spawn by name. */
+  agentDefs?: import('./agentDefs').AgentDef[]
 }
 
 const MAX_SUBAGENT_DEPTH = 2
-const READONLY_SUBAGENT_TOOLS = new Set(['Read', 'Glob', 'Grep', 'MemorySearch'])
+const READONLY_SUBAGENT_TOOLS = new Set(['Read', 'Glob', 'Grep', 'MemorySearch', 'Skill']) // skills are read-only knowledge — children benefit too
 
 function messageText(m: Message): string {
   if (typeof m.content === 'string') return m.content
@@ -104,9 +111,24 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   // The child runs a NESTED runAgentLoop with its OWN messages + a filtered tool set (never Subagent → no
   // recursion; read-only subset for `explore`). Only its final text returns — its steps stay in its context.
   if (depth < MAX_SUBAGENT_DEPTH) {
-    ctx.spawnSubagent = async ({ prompt, readOnly }) => {
+    ctx.spawnSubagent = async ({ prompt, readOnly, agent }) => {
+      // ADR-056: a NAMED agent resolves to a file-defined persona — its body becomes the child's system
+      // prompt (REPLACING parent extraInstructions: personas don't inherit builder-behavior), its tool
+      // allowlist filters the child registry, its `skills:` are preloaded into the prompt.
+      let def: import('./agentDefs').AgentDef | undefined
+      if (agent) {
+        def = (deps.agentDefs ?? []).find((d) => d.name.toLowerCase() === agent.trim().toLowerCase())
+        if (!def) {
+          const names = (deps.agentDefs ?? []).map((d) => d.name).join(', ') || '(none defined)'
+          return `No agent named "${agent}". Available agents: ${names}. Call Subagent again with one of these exact names, or omit \`agent\` for a plain subagent.`
+        }
+      }
+      const allow = def?.tools ? new Set(def.tools) : undefined
       const childRegistry = registryOf(() =>
-        registry.list().filter((t) => t.name !== 'Subagent' && (!readOnly || READONLY_SUBAGENT_TOOLS.has(t.name))),
+        registry
+          .list()
+          .filter((t) => t.name !== 'Subagent')
+          .filter((t) => (allow ? allow.has(t.name) : !readOnly || READONLY_SUBAGENT_TOOLS.has(t.name))),
       )
       let finalText = ''
       for await (const ev of runAgentLoop([{ role: 'user', content: prompt }], {
@@ -122,8 +144,9 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
         todoStore: deps.todoStore, // shared store, keyed by depth → the child's checklist is scoped separately
         todoReminder: deps.todoReminder,
         tier, // child loops have no compact deps — inherit the parent's window tier (same model, same window)
-        maxTurns: 8,
+        maxTurns: def?.maxTurns ?? 8,
         depth: depth + 1,
+        extraInstructions: def ? agentChildInstructions(def, deps.skills ?? []) : undefined,
       })) {
         if (ev.type === 'message') {
           const t = messageText(ev.message)
@@ -167,7 +190,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     // (measured: inputTokens 8191 of 8192, ONE token of output room). The static chars/4 estimate is the
     // FLOOR; once the backend has reported a real prompt size, the MEASURED overhead (real − estimate,
     // which also captures our estimate's own error) takes over — self-correcting at the margin.
-    const systemNow = buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext })
+    const systemNow = buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext, skillsSection: deps.skillsSection })
     const staticOverhead = Math.ceil((systemNow.length + JSON.stringify(registry.schemas(tier)).length) / 4) + 256
     const overheadTokens = Math.max(staticOverhead, wireOverhead ?? 0)
 
@@ -205,7 +228,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     // a (reactive) compaction then retries; abort/fatal surface. `make` re-reads `messages` each attempt, so
     // an overflow-compaction is reflected on the retry. System is rebuilt too (memory may have changed).
     const makeStream = () =>
-      deps.provider.stream({ messages, model: deps.model, ...deps.modelLimits, system: buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext }), tools: registry.schemas(tier) }, deps.signal)
+      deps.provider.stream({ messages, model: deps.model, ...deps.modelLimits, system: buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext, skillsSection: deps.skillsSection }), tools: registry.schemas(tier) }, deps.signal)
     for await (const ev of streamWithRecovery(makeStream, {
       ...deps.recovery,
       signal: deps.signal,

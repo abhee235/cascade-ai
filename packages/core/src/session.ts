@@ -22,6 +22,8 @@ import { loadMemory } from './memory/memoryStore'
 import { resolveCompactionPlan } from './context/compactor'
 import { curateMemory } from './memory/curator'
 import { loadHooksConfig } from './hooks/hookRunner'
+import { createSkillTool, loadSkills, skillsPromptSection } from './skills/skills'
+import { agentsPromptSection, loadAgentDefs } from './agent/agentDefs'
 
 export interface SessionOptions {
   cwd: string
@@ -75,6 +77,13 @@ export interface SessionOptions {
    *  cwd is MODEL-WRITABLE and untrusted (the server's sandboxed builder projects): hook commands spawn on the
    *  HOST, so a model-written hooks.json would otherwise escalate out of the sandbox at the next open(). */
   loadProjectHooks?: boolean
+  /** ADR-055: skill directories, IN ORDER — later dirs shadow earlier ones by name. Pass base (server-owned,
+   *  immutable — they live OUTSIDE the project and the Read jail) dirs first and user dirs last. The session
+   *  loads them once, advertises a one-line index in the system prompt, and serves bodies via the Skill tool. */
+  skillDirs?: string[]
+  /** ADR-056: named-agent definition directories, same ordering/shadowing rules as skillDirs. Each *.md is a
+   *  persona (frontmatter contract + body = its system prompt) the model spawns via Subagent {agent: name}. */
+  agentDirs?: string[]
 }
 
 export interface CascadeSession {
@@ -159,7 +168,13 @@ export function createSession(opts: SessionOptions): CascadeSession {
   // it's a function, so newly-connected MCP tools appear automatically.
   const hub = opts.mcpServers && opts.mcpConnect ? new McpHub(opts.mcpServers, opts.mcpConnect) : undefined
   hub?.start()
-  const registry = createRegistry(() => hub?.readyTools() ?? [])
+  // ADR-055: load skills once (base dirs first, user dirs last — later shadows earlier). The Skill tool
+  // serves bodies on demand; the loop advertises the one-line index in the system prompt.
+  const skills = opts.skillDirs?.length ? loadSkills(opts.skillDirs) : []
+  const skillTool = skills.length > 0 ? createSkillTool(skills) : undefined
+  // ADR-056: named agents — personas the Subagent tool can spawn ({agent: "planner"}).
+  const agentDefs = opts.agentDirs?.length ? loadAgentDefs(opts.agentDirs) : []
+  const registry = createRegistry(() => [...(hub?.readyTools() ?? []), ...(skillTool ? [skillTool] : [])])
 
   // Archival (semantic) memory — Tier 2. The embedder is bound to the provider + embed model; if the
   // provider can't embed (or no model), archival quietly degrades to keyword search.
@@ -282,6 +297,13 @@ export function createSession(opts: SessionOptions): CascadeSession {
           maxTurns: opts.maxTurns,
           verifyGate: opts.verifyGate, // ADR-049 (default on in the loop)
           check, // ADR-051: known check command (declared by the frontend, or resolved from package.json)
+          // ADR-055/056: the capabilities index — skills + named agents, one line each (bodies on demand).
+          skillsSection:
+            [skills.length > 0 ? skillsPromptSection(skills, compactPlan.tier) : '', agentDefs.length > 0 ? agentsPromptSection(agentDefs, compactPlan.tier) : '']
+              .filter(Boolean)
+              .join('\n\n') || undefined,
+          skills, // ADR-056: named agents preload skill BODIES into their child prompts
+          agentDefs,
           delegateNudge: opts.delegateNudge, // ADR-050 (default on in the loop)
           hooks: hooksConfig, // ADR-036
           modelLimits: confidentLimits.contextWindow || confidentLimits.maxOutputTokens ? confidentLimits : undefined, // ADR-038 enforcement

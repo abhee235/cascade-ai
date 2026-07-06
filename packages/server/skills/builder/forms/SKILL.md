@@ -1,3 +1,8 @@
+---
+name: forms
+description: Kit-based forms: Label+Input pairs, on-submit validation, per-field error messages, success states.
+whenToUse: Load BEFORE building any screen with input fields and a submit action: signup, login, checkout, contact, settings, feedback, address, payment details.
+---
 # Forms — inputs, validation, submit flows
 
 ## Structure: Label + Input pairs from the kit, one state object

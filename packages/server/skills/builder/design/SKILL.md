@@ -1,3 +1,8 @@
+---
+name: design
+description: How to build every piece of UI here: compose the installed shadcn/ui kit with the design tokens. Includes the generated per-component reference.
+whenToUse: Load when the task mentions ANY of: page, screen, button, card, modal, dialog, menu, input, list, grid, layout, style, color, theme, dark mode, icon, look and feel. If the task will render anything, load this first.
+---
 # Design — this project uses shadcn/ui. Compose it; never hand-roll.
 
 ## The kit (already installed at `src/components/ui/` — import, don't recreate)
@@ -12,6 +17,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 **NEVER** write a raw `<button className="rounded bg-blue-600 …">` — that's `<Button>`. Never build a
 modal from divs — that's `<Dialog>`. Icons: `import { ShoppingCart } from 'lucide-react'`.
+
+**Exact props, variants, and canonical usage for EVERY component** — generated from the kit's own
+source: load `Skill {name: "design", file: "reference/components.md"}` before composing anything
+non-trivial (Dialog, Select, Table, DropdownMenu especially).
 
 ## Color = tokens only. Never invent colors.
 
