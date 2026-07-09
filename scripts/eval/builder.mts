@@ -16,8 +16,10 @@ import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
-import { createProvider, createSession, JsonlTracer, type ModelProvider } from '@cascade/core'
+import { createProvider, createSession, JsonlTracer, type CascadeSession, type ModelProvider } from '@cascade/core'
 import { BUILDER_BEHAVIOR } from '../../packages/server/src/projectManager'
+import { createPlannerSession, ensurePlanPersisted, needsPlanStage } from '../../packages/server/src/planStage'
+import { keepAwake } from './keepAwake.mts'
 import { fanout, OtelTracer } from './otelTracer.mts'
 
 const { values: args } = parseArgs({
@@ -124,11 +126,15 @@ function withTemperature(p: ModelProvider, temperature: number): ModelProvider {
 		stream: (req, sig) => p.stream({ ...req, temperature }, sig),
 		...(p.embed ? { embed: p.embed.bind(p) } : {}),
 		...(p.detectModelLimits ? { detectModelLimits: p.detectModelLimits.bind(p) } : {}),
+		...(p.recover ? { recover: p.recover.bind(p) } : {}), // WATCHDOG hook must survive the wrapper
 	}
 }
 
 writeFileSync(join(runDir, 'meta.json'), JSON.stringify({ label, model: args.model, tier: 'builder', scenarios: wanted, startedAt: new Date().toISOString() }, null, '\t'))
 console.log(`builder bench "${label}" — model=${args.model} scenarios=${wanted.length}\n`)
+// Builder scenarios (esp. iterate) run far past the 60-min sleep/hibernate threshold — hold the box awake.
+// keepAwake self-reaps on process exit; release() is called explicitly after the run loop below.
+const awake = keepAwake()
 
 for (const id of wanted) {
 	const scenario: Scenario = JSON.parse(readFileSync(join(SCENARIOS_DIR, id, 'scenario.json'), 'utf8'))
@@ -141,6 +147,10 @@ for (const id of wanted) {
 	const otelEndpoint = process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
 	const otel = otelEndpoint ? new OtelTracer({ endpoint: otelEndpoint, service: `${label}:${id}`, attributes: { 'cascade.model': args.model! } }) : undefined
 
+	// Same capability dirs for the builder session AND the plan stage (mirrors projectManager's
+	// skillDirsFor/agentDirsFor — base server-owned dirs first, project .cascade/ shadows).
+	const skillDirs = [join(ROOT, 'packages', 'server', 'skills', 'builder'), join(work, '.cascade', 'skills')]
+	const agentDirs = [join(ROOT, 'packages', 'server', 'agents', 'builder'), join(work, '.cascade', 'agents')]
 	// FIDELITY: identical to the product's builder session (projectManager.ts) — same behavior instructions,
 	// same declared check — so forensics on a bench trace transfer 1:1 to the real product experience.
 	const session = createSession({
@@ -156,17 +166,49 @@ for (const id of wanted) {
 		contextWindow: scenario.session?.contextWindow,
 		maxOutputTokens: scenario.session?.maxOutputTokens,
 		// ADR-055/056 fidelity: same skills + named agents as the product's builder sessions.
-		skillDirs: [join(ROOT, 'packages', 'server', 'skills', 'builder'), join(work, '.cascade', 'skills')],
-		agentDirs: [join(ROOT, 'packages', 'server', 'agents', 'builder'), join(work, '.cascade', 'agents')],
+		skillDirs,
+		agentDirs,
+		contextFiles: [join(work, 'PLAN.md')], // ADR-056 rung 5: pin PLAN.md into the builder prompt (fidelity)
 	})
 	const t0 = Date.now()
 	let timedOut = false
+	let stage: CascadeSession | undefined
 	const timer = setTimeout(() => {
 		timedOut = true
+		stage?.abort()
 		session.abort()
 	}, scenario.budgets.timeoutMs)
 	const prompts = scenario.prompts ?? [scenario.prompt!]
 	try {
+		// ADR-056 rung 3 FIDELITY: same deterministic plan stage as the product (wsServer submit path) —
+		// fresh project + no PLAN.md + proactive planner ⇒ the planner runs as its own top-level session on
+		// the FIRST prompt, auto-answered like every other question in the bench. Separate trace file so
+		// stage forensics don't interleave with the builder's.
+		const plannerDef = needsPlanStage(work, 0, agentDirs)
+		if (plannerDef) {
+			process.stdout.write('P')
+			const planner = createPlannerSession(plannerDef, {
+				dir: work,
+				provider,
+				model: args.model!,
+				skillDirs,
+				tracer: otel ? fanout(new JsonlTracer(join(runDir, 'traces', `${id}-planner.jsonl`)), otel) : new JsonlTracer(join(runDir, 'traces', `${id}-planner.jsonl`)),
+				contextWindow: scenario.session?.contextWindow,
+				maxOutputTokens: scenario.session?.maxOutputTokens,
+			})
+			stage = planner
+			try {
+				for await (const ev of planner.submit(prompts[0]!)) {
+					if (ev.type === 'toolStart') process.stdout.write('.')
+					else if (ev.type === 'question') planner.respondQuestion(ev.id, Object.fromEntries(ev.questions.map((q) => [q.question, q.options[0]?.label ?? 'Other'])))
+					else if (ev.type === 'permission') planner.respondPermission(ev.id, 'allow')
+				}
+			} finally {
+				stage = undefined
+				ensurePlanPersisted(work, planner) // guarantee PLAN.md exists (from the write, or the final message)
+				await planner.dispose().catch(() => {})
+			}
+		}
 		for (let i = 0; i < prompts.length; i++) {
 			if (timedOut) break
 			if (i > 0) process.stdout.write('|') // stage separator: one bar per follow-up prompt
@@ -192,4 +234,5 @@ for (const id of wanted) {
 	appendFileSync(join(runDir, 'results.jsonl'), `${JSON.stringify(row)}\n`)
 	console.log(` ${check.ok ? '✅' : timedOut ? '⏱ timeout' : '❌'}  ${Math.round(wallMs / 1000)}s${check.ok ? '' : `\n   ${check.output.split('\n').filter(Boolean).slice(-2).join(' | ').slice(0, 200)}`}`)
 }
+awake.release() // let the machine sleep again
 console.log(`\nresults → ${runDir}`)

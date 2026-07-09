@@ -49,3 +49,11 @@ export type { ErrorKind, RecoveryOptions } from './llm/resilience'
 // Sandbox (Phase 13.3): the generic execution seam. Core defines the shape; a frontend/wrapper injects an
 // implementation (the server's Docker sandbox). Absent ⇒ tools run on the host.
 export type { Sandbox, ExecOptions, ExecResult } from './sandbox/sandbox'
+// Skills + named agents (ADR-055/056): loaders + the child-instructions builder are public so a wrapper
+// can run a persona as its own TOP-LEVEL session (the server's plan stage) — not only as a subagent.
+export { loadSkills } from './skills/skills'
+export type { Skill } from './skills/skills'
+// Argument-scoped tool grants (ADR-056 rung 4): the generic capability wall behind `Write(PLAN.md)`.
+export { scopeToolsByGrants } from './tools/toolGrants'
+export { loadAgentDefs, agentChildInstructions } from './agent/agentDefs'
+export type { AgentDef } from './agent/agentDefs'

@@ -16,6 +16,7 @@ import { WebSocketServer, type WebSocket } from 'ws'
 import type { CascadeSession, InboundMessage } from '@cascade/core'
 import type { BuilderCommand } from '@cascade/app-protocol'
 import { ProjectManager } from './projectManager.js'
+import { ensurePlanPersisted } from './planStage.js'
 import { DockerSandbox, dockerAvailable, sweepSandboxContainers } from './dockerSandbox.js'
 import { ensureVisualEditConfig, listTemplates } from './templates.js'
 import { ChatStore } from './chatStore.js'
@@ -97,6 +98,9 @@ export function handleConnection(
   }
   let active: CascadeSession | undefined
   let activeId: string | undefined
+  let staging: CascadeSession | undefined // ADR-056 rung 3: the plan-stage session while it runs — user
+  // responses (answer/permission/abort) must reach IT, not the builder, for the stage's duration.
+  let stageAborted = false // abort during the stage cancels the WHOLE submit, not just the planner
   let activeChatId: string | undefined // M11: which chat (conversation) the active session is currently on
   let stopTail: (() => void) | undefined // M5: stops the Console log stream (tail) for this connection
   const terms = new Map<string, TerminalHandle>() // M7: the connection's terminal sessions, keyed by id
@@ -215,6 +219,30 @@ export function handleConnection(
         case 'submit': {
           const s = requireActive()
           if (!s) break
+          // ADR-056 rung 3: first message of a fresh, unplanned project → run the planner as its own
+          // top-level session FIRST (deterministic — planner-1 measured that asking the model doesn't
+          // work). Its events (incl. AskUserQuestion) stream to the client on the same pipe; its
+          // turnDone is swallowed so the UI sees ONE turn. Plan failure never blocks the build — the
+          // builder proceeds and the core nudge remains as the in-session safety net.
+          const planner = activeId ? manager.planSessionFor(activeId) : undefined
+          if (planner) {
+            staging = planner
+            send({ type: 'status', text: 'Planning first — writing PLAN.md…' })
+            try {
+              for await (const ev of planner.submit(msg.text)) if (ev.type !== 'turnDone') send(ev)
+            } finally {
+              staging = undefined
+              const dir = activeId && manager.dirOf(activeId)
+              if (dir) ensurePlanPersisted(dir, planner) // guarantee PLAN.md (from the write, or the final message)
+              await planner.dispose().catch(() => {})
+            }
+            sendTree() // PLAN.md (and nothing else) appeared
+            if (stageAborted) {
+              stageAborted = false
+              send({ type: 'turnDone', steps: 0 }) // close the turn — the user cancelled; don't build
+              break
+            }
+          }
           for await (const ev of s.submit(msg.text, msg.images)) send(ev) // M11: images = attached data-URIs
           sendTree() // the agent may have created/edited files — refresh the tree
           saveChat(msg.text) // M11: persist the turn to the active chat (+ title it from the first message)
@@ -394,12 +422,16 @@ export function handleConnection(
           terms.get(msg.id)?.resize(msg.cols, msg.rows)
           break
         case 'permission':
-          active?.respondPermission(msg.id, msg.decision)
+          ;(staging ?? active)?.respondPermission(msg.id, msg.decision)
           break
         case 'answer': // ADR-043: the user's answer to an AskUserQuestion → wakes the parked loop
-          active?.respondQuestion(msg.id, msg.answers)
+          ;(staging ?? active)?.respondQuestion(msg.id, msg.answers)
           break
         case 'abort':
+          if (staging) {
+            stageAborted = true // cancel the whole submit — the builder must NOT start after a user abort
+            staging.abort()
+          }
           active?.abort()
           break
         case 'reset':

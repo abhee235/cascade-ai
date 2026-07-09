@@ -98,6 +98,7 @@ function withTemperature(p: ModelProvider, temperature: number): ModelProvider {
 		stream: (req, sig) => p.stream({ ...req, temperature }, sig),
 		...(p.embed ? { embed: p.embed.bind(p) } : {}),
 		...(p.detectModelLimits ? { detectModelLimits: p.detectModelLimits.bind(p) } : {}),
+		...(p.recover ? { recover: p.recover.bind(p) } : {}), // WATCHDOG hook must survive the wrapper
 	}
 }
 

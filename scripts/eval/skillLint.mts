@@ -84,7 +84,9 @@ export function lintDoc(doc: Doc): Finding[] {
 	// ── Agent-specific ──
 	if (doc.kind === 'agent') {
 		for (const t of (meta.tools ?? '').split(',').map((s) => s.trim()).filter(Boolean)) {
-			if (!KNOWN_TOOLS.has(t)) add('FAIL', 'unknown-tool', `tools lists "${t}" — not a Cascade tool (typo disables the agent's allowlist)`)
+			// A grant may be arg-scoped (`Write(PLAN.md)`, `Bash(git:*)`) — validate the base tool name only.
+			const base = t.replace(/\(.*\)$/, '')
+			if (!KNOWN_TOOLS.has(base)) add('FAIL', 'unknown-tool', `tools lists "${t}" — not a Cascade tool (typo disables the agent's allowlist)`)
 		}
 		if (meta.maxturns && !/^\d+$/.test(meta.maxturns)) add('FAIL', 'maxturns-numeric', `maxTurns "${meta.maxturns}" is not a number`)
 		if (!body.includes('- [ ]') && !/success criteria/i.test(body)) add('WARN', 'no-success-criteria', 'agent body has no self-check/success criteria — skillify requires knowing what done looks like')

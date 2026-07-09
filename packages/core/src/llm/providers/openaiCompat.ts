@@ -177,6 +177,29 @@ export class OpenAICompatProvider implements ModelProvider {
     }
   }
 
+  /** WATCHDOG (resilience.recover): recycle a degraded local model — unload via keep_alive:0, then a 1-token
+   *  generate forces a FRESH load. Measured remedy across six live Ollama crashes: a crashed runner answers
+   *  again but degraded (empty replies) until this exact sequence. Best-effort; hosted backends no-op fast. */
+  async recover(model: string): Promise<void> {
+    if (this.cfg.id !== 'ollama') return
+    try {
+      await fetch(`${this.cfg.baseUrl}/api/generate`, {
+        method: 'POST',
+        headers: this.headers(),
+        body: JSON.stringify({ model, keep_alive: 0 }),
+        signal: AbortSignal.timeout(15_000),
+      })
+      await fetch(`${this.cfg.baseUrl}/api/generate`, {
+        method: 'POST',
+        headers: this.headers(),
+        body: JSON.stringify({ model, prompt: 'ok', stream: false, options: { num_predict: 1 } }),
+        signal: AbortSignal.timeout(120_000), // cold load can take a while
+      })
+    } catch {
+      /* best-effort — the retry proceeds regardless */
+    }
+  }
+
   async *stream(req: CompletionRequest, signal?: AbortSignal): AsyncIterable<StreamEvent> {
     // M11: image turns go through Ollama's NATIVE /api/chat — its OpenAI-compat /v1 endpoint silently drops
     // image_url (verified on Ollama 0.30.10), whereas /api/chat accepts an `images:[base64]` array per message.

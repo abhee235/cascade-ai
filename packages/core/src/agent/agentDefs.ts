@@ -20,6 +20,10 @@ export interface AgentDef {
 	skills?: string[]
 	/** Reserved (v1.1): may surface AskUserQuestion cards from inside a spawn. Parsed, currently inert. */
 	interactive?: boolean
+	/** The agent OPTS INTO harness proactivity (ADR-056 rung 2: the plan nudge only fires for a planner
+	 *  that declares this). Made deterministic: proactive use is declared in the agent's own definition,
+	 *  never in session config. Shadowing the file without this field silences the nudge. */
+	proactive?: boolean
 	/** The child's system prompt (replaces the parent's extraInstructions — personas don't inherit). */
 	body: string
 	source: string
@@ -55,6 +59,7 @@ export function loadAgentDefs(dirs: string[]): AgentDef[] {
 					maxTurns: meta.maxturns ? Number(meta.maxturns) || undefined : undefined,
 					skills: list(meta.skills),
 					interactive: meta.interactive === 'true',
+					proactive: meta.proactive === 'true',
 					body,
 					source: join(dir, f),
 				})

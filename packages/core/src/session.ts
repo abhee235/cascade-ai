@@ -13,7 +13,8 @@ import { resolveCheckCommand, type CheckCommand } from './agent/verifyGate'
 import type { PermissionController, PermissionMode, PermissionState } from './permissions/gate'
 import { NoopTracer, type Tracer } from './observability/tracer'
 import { join } from 'node:path'
-import { createRegistry } from './tools/toolRegistry'
+import { createRegistry, registryOf } from './tools/toolRegistry'
+import { scopeToolsByGrants } from './tools/toolGrants'
 import { FileStateCache } from './tools/fileState'
 import { TodoStore } from './tools/todoStore'
 import { McpHub, type McpServerConfig, type McpConnect, type McpServerStatus } from './mcp/mcpHub'
@@ -35,6 +36,10 @@ export interface SessionOptions {
   /** Tool names pre-allowed / pre-denied (e.g. from settings). */
   allow?: string[]
   deny?: string[]
+  /** Restrict the session to EXACTLY these tools (same shape as AgentDef.tools — a persona run as a
+   *  top-level session, e.g. the server's plan stage). Absent ⇒ full registry. Generic mechanism: core
+   *  doesn't know WHY a caller narrows the set. */
+  tools?: string[]
   /** Optional forensic trace sink (ADR-023). Omit ⇒ NoopTracer (no output). */
   tracer?: Tracer
   /** MCP servers to register (Phase 9). Connected in the BACKGROUND at startup (ADR-014). */
@@ -60,6 +65,10 @@ export interface SessionOptions {
   sandbox?: import('./sandbox/sandbox').Sandbox
   /** Phase 15: generic extra system-prompt context (e.g. a project template's AI rules). */
   extraInstructions?: string
+  /** ADR-056 rung 5: files pinned into the system prompt, re-read FRESH each turn (like memory) so their
+   *  content is always present + current, never compacted, never dependent on the model choosing to Read.
+   *  The builder pins PLAN.md (the durable contract that must survive compaction across iterate rounds). */
+  contextFiles?: string[]
   /** Max model round-trips per submit before the loop stops (default 10). A builder doing a full app
    *  needs far more than a chat turn — the server sets this high. */
   maxTurns?: number
@@ -174,7 +183,11 @@ export function createSession(opts: SessionOptions): CascadeSession {
   const skillTool = skills.length > 0 ? createSkillTool(skills) : undefined
   // ADR-056: named agents — personas the Subagent tool can spawn ({agent: "planner"}).
   const agentDefs = opts.agentDirs?.length ? loadAgentDefs(opts.agentDirs) : []
-  const registry = createRegistry(() => [...(hub?.readyTools() ?? []), ...(skillTool ? [skillTool] : [])])
+  const fullRegistry = createRegistry(() => [...(hub?.readyTools() ?? []), ...(skillTool ? [skillTool] : [])])
+  // Session-level allowlist (same mechanism the Subagent path applies from AgentDef.tools): a persona run
+  // as its own top-level session gets its declared tools and nothing else — and grants may be arg-scoped
+  // (`Write(PLAN.md)`), so a planner literally cannot write code (ADR-056 rung 4).
+  const registry = opts.tools?.length ? registryOf(() => scopeToolsByGrants(fullRegistry.list(), opts.tools!)) : fullRegistry
 
   // Archival (semantic) memory — Tier 2. The embedder is bound to the provider + embed model; if the
   // provider can't embed (or no model), archival quietly degrades to keyword search.
@@ -293,6 +306,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
           todoStore,
           ask, // ADR-043: AskUserQuestion round-trip
           extraInstructions: opts.extraInstructions,
+          contextFiles: opts.contextFiles, // ADR-056 rung 5: pinned files (e.g. PLAN.md), re-read each turn
           projectContext, // ADR-046: dir tree + git status (gathered once above)
           maxTurns: opts.maxTurns,
           verifyGate: opts.verifyGate, // ADR-049 (default on in the loop)

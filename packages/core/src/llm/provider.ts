@@ -76,4 +76,8 @@ export interface ModelProvider {
    *  `context_length`, which is the trained ceiling) + `num_predict`. Optional; returns {} when unknown or the
    *  backend has no such endpoint (hosted providers 404 → fall back to the model map). */
   detectModelLimits?(model: string, signal?: AbortSignal): Promise<{ contextWindow?: number; maxOutputTokens?: number }>
+  /** WATCHDOG: best-effort backend recovery after repeated transient failures — a crashed/hung LOCAL runner
+   *  often answers again but DEGRADED (empty replies) until the model is unloaded and freshly loaded
+   *  (measured across six live Ollama crashes). Ollama: keep_alive:0 unload; hosted providers: omit. */
+  recover?(model: string): Promise<void>
 }

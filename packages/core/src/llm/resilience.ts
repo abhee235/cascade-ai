@@ -28,7 +28,7 @@ export function classifyError(err: unknown): ErrorKind {
   }
   // Streaming connection dropped mid-response: Node/undici throws `TypeError: terminated` (cause:
   // "other side closed" / UND_ERR_SOCKET). Common with Ollama (model loading, brief stall) — and retryable.
-  if (/fetch failed|terminated|other side closed|socket|network|timeout|connection (closed|reset|error)|econn|und_err|premature close/.test(msg)) return 'transient'
+  if (/fetch failed|terminated|other side closed|socket|network|timeout|stalled|connection (closed|reset|error)|econn|und_err|premature close/.test(msg)) return 'transient'
   return 'fatal'
 }
 
@@ -42,6 +42,21 @@ export interface RecoveryOptions {
   onOverflow?: () => Promise<void>
   onRetry?: (info: { attempt: number; delayMs: number; reason: ErrorKind }) => void
   sleep?: (ms: number) => Promise<void> // injectable for deterministic tests
+  /** WATCHDOG (in-core, ported from the eval runner): a crashed/hung local backend often returns DEGRADED
+   *  until the model is recycled. Called before the 2nd+ consecutive transient retry (best-effort). */
+  recover?: () => Promise<void>
+  /** WATCHDOG: max ms between STREAM EVENTS before the attempt is declared stalled and retried (a connection
+   *  that is open but silent — measured live: an abort went unanswered ~27 min past a run's budget).
+   *  Default 180_000; 0 disables. */
+  stallTimeoutMs?: number
+}
+
+/** A mid-stream stall promoted to an error (classified transient → retried, with recycle). */
+export class StallError extends Error {
+  constructor(ms: number) {
+    super(`stream stalled: no events for ${ms}ms`)
+    this.name = 'StallError'
+  }
 }
 
 export class RecoveryError extends Error {
@@ -57,6 +72,28 @@ function backoff(attempt: number, base: number, max: number): number {
   return d + Math.random() * 0.25 * d // jitter de-synchronizes retries (no thundering herd)
 }
 
+/** Race an iterator's next() against a stall timer. SLEEP-AWARE: on the user's box the OS sleeps at 60min —
+ *  a timer that fires GROSSLY late (≫ armed delay) means the machine slept, not that the backend stalled;
+ *  re-arm once instead of erroring (the backend was asleep too and deserves a fresh chance). */
+async function nextWithStallGuard<T>(it: AsyncIterator<T>, stallMs: number): Promise<IteratorResult<T>> {
+  for (let rearm = 0; ; rearm++) {
+    const armedAt = Date.now()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const stall = new Promise<'stall'>((r) => {
+      timer = setTimeout(() => r('stall'), stallMs)
+    })
+    try {
+      const winner = await Promise.race([it.next().then((r) => ({ r })), stall])
+      if (winner !== 'stall') return winner.r
+      const late = Date.now() - armedAt - stallMs
+      if (late > stallMs && rearm === 0) continue // fired way past its slot ⇒ system slept; one fresh chance
+      throw new StallError(stallMs)
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+}
+
 /** Drive a provider stream with recovery. `make` is called once per attempt (re-reads the latest messages,
  *  so onOverflow's compaction takes effect on the retry). */
 export async function* streamWithRecovery(make: () => AsyncIterable<StreamEvent>, opts: RecoveryOptions = {}): AsyncGenerator<StreamEvent> {
@@ -64,12 +101,35 @@ export async function* streamWithRecovery(make: () => AsyncIterable<StreamEvent>
   const maxOverflow = opts.maxOverflowRetries ?? 2
   const base = opts.baseDelayMs ?? 500
   const max = opts.maxDelayMs ?? 8_000
-  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  const stallMs = opts.stallTimeoutMs ?? 180_000
+  // Backoff sleep must observe the ABORT signal — measured cost of not doing so: a Stop during a long
+  // backoff waits out the full delay before the loop notices.
+  const sleep =
+    opts.sleep ??
+    ((ms: number) =>
+      new Promise<void>((resolve) => {
+        const t = setTimeout(done, ms)
+        function done() {
+          opts.signal?.removeEventListener('abort', done)
+          clearTimeout(t)
+          resolve()
+        }
+        opts.signal?.addEventListener('abort', done, { once: true })
+      }))
   let transientAttempts = 0
   let overflowAttempts = 0
 
   while (true) {
     try {
+      if (stallMs > 0) {
+        // Pull manually so every await between events is stall-guarded.
+        const it = make()[Symbol.asyncIterator]()
+        while (true) {
+          const r = await nextWithStallGuard(it, stallMs)
+          if (r.done) return
+          yield r.value
+        }
+      }
       for await (const ev of make()) yield ev
       return // stream completed
     } catch (err) {
@@ -94,6 +154,15 @@ export async function* streamWithRecovery(make: () => AsyncIterable<StreamEvent>
         const delayMs = backoff(transientAttempts, base, max)
         opts.onRetry?.({ attempt: transientAttempts, delayMs, reason: 'transient' })
         yield { type: 'retry', attempt: transientAttempts, delayMs, reason: 'transient' } // surfaced to the UI; resets partial output
+        // WATCHDOG: a crashed/hung local backend often answers again but DEGRADED (empty replies) until
+        // the model is recycled — the eval runner learned this over six live crashes; now core knows too.
+        if (transientAttempts >= 2 && opts.recover) {
+          try {
+            await opts.recover()
+          } catch {
+            /* best-effort — the retry proceeds regardless */
+          }
+        }
         await sleep(delayMs)
         continue
       }

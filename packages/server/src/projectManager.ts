@@ -10,9 +10,10 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { createProvider, createSession, type CascadeSession, type Sandbox } from '@cascade/core'
+import { createProvider, createSession, type AgentDef, type CascadeSession, type Sandbox } from '@cascade/core'
 import type { ProjectInfo } from '@cascade/app-protocol'
 import { applyTemplate, readAiRules } from './templates.js'
+import { createPlannerSession, needsPlanStage } from './planStage.js'
 
 /** Initialize a git repo in `dir` with one commit — the baseline for checkpoints (Phase 18). Best-effort. */
 function gitInit(dir: string): void {
@@ -39,6 +40,8 @@ export interface ProjectManagerOptions {
   /** How to build a project's session. Injected so tests can pass a FakeProvider. Default: an Ollama-backed
    *  session rooted at the project dir, with the project's sandbox (if any) + AI rules injected. */
   createSessionFor?: (dir: string, sandbox?: Sandbox, extraInstructions?: string) => CascadeSession
+  /** How to build a plan-stage session (ADR-056 rung 3). Injected for tests; default: planStage.ts. */
+  createPlanSessionFor?: (dir: string, def: AgentDef, sandbox?: Sandbox) => CascadeSession
 }
 
 /** Builder behavior injected ahead of every project's AI rules (as generic `extraInstructions`). The core
@@ -56,8 +59,10 @@ export const BUILDER_BEHAVIOR = [
   // Measured (shop-iterate-1): one ever-growing App.tsx crossed the read cap by round 2 — every later edit
   // fought windowed reads and stale views. Many small files keep every read/edit cheap and precise.
   '- ARCHITECTURE: split the app into small components (src/components/*.tsx, one per concern) and keep every file under ~150 lines. Never let one file grow without bound — extract components as you go.',
-  // ADR-056: plan-first flow. The MAIN agent asks (it owns the question channel); the planner distills.
-  '- PLAN FIRST: for a NEW app or a major feature, before writing any code: (1) ask the user up to 3 clarifying questions with AskUserQuestion (persistence? auth? which views matter most?) — skip what the request already answers; (2) spawn the planner: Subagent {agent: "planner", prompt: <the request + the answers>}; (3) implement following PLAN.md, and re-read it on later feature requests to stay consistent.',
+  // ADR-056 rung 3+5: fresh-project planning is ORCHESTRATED (the server runs the planner before the first
+  // build message — planner-1 measured that the model overrules polite requests), and the resulting PLAN.md
+  // is PINNED into this prompt under "Pinned context" (rung 5 — always present, no need to Read it).
+  '- PLAN: your PLAN.md appears under "Pinned context" below — it is the contract for this app. Build EXACTLY the views, components, and data model it specifies; do not invent structure that contradicts it. For a MAJOR new feature that changes the plan, update it first: Subagent {agent: "planner", prompt: <the feature request>} (the pinned copy refreshes automatically).',
   // Weak models route poorly on categories — the two ALWAYS-needed skills are mandated, not routed
   // (the situational ones — data/forms/auth/dashboard/landing — carry literal trigger words instead).
   '- MANDATORY SKILLS: before your FIRST Write or Edit in a session, call Skill {name: "architecture"} and Skill {name: "design"}. This is not optional. Load the other skills when their trigger words match the task.',
@@ -66,6 +71,12 @@ export const BUILDER_BEHAVIOR = [
 /** name → a filesystem-safe slug (so dirs are readable); id keeps them unique. */
 const slug = (name: string) =>
   name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || 'project'
+
+/** The capability dirs every builder-facing session shares: server-owned base first (immutable), then the
+ *  project's own `.cascade/` (user-owned; shadows base by name). One definition — builder, plan stage,
+ *  and the eval bench must all see the SAME capabilities. */
+export const skillDirsFor = (dir: string) => [join(import.meta.dirname, '..', 'skills', 'builder'), join(dir, '.cascade', 'skills')]
+export const agentDirsFor = (dir: string) => [join(import.meta.dirname, '..', 'agents', 'builder'), join(dir, '.cascade', 'agents')]
 
 export class ProjectManager {
   private readonly projects = new Map<string, Project>()
@@ -100,11 +111,39 @@ export class ProjectManager {
           checkCommand: 'npm run build',
           // ADR-055: base skills are SERVER-owned (immutable — outside the project and the Read jail);
           // user skills in the project shadow base by name and are theirs to edit.
-          skillDirs: [join(import.meta.dirname, '..', 'skills', 'builder'), join(dir, '.cascade', 'skills')],
+          skillDirs: skillDirsFor(dir),
           // ADR-056: named agents — base personas server-owned; user personas in the project shadow by name.
-          agentDirs: [join(import.meta.dirname, '..', 'agents', 'builder'), join(dir, '.cascade', 'agents')],
+          // ADR-056 rung 2 activation is NOT wired here: the base planner.md declares `proactive: true`
+          // in its own frontmatter (the idiom: policy travels with the capability, never a session flag).
+          agentDirs: agentDirsFor(dir),
+          // ADR-056 rung 5: PLAN.md is pinned into the builder's system prompt, re-read each turn — the
+          // contract is ALWAYS in context (measured: the builder read it 0 times when only on disk), and
+          // survives compaction across iterate rounds (the whole reason a durable plan exists).
+          contextFiles: [join(dir, 'PLAN.md')],
         }))
     this.load()
+  }
+
+  /** ADR-056 rung 3: the plan stage. If this project's NEXT submit is the first message of a fresh,
+   *  unplanned project (and a proactive planner is mounted), build the planner's one-shot TOP-LEVEL
+   *  session. The caller runs it to completion (PLAN.md lands on disk), disposes it, then submits the
+   *  user's message to the builder as usual. Undefined ⇒ no stage. */
+  planSessionFor(id: string): CascadeSession | undefined {
+    const project = this.projects.get(id)
+    if (!project?.session) return undefined // not open()ed — the submit path always opens first
+    const def = needsPlanStage(project.dir, project.session.getHistory().length, agentDirsFor(project.dir))
+    if (!def) return undefined
+    const build =
+      this.opts.createPlanSessionFor ??
+      ((dir: string, d: AgentDef, sandbox?: Sandbox) =>
+        createPlannerSession(d, {
+          dir,
+          provider: createProvider({ provider: 'ollama', model: this.opts.model, baseUrl: this.opts.baseUrl }),
+          model: this.opts.model,
+          skillDirs: skillDirsFor(dir),
+          sandbox,
+        }))
+    return build(project.dir, def, project.sandbox)
   }
 
   /** The host dir of a project — SERVER-INTERNAL only (never crosses the wire). For the file service. */

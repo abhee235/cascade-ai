@@ -227,3 +227,132 @@ end). New weak tier: **hermes3:8b** (user's 7B rule — the 3B floor never moved
 - Next candidates (review point): delegation for scatter-class tasks (ADR-050 revisit — the strong model
   now delegates; the weak one still needs the story), and whether `wrong_code` at 8B merits a rung
   (e.g. red-test output shaping) or is simply the model's ceiling.
+
+## Rung 9 — skills routing measured (skills-2, 2026-07-07, user-approved run)
+
+**The routing fix worked — user's critique validated end-to-end.** Salvaged pre-fix trace: ZERO Skill
+calls (vague descriptions). Post-fix (mandatory rule + trigger-word whenToUse + example call): BOTH
+scenarios opened with exactly `Skill architecture` + `Skill design`, and the model COPIED the
+architecture checklist into its reply and ticked it while working — the official checklist pattern
+functioning verbatim on a local model.
+
+- **builder-shop ✅ 201s** (pre-skills: 146s monolith; skills-with-old-routing: 335s): TEN Writes —
+  types, seed data, and 7 components as separate files. The monolith is dead in one-shot builds.
+- **builder-shop-iterate ⏱**: died mid-round-2 at 5,231s against a 3,600s budget. Initial read was "a
+  hung backend call ignored the abort for ~27 minutes" — **corrected**: this box sleeps/hibernates at
+  60 minutes, so the excess wall-clock is most plausibly the machine sleeping mid-run (timers and the
+  abort can't fire while suspended; they land on wake). The hang diagnosis is UNPROVEN either way.
+  Watchdog-in-core still ships — real mid-stream stalls were observed on other runs — but its stall
+  guard is sleep-aware (a timer that fires grossly late re-arms once instead of declaring a stall),
+  and approved long runs should hold the machine awake.
+- **Planner MISS**: zero AskUserQuestion, zero Subagent{planner} in both scenarios. Diagnosis: the
+  plan-first rule is a 3-step COMPOSITE instruction competing with the simple mandate — the mechanical
+  rule won, the composite lost (the week's recurring lesson). Candidate fix: the detect→remind idiom —
+  harness detects a fresh project + build request + no PLAN.md → injects the exact
+  `Subagent {agent: "planner", …}` directive, like the verify gate does.
+- Instrument note: the live monitor (tail -F pipeline) produced zero events despite matching content —
+  git-bash buffering on an actively-appended NTFS file. Replaced with `scripts/eval/watch.mts`
+  (Node-native offset polling, no pipeline); verified against this run's traces — it renders the whole
+  story above (skill calls, verify gate, 12 compactions, the build failure) in one screen.
+
+## Rung 10 — plan nudge measured; verdict: orchestrate, don't ask (planner-1, 2026-07-07, user-approved)
+
+**builder-shop ✅ 277s** on qwen36-agentic with the rung-2 nudge live. The mechanism worked end-to-end:
+`plan_nudge` fired at turn 2 (writes started, no PLAN.md), the injected directive was read intact — and
+the model **deliberately declined it**: "this is a straightforward e-commerce storefront with clear
+requirements that I've already understood… I have all the information I need." Zero Subagent calls;
+built correctly anyway.
+
+- Class insight: detect→remind converts *forgetting* into compliance (skills, todos, verify) but cannot
+  convert *disagreement* — a 36B model treats an advisory as advisory. And on a one-shot scenario its
+  judgment was defensible (the plan pays in ITERATE rounds, where compaction erases working memory).
+- Fix shipped (ADR-056 rung 3): the builder product now runs the planner as a deterministic pipeline
+  stage on every fresh project's first message (server-orchestrated, top-level session, questions reach
+  the real user). The nudge stays as the mid-session safety net. Core untouched by policy.
+- Next measurement: builder-shop{,-iterate} with the stage live — success = PLAN.md before first build
+  write; iterate additionally probes whether later rounds actually re-read the plan (the payoff claim).
+
+### planner-2 (stage live, same day): ✅ 579s — but the PLANNER BUILT
+
+The stage ran end-to-end (plan_nudge correctly silent; first live in-core watchdog recover mid-stage).
+PLAN.md content was textbook — all six sections, real interfaces, exact component list, out-of-scope.
+**But the planner wrote 6 app files** (types, data, useCart, 3 components) and hit maxTurns=10
+mid-build; the builder finished the remaining 4 files and passed. Root cause is OURS: `skills:
+architecture` preloaded a BUILD RECIPE with an imperative checklist into the planner's prompt — and
+models executing checklists verbatim is precisely the behavior our skills bank on. The skill overrode
+the persona ("you never build").
+
+- Fix: preload removed; persona hardened ("you write EXACTLY ONE file: PLAN.md"; skills may be
+  consulted but their checklists are the BUILDER's; self-check box "PLAN.md is the ONLY file you
+  wrote"). Re-measure before judging the builder's plan-adherence — this run confounds it (the app
+  was half-built, so the builder had no reason to read PLAN.md; 0 reads observed).
+- If re-measure still shows planner drift: the evidence-driven escalation is path-scoped tool grants
+  in core (`Write(PLAN.md)`-style specifiers) — a GENERIC mechanism, not a planner hack.
+
+### planner-3 (persona-hardened, no skill preload): ❌ persona FAILED
+
+The planner received the hardened persona ("you write EXACTLY ONE file: PLAN.md") and the architecture
+skill was NOT preloaded (verified in the system prompt), yet its first thought was "build a storefront…
+then plan and implement it." It wrote a **295-line App.tsx monolith**, never wrote PLAN.md, and its 5
+Bash build-attempts were blocked only by the allowlist. **Verdict: a system-prompt persona cannot hold
+a mid model back from building when it has an unrestricted Write + a build request.** Industry check
+(the plan modes of hosted app builders): production tools enforce plan-vs-build by REMOVING code-write
+capability, never by prompting. → ADR-056 rung 4 (arg-scoped tool grants).
+
+### planner-4 (rung 4, `Write(PLAN.md)`): ✅ 569s — the wall works, BEST build yet
+
+- **Capability wall: complete success.** The planner reached for `Write src/App.tsx` → DENIED with the
+  teaching message → **self-corrected to PLAN.md on the FIRST denial** (no flailing, unlike planner-3's
+  5 Bash retries), done in 5 turns. Exactly one successful planner write: PLAN.md.
+- **Best build to date:** the builder produced 10 clean files (types + data + 7 components) and a
+  74-line App.tsx orchestrator. Monolith gone. plan_nudge correctly silent (PLAN.md present).
+- **⚠️ Plan CONSUMPTION gap (next rung):** the builder wrote a plan-shaped architecture but **read
+  PLAN.md 0 times** — convergent (both agents apply the architecture skill to the same request), not
+  consumptive. Harmless one-shot; fatal for ITERATE (the plan exists to survive compaction across
+  rounds). Closing it needs the plan IN the builder's context, not just on disk — and the iterate
+  scenario to prove where it pays. Candidate: the stage injects PLAN.md (short, <page) into the
+  builder's first message; measure on builder-shop-iterate (needs runner keep-awake for the ~90-min run
+  vs the 60-min sleep).
+
+### planner-5→8: closing the consumption loop (ADR-056 rung 5, pinned context)
+
+Fix chosen: pin PLAN.md into the builder's SYSTEM PROMPT, re-read fresh each turn (survives compaction,
+no reliance on the model Reading). Reaching a proven mechanism took four runs, each exposing a defect
+units couldn't:
+
+- **planner-5** ⏱ (1800s, hit ceiling): the pin WORKS (plan in the builder's prompt) but the full 6.4KB
+  plan was a ~1600 tok/turn tax that pushed the build over the compaction threshold — 0→3 compactions →
+  a re-read/re-edit cascade (11→26 turns). The plan meant to survive compaction was *causing* it.
+  → Fix: terse planner (~1.5KB dense skeleton, no prose) + a core `PIN_CAP_CHARS=2500` backstop.
+- **planner-6** ❌ (no PLAN.md): the Write(PLAN.md) grant reliably STOPS building, but whether the planner
+  then WRITES the plan vs. SPEAKS it in chat is non-deterministic — here it dumped the plan into its
+  final message and never wrote the file, so the pin had nothing to inject. → Fix: `ensurePlanPersisted`
+  captures the planner's final message as PLAN.md when no file was written (belt = grant, suspenders =
+  capture).
+- **planner-7** — inconclusive: Ollama HTTP 500 (llama-server crash) killed the stage after 3 watchdog
+  retries; the builder degraded gracefully and built without a plan (the designed fallback). Infra, not
+  code. Ollama recovered on its own.
+- **planner-8** ✅ (462s — fastest yet): ALL fixes hold together. The planner spoke the plan (3 code-write
+  denials, no Write) and `ensurePlanPersisted` captured it → clean 1.5KB PLAN.md (`# Cascade Shop —
+  Plan`, six terse sections). Pinned in the builder prompt (16.6KB, not 21.5KB); **0 compactions**, 11
+  turns, 8 clean files matching the plan. The one-shot mechanism is PROVEN.
+
+Runner keep-awake (`scripts/eval/keepAwake.mts`, SetThreadExecutionState) now holds the box awake so the
+iterate durability run survives the 60-min sleep.
+
+### iterate-2 (6 rounds, pinned 16k window): ❌ build — but durability PROVEN, failure is INFRA
+
+Keep-awake worked (the run went the full 2445s / 41 min without sleeping). The check failed ("built
+bundle missing 'Cascade Shop'"), but forensics show the cause is **backend instability, not the plan
+mechanism**: 6× `ollama HTTP 500 (llama-server crash)` across the run, one needing 5 watchdog retries.
+Round 1 built the 8 component files but llama-server crashed BEFORE it wrote App.tsx (the view-switcher
+that sets `shopName`), so the app was never wired up — App.tsx stayed the template default. Rounds 2, 3,
+6 did nothing (backend down when they started). Same failure class as planner-7.
+
+**The durability claim rung 5 exists to prove is nonetheless CONFIRMED:** in round 1 the pinned plan
+survived all **6 compactions** — present and still terse in the 15th (last) model_request, identical to
+the 1st. The plan-in-system-prompt genuinely outlives what compaction does to message history. That is
+the core positive result; a clean full 6-round consistency demo is blocked only by the 36B model
+crashing llama-server under sustained load (an infra/hardware issue, orthogonal to Cascade). Follow-up:
+either stabilise the backend (Ollama num_ctx/flash-attn tuning, model reload) or run the consistency
+demo on a more stable model.

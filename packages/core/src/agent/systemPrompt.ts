@@ -10,7 +10,9 @@
 //   minimal (<24k):   a tight core-rules digest + environment only.
 // Kept pure + headless (node:os only, no vscode).
 
+import { existsSync, readFileSync } from 'node:fs'
 import { platform } from 'node:os'
+import { basename } from 'node:path'
 import { loadMemory } from '../memory/memoryStore'
 import type { WindowTier } from '../llm/contextWindows'
 
@@ -38,6 +40,11 @@ export interface SystemPromptInput {
   /** ADR-055: the skills INDEX (pre-rendered by skillsPromptSection — one line each, frontmatter-only
    *  token cost). Bodies load on demand via the Skill tool; this section teaches the model to reach for it. */
   skillsSection?: string
+  /** ADR-056 rung 5: files PINNED into the system prompt, re-read FRESH each turn (like memory), so their
+   *  content is always present and always current — never compacted away, never dependent on the model
+   *  choosing to Read. Generic: the builder pins PLAN.md (the durable contract); any frontend can pin a
+   *  README/conventions file. Paths are absolute or cwd-relative; missing files are skipped silently. */
+  contextFiles?: string[]
 }
 
 // ── Sections (each returns markdown; some collapse or drop at smaller tiers) ─────────────────────────────────
@@ -122,7 +129,37 @@ function environment(cwd: string, sandboxRoot?: string): string {
   ].join('\n')
 }
 
-export function buildSystemPrompt({ cwd, sandboxRoot, tier = 'full', subagent = false, recalled, extraInstructions, projectContext, skillsSection }: SystemPromptInput): string {
+// A pinned file is sent on EVERY turn, so it must stay small — measured (planner-5): a 6.4KB plan pinned
+// each turn pushed the build over the compaction threshold (0→3 compactions) and tripled its length. Cap
+// each file so a runaway artifact can never evict the model's working context; the note tells the model
+// the pin was clipped so it can Read the file for the rest if it truly needs the tail.
+const PIN_CAP_CHARS = 2_500
+
+/** Read the pinned context files that exist, concatenated under a header (basename-labelled). Fresh each
+ *  call — a plan the planner just wrote, or an updated one, shows up on the very next turn. Kept generic:
+ *  core doesn't know PLAN.md means anything; the instruction to FOLLOW a pinned file lives in the frontend's
+ *  extraInstructions (BUILDER_BEHAVIOR). Absent/unreadable files are skipped; oversized files are capped. */
+function pinnedContext(cwd: string, files: string[]): string {
+  const blocks: string[] = []
+  for (const f of files) {
+    const path = f.match(/^([A-Za-z]:[\\/]|[\\/])/) ? f : `${cwd}/${f}`
+    try {
+      if (!existsSync(path)) continue
+      let content = readFileSync(path, 'utf8').trim()
+      if (!content) continue
+      if (content.length > PIN_CAP_CHARS) {
+        content = `${content.slice(0, PIN_CAP_CHARS)}\n… [pinned view truncated at ${PIN_CAP_CHARS} chars — Read ${basename(f)} for the full file]`
+      }
+      blocks.push(`## ${basename(f)}\n${content}`)
+    } catch {
+      /* unreadable → skip; a pinned file must never break the turn */
+    }
+  }
+  if (blocks.length === 0) return ''
+  return `# Pinned context (kept current every turn)\n${blocks.join('\n\n')}`
+}
+
+export function buildSystemPrompt({ cwd, sandboxRoot, tier = 'full', subagent = false, recalled, extraInstructions, projectContext, skillsSection, contextFiles }: SystemPromptInput): string {
   const agentNote = subagent ? subagentNote() : null // G8: inserted right after intro at every tier
   let sections: (string | null)[]
   if (tier === 'minimal') {
@@ -140,6 +177,12 @@ export function buildSystemPrompt({ cwd, sandboxRoot, tier = 'full', subagent = 
   if (memory) prompt += `\n\n${memory}`
   // Frontend-supplied context (e.g. a project template's AI rules). Outside the conversation history too.
   if (extraInstructions) prompt += `\n\n${extraInstructions}`
+  // ADR-056 rung 5: pinned files (e.g. PLAN.md) — read fresh each turn, right after the behavioural rules
+  // that tell the model to follow them, and (like memory) outside the compactable history so they persist.
+  if (contextFiles?.length) {
+    const pinned = pinnedContext(cwd, contextFiles)
+    if (pinned) prompt += `\n\n${pinned}`
+  }
   // ADR-046: gathered project facts (dir tree + git status). Pre-sized to the tier; kept out of the compactable
   // history so the layout is always available. Subagents don't get it (they run a focused, delegated task).
   if (projectContext && !subagent) prompt += `\n\n${projectContext}`

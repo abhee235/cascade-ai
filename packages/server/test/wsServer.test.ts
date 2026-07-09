@@ -19,6 +19,19 @@ const fakeProvider: ModelProvider = {
   },
 }
 
+// The plan stage's fake (ADR-056 rung 3): a fresh project's first submit runs the planner first — the
+// REAL server planner.md is proactive, so without this injection the default factory would dial Ollama.
+const fakePlannerProvider: ModelProvider = {
+  id: 'fake',
+  async complete() {
+    return { text: '' }
+  },
+  async *stream() {
+    yield { type: 'text_delta', text: 'Plan summary from the planner' }
+    yield { type: 'done', stopReason: 'end_turn' }
+  },
+}
+
 /** A ProjectManager whose sessions are fake (no Ollama), rooted in a throwaway temp dir. */
 function fakeManager() {
   const root = mkdtempSync(join(tmpdir(), 'cascade-proj-'))
@@ -26,6 +39,7 @@ function fakeManager() {
     root,
     model: 'fake',
     createSessionFor: (dir) => createSession({ cwd: dir, provider: fakeProvider, model: 'fake' }),
+    createPlanSessionFor: (dir) => createSession({ cwd: dir, provider: fakePlannerProvider, model: 'fake' }),
   })
 }
 
@@ -78,8 +92,12 @@ describe('wsServer — projects + ActivityEvent relay over the socket (13.2)', (
     expect(types).toContain('text_delta')
     expect(types).toContain('message')
     expect(types).toContain('turnDone')
-    const msg = ws.sent.find((e) => e.type === 'message') as { message: { content: { text?: string }[] } }
-    expect(JSON.stringify(msg.message.content)).toContain('Hello from the server')
+    // ADR-056 rung 3: the fresh project's first submit ran the plan stage on the SAME pipe first — the
+    // planner's message precedes the builder's, and the stage's turnDone is swallowed (ONE turn total).
+    const texts = ws.sent.filter((e) => e.type === 'message').map((e) => JSON.stringify(e))
+    expect(texts.findIndex((t) => t.includes('Plan summary from the planner'))).toBeGreaterThanOrEqual(0)
+    expect(texts.findIndex((t) => t.includes('Hello from the server'))).toBeGreaterThan(texts.findIndex((t) => t.includes('Plan summary from the planner')))
+    expect(ws.sent.filter((e) => e.type === 'turnDone')).toHaveLength(1)
   })
 
   it('submit with no project open → prompts to open one (does not crash)', async () => {

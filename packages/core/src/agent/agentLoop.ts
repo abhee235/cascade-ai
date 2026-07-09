@@ -6,12 +6,15 @@
 // Tool use is detected by PRESENCE of tool_use blocks, not by stop_reason (stop_reason is
 // unreliable). The recurse is the agent.
 
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import type { ActivityEvent, ContentBlock, Message } from '../protocol'
 import type { ModelProvider } from '../llm/provider'
 import type { ToolContext } from '../tools/Tool'
 import type { PermissionController } from '../permissions/gate'
 import { NoopTracer, type Tracer } from '../observability/tracer'
 import { createRegistry, registryOf, type ToolRegistry } from '../tools/toolRegistry'
+import { scopeToolsByGrants } from '../tools/toolGrants'
 import { buildSystemPrompt } from './systemPrompt'
 import { compactIfNeeded, estimateTokens, measureWireOverhead, type CompactDeps } from '../context/compactor'
 import { streamWithRecovery, type RecoveryOptions } from '../llm/resilience'
@@ -64,6 +67,7 @@ export interface LoopDeps {
   tier?: import('../llm/contextWindows').WindowTier
   /** ADR-055: pre-rendered skills index for the system prompt (bodies load via the Skill tool). */
   skillsSection?: string
+  contextFiles?: string[] // ADR-056 rung 5: files pinned into the system prompt, re-read fresh each turn
   /** ADR-055: the loaded skills — needed by named agents to PRELOAD skill bodies into child prompts. */
   skills?: import('../skills/skills').Skill[]
   /** ADR-056: named agent definitions the Subagent tool can spawn by name. */
@@ -123,13 +127,14 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
           return `No agent named "${agent}". Available agents: ${names}. Call Subagent again with one of these exact names, or omit \`agent\` for a plain subagent.`
         }
       }
-      const allow = def?.tools ? new Set(def.tools) : undefined
-      const childRegistry = registryOf(() =>
-        registry
-          .list()
-          .filter((t) => t.name !== 'Subagent')
-          .filter((t) => (allow ? allow.has(t.name) : !readOnly || READONLY_SUBAGENT_TOOLS.has(t.name))),
-      )
+      // A named agent's `tools:` is an arg-scoped grant list (`Write(PLAN.md)` restricts, not just filters);
+      // an anonymous explore subagent falls back to the read-only subset. Subagent is always stripped (no
+      // recursion via this path).
+      const childRegistry = registryOf(() => {
+        const base = registry.list().filter((t) => t.name !== 'Subagent')
+        if (def?.tools) return scopeToolsByGrants(base, def.tools)
+        return base.filter((t) => !readOnly || READONLY_SUBAGENT_TOOLS.has(t.name))
+      })
       let finalText = ''
       for await (const ev of runAgentLoop([{ role: 'user', content: prompt }], {
         provider: deps.provider,
@@ -174,6 +179,8 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   let readPressureTokens = 0
   let delegateNudged = false
   let subagentUsed = false
+  let planNudged = false
+  let plannerUsed = false
   // Wire-overhead calibration (ADR-052 companion): real prompt tokens minus our message estimate, EMA'd.
   // Undefined until the backend reports usage once; the static chars/4 overhead estimate is the floor.
   let wireOverhead: number | undefined
@@ -190,7 +197,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     // (measured: inputTokens 8191 of 8192, ONE token of output room). The static chars/4 estimate is the
     // FLOOR; once the backend has reported a real prompt size, the MEASURED overhead (real − estimate,
     // which also captures our estimate's own error) takes over — self-correcting at the margin.
-    const systemNow = buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext, skillsSection: deps.skillsSection })
+    const systemNow = buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext, skillsSection: deps.skillsSection, contextFiles: deps.contextFiles })
     const staticOverhead = Math.ceil((systemNow.length + JSON.stringify(registry.schemas(tier)).length) / 4) + 256
     const overheadTokens = Math.max(staticOverhead, wireOverhead ?? 0)
 
@@ -228,10 +235,11 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     // a (reactive) compaction then retries; abort/fatal surface. `make` re-reads `messages` each attempt, so
     // an overflow-compaction is reflected on the retry. System is rebuilt too (memory may have changed).
     const makeStream = () =>
-      deps.provider.stream({ messages, model: deps.model, ...deps.modelLimits, system: buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext, skillsSection: deps.skillsSection }), tools: registry.schemas(tier) }, deps.signal)
+      deps.provider.stream({ messages, model: deps.model, ...deps.modelLimits, system: buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext, skillsSection: deps.skillsSection, contextFiles: deps.contextFiles }), tools: registry.schemas(tier) }, deps.signal)
     for await (const ev of streamWithRecovery(makeStream, {
       ...deps.recovery,
       signal: deps.signal,
+      recover: deps.provider.recover ? () => deps.provider.recover!(deps.model) : undefined, // WATCHDOG: recycle a degraded backend
       onOverflow: deps.compact
         ? async () => {
             // Reactive overflow: force compaction regardless of the threshold (ADR-039 `force`) — the model just
@@ -332,6 +340,30 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
       tracer.event({ t: 'delegate_nudge', turn, readTokens: readPressureTokens })
       appendReminder(messages, buildDelegateNudgeText())
       yield { type: 'status', text: 'Suggesting delegation for the remaining reads…' }
+    }
+
+    // ADR-056 rung 2: plan-first detect→remind. Measured (skills-2): the composite PROMPT rule produced
+    // zero planner spawns while the simple skills mandate was obeyed — so the harness detects instead:
+    // files are being written, no PLAN.md exists, the planner was never spawned → inject the EXACT call
+    // once. ACTIVATION: the planner def itself declares `proactive: true` (policy lives in
+    // the capability's own frontmatter, never a session flag). Presence alone = available, not enforced;
+    // users silence the nudge by shadowing planner.md without the field.
+    if (toolUses.some((tu) => tu.name === 'Subagent' && (tu.input as { agent?: string } | null)?.agent === 'planner')) plannerUsed = true
+    if (
+      depth === 0 &&
+      !planNudged &&
+      !plannerUsed &&
+      (deps.agentDefs ?? []).some((d) => d.name === 'planner' && d.proactive) &&
+      toolUses.some((tu) => (tu.name === 'Write' || tu.name === 'Edit' || tu.name === 'MultiEdit') && results.some((r) => r.type === 'tool_result' && r.tool_use_id === tu.id && !r.isError)) &&
+      !existsSync(join(deps.cwd, 'PLAN.md'))
+    ) {
+      planNudged = true
+      tracer.event({ t: 'plan_nudge', turn })
+      appendReminder(
+        messages,
+        '<system-reminder>You are building without a plan. Call Subagent {agent: "planner", prompt: "<the user\'s full request>"} NOW — it writes PLAN.md; then continue implementing AGAINST that plan. This is a background note, NOT a new request: do not reply to it — make the call, then continue the ORIGINAL task.</system-reminder>',
+      )
+      yield { type: 'status', text: 'Asking the agent to plan first…' }
     }
 
     if (++turn >= maxTurns) {
