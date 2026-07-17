@@ -7,6 +7,7 @@
 
 import type { Message } from '../protocol'
 import type { ModelProvider } from '../llm/provider'
+import { completeWithRecovery } from '../llm/resilience'
 import type { CompactionLayer, CompactionPlan } from './compactionPlan'
 import {
   collapseSuperseded,
@@ -124,8 +125,14 @@ function serialize(messages: Message[]): string {
     .join('\n\n')
 }
 
-async function summarize(older: Message[], provider: ModelProvider, model: string, signal?: AbortSignal): Promise<string> {
-  const res = await provider.complete({ messages: [{ role: 'user', content: serialize(older) }], model, system: COMPACT_SYSTEM }, signal)
+async function summarize(older: Message[], deps: CompactDeps): Promise<string> {
+  // GUARDED like the main model call (iterate-5: this was a raw complete() — one 300s backend wedge here
+  // killed the whole round before the guarded main call was even made). Same policy: retry transients,
+  // recycle the backend at ≥2 consecutive failures, reset the budget when the recycle verifies healthy.
+  const res = await completeWithRecovery(
+    () => deps.provider.complete({ messages: [{ role: 'user', content: serialize(older) }], model: deps.model, system: COMPACT_SYSTEM }, deps.signal),
+    { signal: deps.signal, recover: deps.recover, sleep: deps.sleepForTest },
+  )
   return res.text.trim()
 }
 
@@ -141,6 +148,10 @@ export interface CompactDeps {
    *  window): ~4k of overhead ⇒ Ollama front-truncated the prompt to window−1 and left the model ONE token of
    *  output room (`inputTokens: 8191, outputTokens: 1`). The loop measures and passes it; default 0. */
   overheadTokens?: number
+  /** WATCHDOG hook for the summarize call (same one the main loop uses — recycle a wedged backend). */
+  recover?: () => Promise<void>
+  /** Injectable backoff sleep for deterministic tests. */
+  sleepForTest?: (ms: number) => Promise<void>
 }
 
 // The pure, no-LLM layers in escalation order, each mapped to the kind it reports. `summarize` is handled
@@ -291,18 +302,29 @@ export async function compactIfNeeded(
       const worthIt = force || stillOverCeiling || olderTokens >= expectedSummary * 3
       if ((survival || canHelp) && worthIt) {
         if (deps.onDiscard) await deps.onDiscard(older)
-        const summary = await summarize(older, deps.provider, deps.model, deps.signal)
         // The ORIGINAL TASK and the LATEST USER INSTRUCTION ride along VERBATIM — never entrusted to the
         // summary. Measured failures: a weak model's summary lost the task statement and its next reply was
         // "please share the task you'd like me to work on" (window-gate-2, longctx-wire-modules); and a
         // just-injected steering nudge was summarized away before the model ever read it (delegateNudge test).
         // Folding them into the same user message is structural insurance and keeps the sequence valid.
         const { task, lastInstruction } = preservedUserTexts(older)
+        let summary: string | undefined
+        try {
+          summary = await summarize(older, deps)
+        } catch {
+          // Summarizer unreachable even after retries + recycles. A dead round is worse than a lossy one:
+          // fall back to DROPPING the older region, keeping the verbatim task + latest instruction (the
+          // two things a summary must never lose anyway). The window is freed either way; the model can
+          // re-read files it needs (they're on disk — observations are re-derivable, instructions aren't).
+          summary = undefined
+        }
         const summaryMsg: Message = {
           role: 'user',
           content: [
             task ? `[Original task]\n${task}` : '',
-            `[Earlier conversation compacted to save context]\n\n${summary}`,
+            summary
+              ? `[Earlier conversation compacted to save context]\n\n${summary}`
+              : '[Earlier conversation dropped to save context — its summary was unavailable. Re-read any file you need; the task above and instruction below are verbatim.]',
             lastInstruction ? `[Latest user instruction — still applies]\n${lastInstruction}` : '',
           ]
             .filter(Boolean)
@@ -312,7 +334,7 @@ export async function compactIfNeeded(
         // side-query paid, tokens up). If the model wrote a long summary, keep `working` instead.
         const swapped = [summaryMsg, ...recent]
         if (estimateTokens(swapped) >= estimateTokens(working)) return { messages: working, kind }
-        return { messages: swapped, kind: 'summarized' }
+        return { messages: swapped, kind: summary ? 'summarized' : 'dropped' }
       }
     }
   }

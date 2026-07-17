@@ -340,6 +340,37 @@ units couldn't:
 Runner keep-awake (`scripts/eval/keepAwake.mts`, SetThreadExecutionState) now holds the box awake so the
 iterate durability run survives the 60-min sleep.
 
+### The hardware envelope (iterate-3→6 + probes): the 36B Q4_K_M is a 24GB model on a 16GB card
+
+The tuning arc that followed iterate-2's crashes, one lever per run:
+
+| run | config | stability | speed | lesson |
+|---|---|---|---|---|
+| iterate-2 | defaults (batch 512) | ❌ 6 crashes | mixed | living on the allocation knife-edge |
+| iterate-3 | num_gpu=36 | ✅ | ❌ 5 tok/s | CPU-streamed MoE experts = wrong knob |
+| iterate-4 | batch 256 | ✅ | ❌ prefill-bound | agentic turns are PREFILL-heavy; batch is the prefill knob |
+| probes | batch 384 vs 512 | — | 651 vs 133 tok/s | **512's buffers SPILL to shared memory** (the silent 5×) |
+| iterate-5 | batch 384 @16k | ✅ 0 crashes/90min | R1=54min | correct-under-torture; 21 compactions survived; the pin held |
+| iterate-6 | batch 384 @32k | ❌ crashes return | 0.6 tok/s | 32k KV blows the envelope outright |
+| probes | 20k/24k | ❌ crash / 9GB spill | — | the cliff sits JUST above 16k |
+
+Root fact (visible in `ollama ps` only under load): the Q4_K_M 36B is **24GB total — 9GB has been on
+CPU all along**. The card's honest envelope for it: **num_ctx 16384 + num_batch 384**, and nothing more.
+No code fixes physics; what code COULD fix, this arc fixed and tested:
+
+- retry budget resets when `recover()` verifies the backend healthy (capped ×3) — rounds now bridge
+  crash+reload instead of dying in a 15s retry window;
+- the compactor's summarize call is GUARDED (`completeWithRecovery`) — an unguarded raw complete() was
+  how a 300s backend wedge killed iterate-5's R3/R4 before the main (guarded) call was even made;
+- summarizer still unreachable ⇒ compaction degrades to a task-preserving DROP (`kind: 'dropped'`) —
+  compaction can never kill a round again;
+- `ProviderConfig.options` passthrough (adapter-level) + `--gpu-layers/--ollama-options/--context-window`
+  ops knobs on the bench.
+
+**The resident alternative (probed):** `qwen36-fast` — the SAME 36B at IQ4_XS — is 15GB, loads FULLY
+RESIDENT at 16k/384 (zero spill), 555 tok/s prefill, GPU-speed decode. On this card it is the
+configuration the hardware wants; Q4_K_M remains the quality reference for short runs.
+
 ### iterate-2 (6 rounds, pinned 16k window): ❌ build — but durability PROVEN, failure is INFRA
 
 Keep-awake worked (the run went the full 2445s / 41 min without sleeping). The check failed ("built

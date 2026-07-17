@@ -9,6 +9,6 @@
 		"Three fixes: (1) reducing a cart line's quantity to zero must remove the line entirely, (2) the 'Checkout' button must be disabled when the cart is empty, and (3) every price shown anywhere in the app must be formatted with exactly two decimals.",
 		"Add an 'Orders' view: after a successful checkout, store the order (line items, total, timestamp) in client-side state, clear the cart, and show past orders under an 'Orders' header button — each order expandable to reveal its line items and total. Then run the production build and confirm everything passes."
 	],
-	"budgets": { "maxTurns": 40, "timeoutMs": 3600000 },
+	"budgets": { "maxTurns": 40, "timeoutMs": 5400000 },
 	"session": { "contextWindow": 16384 }
 }

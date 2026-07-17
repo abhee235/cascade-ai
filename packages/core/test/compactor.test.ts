@@ -122,6 +122,43 @@ describe('compactor — compactIfNeeded (plan-driven, ADR-039)', () => {
     expect(discarded[0].length).toBeGreaterThan(0) // coupled-curation hook saw the older messages
   })
 
+  it('summarizer UNREACHABLE → falls back to dropping older with task preserved — never throws (iterate-5)', async () => {
+    // Measured: the raw summarize call was how a wedged backend killed whole rounds. Now it retries with
+    // the recycle hook; if STILL dead, compaction degrades to a task-preserving drop instead of throwing.
+    const older: Message[] = [
+      { role: 'user', content: `Build the Cascade Shop storefront ${'x'.repeat(30)}` }, // the task — must survive verbatim
+      ...Array.from({ length: 6 }, (_, i) => ({ role: 'user' as const, content: `old message ${i} ${'x'.repeat(36)}` })),
+    ]
+    const recent: Message[] = [
+      { role: 'user', content: `recent ${'y'.repeat(36)}` },
+      { role: 'assistant', content: [{ type: 'text', text: `reply ${'z'.repeat(36)}` }] },
+      { role: 'user', content: `latest instruction ${'w'.repeat(36)}` },
+    ]
+    let recovered = 0
+    const deadProvider = {
+      id: 'fake',
+      async complete(): Promise<never> {
+        throw Object.assign(new Error('fetch failed (Headers Timeout Error)'), { code: 'UND_ERR_HEADERS_TIMEOUT' })
+      },
+      async *stream(): AsyncIterable<never> {
+        /* unused */
+      },
+    } as unknown as import('../src/llm/provider').ModelProvider
+    const { messages, kind } = await compactIfNeeded([...older, ...recent], {
+      provider: deadProvider,
+      model: 'fake',
+      plan,
+      recover: async () => void recovered++, // recycle attempted, backend still dead
+      sleepForTest: async () => {},
+    })
+    expect(kind).toBe('dropped') // degraded, honest — NOT a throw, NOT a dead round
+    expect(messages[0].content).toContain('[Original task]') // the task rode along verbatim
+    expect(messages[0].content).toContain('Cascade Shop')
+    expect(messages[0].content).toContain('dropped to save context') // the model is told what happened
+    expect(messages.length).toBeLessThan(older.length + recent.length) // the window was still freed
+    expect(recovered).toBeGreaterThanOrEqual(1) // the recycle hook was tried before giving up
+  })
+
   it('summarize never orphans a tool_result: recent starts on an assistant, pairs stay intact', async () => {
     // Boundary would naturally land on a user(tool_result) whose assistant(tool_use) is in the summarized older
     // region — the exact orphan case. After the fix, `recent` must start on the assistant so the pair survives.

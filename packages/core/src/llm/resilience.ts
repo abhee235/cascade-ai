@@ -33,18 +33,25 @@ export function classifyError(err: unknown): ErrorKind {
 }
 
 export interface RecoveryOptions {
-  maxRetries?: number // transient retries (default 4)
+  maxRetries?: number // transient retries (default 5)
   maxOverflowRetries?: number // compact-then-retry attempts (default 2)
   baseDelayMs?: number // default 500
-  maxDelayMs?: number // default 30_000
+  maxDelayMs?: number // default 8_000
   signal?: AbortSignal
   /** Recover from context overflow (e.g. compact the history) before retrying. Return value ignored. */
   onOverflow?: () => Promise<void>
   onRetry?: (info: { attempt: number; delayMs: number; reason: ErrorKind }) => void
   sleep?: (ms: number) => Promise<void> // injectable for deterministic tests
   /** WATCHDOG (in-core, ported from the eval runner): a crashed/hung local backend often returns DEGRADED
-   *  until the model is recycled. Called before the 2nd+ consecutive transient retry (best-effort). */
+   *  until the model is recycled. Called before the 2nd+ consecutive transient retry (best-effort). When it
+   *  SUCCEEDS (the adapter verified the backend answers again — e.g. a 1-token reload probe), the transient
+   *  budget RESETS: retries were sized for blips (~15s), but a crashed 15GB model takes MINUTES to reload
+   *  (measured, iterate-2: rounds died retrying into a still-loading backend that recover() then verified
+   *  healthy). Capped by maxRecoveries so a backend that crashes deterministically on the real request
+   *  still terminates. */
   recover?: () => Promise<void>
+  /** Max times a SUCCESSFUL recover() may reset the transient budget per stream call (default 3). */
+  maxRecoveries?: number
   /** WATCHDOG: max ms between STREAM EVENTS before the attempt is declared stalled and retried (a connection
    *  that is open but silent — measured live: an abort went unanswered ~27 min past a run's budget).
    *  Default 180_000; 0 disables. */
@@ -94,6 +101,44 @@ async function nextWithStallGuard<T>(it: AsyncIterator<T>, stallMs: number): Pro
   }
 }
 
+/** Non-streaming twin of streamWithRecovery, for the model calls that live OUTSIDE the main loop —
+ *  compaction summarize, memory curation. Measured (iterate-5): those calls were raw `provider.complete`
+ *  with NO guard, so one 300s backend wedge on a summarize killed the whole round before the main
+ *  (fully-guarded) model call was even made. Same policy as the stream: classify → backoff → recover at
+ *  ≥2 consecutive transients → a SUCCESSFUL recover resets the budget (capped). Overflow is NOT retried
+ *  here (a too-big summarize prompt won't shrink by retrying — the caller owns that). */
+export async function completeWithRecovery<T>(call: () => Promise<T>, opts: RecoveryOptions = {}): Promise<T> {
+  const maxRetries = opts.maxRetries ?? 5
+  const base = opts.baseDelayMs ?? 500
+  const max = opts.maxDelayMs ?? 8_000
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  let attempts = 0
+  let recoveries = 0
+  const maxRecoveries = opts.maxRecoveries ?? 3
+  while (true) {
+    try {
+      return await call()
+    } catch (err) {
+      const kind = classifyError(err)
+      if (kind !== 'transient' || attempts >= maxRetries) throw err instanceof RecoveryError ? err : new RecoveryError(err)
+      attempts++
+      const delayMs = backoff(attempts, base, max)
+      opts.onRetry?.({ attempt: attempts, delayMs, reason: 'transient' })
+      if (attempts >= 2 && opts.recover && recoveries < maxRecoveries) {
+        try {
+          await opts.recover()
+          recoveries++
+          attempts = 0 // verified-healthy backend ⇒ fresh budget (see streamWithRecovery)
+        } catch {
+          /* best-effort */
+        }
+      }
+      if (opts.signal?.aborted) throw err instanceof RecoveryError ? err : new RecoveryError(err)
+      await sleep(delayMs)
+    }
+  }
+}
+
 /** Drive a provider stream with recovery. `make` is called once per attempt (re-reads the latest messages,
  *  so onOverflow's compaction takes effect on the retry). */
 export async function* streamWithRecovery(make: () => AsyncIterable<StreamEvent>, opts: RecoveryOptions = {}): AsyncGenerator<StreamEvent> {
@@ -118,6 +163,8 @@ export async function* streamWithRecovery(make: () => AsyncIterable<StreamEvent>
       }))
   let transientAttempts = 0
   let overflowAttempts = 0
+  let recoveries = 0
+  const maxRecoveries = opts.maxRecoveries ?? 3
 
   while (true) {
     try {
@@ -156,11 +203,16 @@ export async function* streamWithRecovery(make: () => AsyncIterable<StreamEvent>
         yield { type: 'retry', attempt: transientAttempts, delayMs, reason: 'transient' } // surfaced to the UI; resets partial output
         // WATCHDOG: a crashed/hung local backend often answers again but DEGRADED (empty replies) until
         // the model is recycled — the eval runner learned this over six live crashes; now core knows too.
-        if (transientAttempts >= 2 && opts.recover) {
+        if (transientAttempts >= 2 && opts.recover && recoveries < maxRecoveries) {
           try {
             await opts.recover()
+            // recover() resolving = the adapter VERIFIED the backend answers again. Retries were budgeted
+            // for blips; a crash+reload is a different timescale — grant a fresh budget (capped, so a
+            // backend that deterministically dies on the real request still exhausts and fails honestly).
+            recoveries++
+            transientAttempts = 0
           } catch {
-            /* best-effort — the retry proceeds regardless */
+            /* best-effort — the retry proceeds on the remaining budget */
           }
         }
         await sleep(delayMs)

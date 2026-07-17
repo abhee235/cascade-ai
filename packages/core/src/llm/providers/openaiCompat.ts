@@ -98,6 +98,10 @@ export interface OpenAICompatConfig {
   id: string
   baseUrl: string
   apiKey?: string
+  /** Backend-native runtime options merged VERBATIM into Ollama's /api/chat `options` (e.g. `num_gpu` to
+   *  trade offloaded layers for VRAM headroom). Request-derived options (num_ctx/num_predict/temperature)
+   *  win on conflict — a pinned window must never be overridden by static config. Ignored on /v1 backends. */
+  options?: Record<string, unknown>
 }
 
 export class OpenAICompatProvider implements ModelProvider {
@@ -207,7 +211,9 @@ export class OpenAICompatProvider implements ModelProvider {
     // route through the NATIVE /api/chat (which we already use for images) so options.num_ctx goes on the
     // wire — the window the compactor protects becomes the window the model actually has.
     const enforceWindow = this.cfg.id === 'ollama' && req.contextWindow !== undefined
-    if (enforceWindow || req.messages.some((m) => Array.isArray(m.content) && m.content.some((b) => b.type === 'image'))) {
+    // Static adapter options (num_gpu etc.) can also only be expressed natively — /v1 would drop them.
+    const hasStaticOptions = this.cfg.id === 'ollama' && this.cfg.options && Object.keys(this.cfg.options).length > 0
+    if (enforceWindow || hasStaticOptions || req.messages.some((m) => Array.isArray(m.content) && m.content.some((b) => b.type === 'image'))) {
       yield* this.streamNative(req, signal)
       return
     }
@@ -300,7 +306,7 @@ export class OpenAICompatProvider implements ModelProvider {
   // carries `message.content` (+ optional `thinking`/`tool_calls`) and the last one has `done:true`. Tool
   // calls arrive whole here (arguments already an object), so we emit them directly.
   private async *streamNative(req: CompletionRequest, signal?: AbortSignal): AsyncIterable<StreamEvent> {
-    const options: Record<string, unknown> = {}
+    const options: Record<string, unknown> = { ...this.cfg.options } // static adapter config first (num_gpu etc.)
     if (req.contextWindow !== undefined) options.num_ctx = req.contextWindow // ADR-038: enforce the allocated window
     if (req.maxOutputTokens !== undefined) options.num_predict = req.maxOutputTokens
     if (req.temperature !== undefined) options.temperature = req.temperature

@@ -2,7 +2,7 @@
 // abort: mid-stream stall detection, abort-aware backoff, and the provider recycle hook.
 
 import { describe, expect, it } from 'vitest'
-import { classifyError, StallError, streamWithRecovery } from '../src/llm/resilience'
+import { classifyError, completeWithRecovery, StallError, streamWithRecovery } from '../src/llm/resilience'
 import type { StreamEvent } from '../src/llm/provider'
 
 const done = (): StreamEvent => ({ type: 'done', stopReason: 'end_turn' })
@@ -38,7 +38,7 @@ describe('watchdog — stall detection', () => {
 		expect(classifyError(new StallError(180_000))).toBe('transient')
 	})
 
-	it('the recycle hook fires from the 2nd consecutive transient failure on', async () => {
+	it('the recycle hook fires at the 2nd consecutive transient, and success RESETS the budget', async () => {
 		let attempt = 0
 		let recovered = 0
 		const make = (): AsyncIterable<StreamEvent> => ({
@@ -50,7 +50,70 @@ describe('watchdog — stall detection', () => {
 		})
 		await collect(streamWithRecovery(make, { sleep: async () => {}, baseDelayMs: 1, recover: async () => void recovered++ }))
 		expect(attempt).toBe(4)
-		expect(recovered).toBe(2) // not on the 1st retry (transient blips deserve one free pass), then every retry
+		// 1st failure: free pass. 2nd: recover fires, succeeds → budget resets. 3rd failure is attempt 1 of
+		// the FRESH budget (no recover), then success. One recycle, not one per retry.
+		expect(recovered).toBe(1)
+	})
+
+	it('a successful recover() lets the stream outlive the base retry budget (crash + slow reload)', async () => {
+		// 7 consecutive failures would exhaust maxRetries=5 outright — but each successful recover() grants a
+		// fresh budget (the measured iterate-2 failure: rounds died in ~15s of retries while the crashed 15GB
+		// model needed minutes to reload; recover()'s reload-probe IS the wait).
+		let attempt = 0
+		let recovered = 0
+		const make = (): AsyncIterable<StreamEvent> => ({
+			async *[Symbol.asyncIterator]() {
+				attempt++
+				if (attempt <= 7) throw Object.assign(new Error('fetch failed'), { code: 'ECONNRESET' })
+				yield text('back alive')
+				yield done()
+			},
+		})
+		const events = await collect(streamWithRecovery(make, { sleep: async () => {}, baseDelayMs: 1, recover: async () => void recovered++ }))
+		expect(events.some((e) => e.type === 'text_delta' && e.text === 'back alive')).toBe(true)
+		expect(recovered).toBeGreaterThanOrEqual(3) // multiple resets bridged the outage
+	})
+
+	it('recover() resets are CAPPED — a deterministically-crashing backend still fails honestly', async () => {
+		let recovered = 0
+		const make = (): AsyncIterable<StreamEvent> => ({
+			async *[Symbol.asyncIterator]() {
+				throw Object.assign(new Error('fetch failed'), { code: 'ECONNRESET' }) // fails forever
+			},
+		})
+		await expect(collect(streamWithRecovery(make, { sleep: async () => {}, baseDelayMs: 1, recover: async () => void recovered++ }))).rejects.toThrow()
+		expect(recovered).toBe(3) // default maxRecoveries — then the remaining budget runs out and we fail
+	})
+
+	it('completeWithRecovery guards NON-streaming calls the same way (the unguarded-summarize lesson)', async () => {
+		// iterate-5: a 300s backend wedge on the compactor's raw complete() killed whole rounds. The twin
+		// wrapper retries transients, recycles at ≥2, and a verified recycle refreshes the budget.
+		let call = 0
+		let recovered = 0
+		const result = await completeWithRecovery(
+			async () => {
+				call++
+				if (call <= 7) throw Object.assign(new Error('fetch failed (Headers Timeout Error)'), { code: 'UND_ERR_HEADERS_TIMEOUT' })
+				return 'summary text'
+			},
+			{ sleep: async () => {}, baseDelayMs: 1, recover: async () => void recovered++ },
+		)
+		expect(result).toBe('summary text')
+		expect(recovered).toBeGreaterThanOrEqual(3) // resets bridged what a plain budget could not
+	})
+
+	it('completeWithRecovery fails fast on fatal errors (no retry burn)', async () => {
+		let call = 0
+		await expect(
+			completeWithRecovery(
+				async () => {
+					call++
+					throw Object.assign(new Error('unauthorized'), { status: 401 })
+				},
+				{ sleep: async () => {} },
+			),
+		).rejects.toThrow()
+		expect(call).toBe(1)
 	})
 
 	it('abort during backoff resolves promptly instead of waiting out the delay', async () => {

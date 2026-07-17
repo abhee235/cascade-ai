@@ -14,6 +14,10 @@ export interface ProviderConfig {
   /** Optional override; falls back to the provider's default origin below. */
   baseUrl?: string
   apiKey?: string
+  /** Backend-native load/runtime options passed through VERBATIM by adapters that support them (Ollama:
+   *  merged into /api/chat `options`, e.g. `{ num_gpu: 40 }` to trade offloaded layers for VRAM headroom).
+   *  This is adapter CONFIG, not core knowledge — core never reads it; other backends ignore it. */
+  options?: Record<string, unknown>
 }
 
 // Origins for OpenAI-compatible providers. We append /v1/chat/completions to these.
@@ -33,6 +37,7 @@ export function createProvider(cfg: ProviderConfig): ModelProvider {
       id,
       baseUrl: cfg.baseUrl || OPENAI_COMPAT_BASE_URLS[id],
       apiKey: cfg.apiKey,
+      options: cfg.options,
     })
   }
 

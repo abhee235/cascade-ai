@@ -76,6 +76,10 @@ export type CompactionKind =
   | 'microcompacted'
   | 'snipped'
   | 'summarized'
+  /** Summarize's no-model FALLBACK: the summarizer itself was unreachable (backend wedged/crashed even
+   *  after recovery), so the older region is dropped with only the verbatim task + latest instruction
+   *  preserved. Lossy — but a degraded round beats a dead one (iterate-5: two rounds died here). */
+  | 'dropped'
 
 /** Human label for the `compacted` activity event (single source of truth for both UIs). */
 export function compactionKindLabel(kind: string): string {
@@ -90,6 +94,8 @@ export function compactionKindLabel(kind: string): string {
       return 'snipped large tool inputs'
     case 'summarized':
       return 'summarized older turns'
+    case 'dropped':
+      return 'dropped older turns (summarizer unavailable; task preserved)'
     default:
       return 'compacted context'
   }

@@ -297,6 +297,9 @@ export function createSession(opts: SessionOptions): CascadeSession {
             model: opts.model,
             plan: compactPlan,
             signal: controller.signal,
+            // WATCHDOG (iterate-5): the summarize call gets the SAME recycle hook as the main model call —
+            // an unguarded summarize was how a wedged backend killed whole rounds.
+            recover: opts.provider.recover ? () => opts.provider.recover!(opts.model) : undefined,
             // Coupled curation: harvest durable facts from the OLDER messages right before they're summarized away.
             onDiscard: autoMemory ? async (older) => void (await curate(older)) : undefined,
           },

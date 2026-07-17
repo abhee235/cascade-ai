@@ -32,6 +32,19 @@ const { values: args } = parseArgs({
 		provider: { type: 'string', default: 'ollama' },
 		'base-url': { type: 'string' },
 		temperature: { type: 'string', default: '0' },
+		// VRAM headroom knob (iterate-2 forensics: llama-server aborts at ~1.3GB free with all layers
+		// offloaded). Offload N layers instead of all → frees VRAM for compute buffers; costs some speed.
+		// (iterate-3 measured that cost: CPU-streamed MoE experts ≈ 5 tok/s — usually the WRONG knob.)
+		'gpu-layers': { type: 'string' },
+		// Arbitrary Ollama-native options as JSON, e.g. '{"num_batch":256}' (shrink compute buffers WITHOUT
+		// evicting weights — the right knob when the assert is allocation pressure, not weight residency).
+		'ollama-options': { type: 'string' },
+		// Ops override of the scenario's pinned window (e.g. 32768 = the PRODUCT config). The 16k pin stays
+		// the canonical compaction-torture fixture; consistency questions get measured at the real config.
+		'context-window': { type: 'string' },
+		// Ops override of the scenario's timeout — a longer leash for a slow-but-honest config (measured:
+		// Q4_K_M at the 16k envelope needs ~3h for 6 rounds) without rewriting the fixture.
+		'timeout-ms': { type: 'string' },
 	},
 })
 
@@ -142,7 +155,19 @@ for (const id of wanted) {
 	const tracePath = join(runDir, 'traces', `${id}.jsonl`)
 	process.stdout.write(`▶ ${id} `)
 
-	const provider = withTemperature(createProvider({ provider: args.provider!, model: args.model!, baseUrl: args['base-url'] }), Number(args.temperature))
+	const nativeOptions = {
+		...(args['ollama-options'] ? JSON.parse(args['ollama-options']) : {}),
+		...(args['gpu-layers'] ? { num_gpu: Number(args['gpu-layers']) } : {}),
+	}
+	const provider = withTemperature(
+		createProvider({
+			provider: args.provider!,
+			model: args.model!,
+			baseUrl: args['base-url'],
+			...(Object.keys(nativeOptions).length ? { options: nativeOptions } : {}),
+		}),
+		Number(args.temperature),
+	)
 	// ADR-053: with an OTLP endpoint configured, fan the trace out to the viewer (Phoenix/Langfuse) live.
 	const otelEndpoint = process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
 	const otel = otelEndpoint ? new OtelTracer({ endpoint: otelEndpoint, service: `${label}:${id}`, attributes: { 'cascade.model': args.model! } }) : undefined
@@ -163,7 +188,7 @@ for (const id of wanted) {
 		maxTurns: scenario.budgets.maxTurns,
 		extraInstructions: BUILDER_BEHAVIOR,
 		checkCommand: 'npm run build',
-		contextWindow: scenario.session?.contextWindow,
+		contextWindow: args['context-window'] ? Number(args['context-window']) : scenario.session?.contextWindow,
 		maxOutputTokens: scenario.session?.maxOutputTokens,
 		// ADR-055/056 fidelity: same skills + named agents as the product's builder sessions.
 		skillDirs,
@@ -177,7 +202,7 @@ for (const id of wanted) {
 		timedOut = true
 		stage?.abort()
 		session.abort()
-	}, scenario.budgets.timeoutMs)
+	}, args['timeout-ms'] ? Number(args['timeout-ms']) : scenario.budgets.timeoutMs)
 	const prompts = scenario.prompts ?? [scenario.prompt!]
 	try {
 		// ADR-056 rung 3 FIDELITY: same deterministic plan stage as the product (wsServer submit path) —
@@ -193,7 +218,7 @@ for (const id of wanted) {
 				model: args.model!,
 				skillDirs,
 				tracer: otel ? fanout(new JsonlTracer(join(runDir, 'traces', `${id}-planner.jsonl`)), otel) : new JsonlTracer(join(runDir, 'traces', `${id}-planner.jsonl`)),
-				contextWindow: scenario.session?.contextWindow,
+				contextWindow: args['context-window'] ? Number(args['context-window']) : scenario.session?.contextWindow,
 				maxOutputTokens: scenario.session?.maxOutputTokens,
 			})
 			stage = planner
