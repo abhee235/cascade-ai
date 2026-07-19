@@ -440,3 +440,19 @@ The design-lint ladder on builder-shop (qwen36-agentic @ 16k/384), one skill-tex
 
 Class insight: a design system for weak models is only as strong as its most concrete example — every
 skill that shows a file layout or component name is a source of truth, and they must all agree.
+
+## Prefill / prefix-cache verdict (2026-07-20) — CLOSED, no software fix required
+
+The "8× dead-air prize" hypothesis is DEAD, killed by measurement:
+- **Offline prefix-diff** (run-5 trace, 27 requests): system prompt byte-identical across all turns;
+  every request's messages a STRICT PREFIX of the next. Our payload is cache-clean.
+- **Replay probe** (turns 18→20 verbatim): cold 111s → identical resend **0.1s** → superset turns
+  **9.9s / 2.2s** (delta only). The cache works — and `prompt_eval_count` REPORTS CACHED TOKENS TOO,
+  which is what previously misread as "no reuse" (inputTokens ≈ full context every turn is normal).
+- **Production timing** (trace timestamps minus generation estimate): multiple near-zero-prefill turns
+  confirm live cache hits; slow turns are legitimate deltas (skill bodies, big reads) + CPU contention.
+- **The real constraint is VRAM**: `ollama ps` shows ~40%/60% CPU/GPU at EVERY num_ctx (131072 → 65536
+  changes it 42%→39%) — the 24GB Q4_K_M weights simply exceed the GPU; offload is inherent. num_ctx
+  stays 131072 (the compaction-free window is free at the margin).
+Turn latency on this box is the honest 36B-on-this-GPU envelope: ~35 tok/s generation, cache-assisted
+prefill. Remaining levers are model/quant/hardware choices, not harness work.
