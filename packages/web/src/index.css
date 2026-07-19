@@ -1,7 +1,8 @@
-@import 'tailwindcss';
-
-/* Geist + Geist Mono. */
+/* Geist + Geist Mono. MUST be the first rule:
+   @import is spec-ignored after any other statement, and the tailwindcss import below expands to
+   thousands of lines — a font import placed after it lands mid-bundle and vite warns. */
 @import url('https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400..600&display=swap');
+@import 'tailwindcss';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -157,11 +158,11 @@ body {
      (rgb 24,24,27); muted gray belongs ONLY to step/log rows. */
   color: var(--foreground);
   font-size: 14px;
-  line-height: 21px;
+  line-height: 22px;
   max-width: none;
 }
 .chat-transcript .prose p {
-  margin: 0 0 12px;
+  margin: 12px 0;
 }
 .chat-transcript .prose h1,
 .chat-transcript .prose h2 {
@@ -190,7 +191,7 @@ body {
 .chat-transcript .prose ol {
   list-style: none;
   padding-left: 8px;
-  margin: 0 0 12px;
+  margin: 12px 0;
 }
 .chat-transcript .prose li {
   position: relative;

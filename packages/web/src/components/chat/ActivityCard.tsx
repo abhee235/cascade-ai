@@ -130,12 +130,12 @@ function ThoughtBlock({ thinking, ms }: { thinking: string; ms?: number }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        className="flex items-center gap-1 text-[13px] leading-[21px] text-muted-foreground transition-colors hover:text-foreground"
       >
         <ChevronRight className={cn('h-3 w-3 transition-transform', open && 'rotate-90')} />
         {label}
       </button>
-      {open && <div className="mt-1 whitespace-pre-wrap border-l-2 border-border pl-3 text-xs text-muted-foreground">{thinking}</div>}
+      {open && <div className="mt-1 whitespace-pre-wrap border-l-2 border-border pl-3 text-[13px] leading-[21px] text-muted-foreground">{thinking}</div>}
     </div>
   )
 }
@@ -160,33 +160,33 @@ function ToolCard({ item }: { item: Extract<Item, { kind: 'tool' }> }) {
   const Icon = iconFor(item.name)
   const StatusIcon = item.status === 'running' ? Loader2 : item.status === 'ok' ? CheckCircle2 : XCircle
   const hasOutput = !!item.preview
+  // A NAKED log row — no border, no background. Status leads ("Simmer complete ✓");
+  // 13px muted; hierarchy from type, not boxes. Click still expands output.
   return (
-    <div className="my-1.5 overflow-hidden rounded-md border border-border bg-card/60">
+    <div className="my-0">
       <button
         type="button"
         disabled={!hasOutput}
         onClick={() => setOpen((o) => !o)}
-        className={cn('flex w-full items-center gap-2 px-3 py-1.5 text-xs', hasOutput && 'hover:bg-accent/40')}
+        className={cn('group flex w-full items-center gap-2 py-[3px] text-[13px] text-muted-foreground', hasOutput && 'hover:text-foreground')}
       >
-        <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className="font-mono font-semibold">{item.name}</span>
-        <span className="truncate text-muted-foreground">
-          {item.summary || (item.status === 'running' ? 'working…' : '')}
-        </span>
-        <span className="ml-auto flex shrink-0 items-center gap-1.5">
-          {hasOutput && <ChevronRight className={cn('h-3 w-3 text-muted-foreground transition-transform', open && 'rotate-90')} />}
-          <StatusIcon
-            className={cn(
-              'h-3.5 w-3.5',
-              item.status === 'running' && 'animate-spin text-muted-foreground',
-              item.status === 'ok' && 'text-green-500',
-              item.status === 'error' && 'text-red-500',
-            )}
-          />
-        </span>
+        <StatusIcon
+          className={cn(
+            'h-3.5 w-3.5 shrink-0',
+            item.status === 'running' && 'animate-spin text-primary',
+            item.status === 'ok' && 'text-muted-foreground/70',
+            item.status === 'error' && 'text-destructive',
+          )}
+        />
+        <Icon className="h-3.5 w-3.5 shrink-0 opacity-60" />
+        
+        <span className="truncate">{(item.summary || (item.status === 'running' ? 'working…' : '')).split('/workspace/').join('')}</span>
+        {hasOutput && (
+          <ChevronRight className={cn('ml-auto h-3 w-3 shrink-0 opacity-0 transition-all group-hover:opacity-60', open && 'rotate-90 opacity-60')} />
+        )}
       </button>
       {open && hasOutput && (
-        <pre className="max-h-48 overflow-auto whitespace-pre-wrap border-t border-border px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
+        <pre className="mb-1 ml-[22px] max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-secondary/60 px-3 py-2 font-mono text-[11px] text-muted-foreground">
           {item.preview}
         </pre>
       )}
@@ -199,7 +199,7 @@ function ToolCard({ item }: { item: Extract<Item, { kind: 'tool' }> }) {
 function TodoCard({ items }: { items: TodoItem[] }) {
   const done = items.filter((t) => t.status === 'completed').length
   return (
-    <div className="my-1.5 rounded-md border border-border bg-card/60 p-2.5 text-xs">
+    <div className="my-1.5 rounded-md border border-border bg-card/80 p-2.5 text-[13px] text--muted-foreground">
       <div className="mb-1.5 flex items-center gap-2 font-medium text-muted-foreground">
         <ListTodo className="h-3.5 w-3.5" /> Tasks
         <span className="ml-auto font-mono text-[10px]">
@@ -276,7 +276,8 @@ export function ActivityCard({ item }: { item: Item }) {
     default: {
       // User turns are a gray bubble; assistant turns flow as plain text (no repeated role labels).
       if (item.kind === 'user') {
-        return <div className="my-3 whitespace-pre-wrap rounded-2xl bg-muted px-3.5 py-2.5">{item.text}</div>
+        // A QUIET bubble — barely-there wash, tighter radius, same 13px/21 as the prose.
+        return <div className="my-3 whitespace-pre-wrap rounded-xl bg-secondary/70 px-3.5 py-2.5 text-[13px] leading-[21px]">{item.text}</div>
       }
       if (item.kind === 'question') return null // ADR-043: rendered by QuestionCard in ChatPanel, not here
       return (

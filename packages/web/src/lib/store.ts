@@ -414,13 +414,30 @@ export const useStore = create<UiState>((set, get) => {
         case 'chats':
           set({ chats: e.chats, activeChatId: e.activeId })
           break
-        case 'chatHistory':
-          // M11: render a switched-to chat's saved transcript (flattened rows → transcript items).
+        case 'chatHistory': {
+          // M11: render a switched-to chat's saved transcript.
           // GUARD (measured in the first live walkthrough): the Home flow sends `open` + `submit`
           // back-to-back, and the open's chatHistory reply (an EMPTY saved chat) landed AFTER the
           // optimistic user message — wiping the pane while the plan stage ran, so the app looked
           // stuck for minutes. A history load must never clobber an in-flight turn.
           if (get().busy) break
+          if (e.events?.length) {
+            // High-fidelity path: RE-DISPATCH the logged live events through this very reducer — the
+            // reloaded transcript is the live transcript by construction (tool cards with status/diffs/
+            // previews, thinking blocks, compaction dividers; only thought-timing is lost, since that
+            // was measured client-side). The `user` entries are the submits (not ActivityEvents).
+            set({ items: [], streaming: null, status: null })
+            for (const entry of e.events) {
+              if (typeof entry === 'object' && entry !== null && 'user' in entry) {
+                set((s) => ({ items: [...s.items, { kind: 'user', text: String((entry as { user: string }).user) }] }))
+              } else if (typeof entry === 'object' && entry !== null && 'event' in entry) {
+                get().handleEvent((entry as { event: never }).event)
+              }
+            }
+            set({ streaming: null, status: null, busy: false, recovering: null, stepStartedAt: null, sawTokens: false })
+            break
+          }
+          // LEGACY fallback (chats recorded before the replay log): the flattened rows.
           set({
             items: e.items.map((it, i): Item =>
               it.role === 'user'
@@ -434,6 +451,7 @@ export const useStore = create<UiState>((set, get) => {
             busy: false,
           })
           break
+        }
         case 'fileDiff':
           set({ fileDiff: { path: e.path, original: e.original, modified: e.modified } })
           break

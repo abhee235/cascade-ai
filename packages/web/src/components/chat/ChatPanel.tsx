@@ -64,12 +64,12 @@ function LiveThinking({ thinking, seconds }: { thinking: string; seconds: number
   }, [thinking])
   return (
     <div className="my-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
-      <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+      <div className="mb-1 flex items-center gap-2 text-[13px] leading-[21px] text-muted-foreground">
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
         <span>Thinking…</span>
         {seconds > 0 && <span className="opacity-60 tabular-nums">{seconds}s</span>}
       </div>
-      <div ref={ref} className="max-h-24 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground/80">
+      <div ref={ref} className="max-h-24 overflow-y-auto whitespace-pre-wrap text-[13px] leading-[21px] text-muted-foreground/80">
         {thinking}
       </div>
     </div>
@@ -148,7 +148,7 @@ export function ChatPanel() {
   return (
     <div className="flex h-full flex-col text-sm">
       <ChatHeader />
-      <div className="flex-1 overflow-y-auto px-4 py-3">
+      <div className="chat-transcript flex-1 overflow-y-auto px-4 py-3">
         {renderTranscript(items)}
 
         {/* Live turn: while only thinking has arrived, stream the reasoning tail live (so the user sees the
@@ -171,15 +171,17 @@ export function ChatPanel() {
           </div>
         )}
 
-        {/* Persistent "still working" indicator: shows whenever the turn is running and nothing else is
-            currently rendering. Before the first token of a step it means the model is still INGESTING the
-            prompt ("Processing input…") — the dead-air phase that used to look like a hang; the ticking
-            elapsed seconds prove it's alive. Between steps it's a plain "Working…". */}
+        {/* Persistent "still working" indicator — THE dead-air contract: while `busy` (i.e. until the
+            final turnDone, the ONLY completion signal), something visible must always say we're working.
+            Before a step's first token the model is INGESTING the prompt (a local model re-reads the
+            whole conversation — 10-30s of true silence); the ticking per-step seconds prove it's alive.
+            Rendered as a real card (not a whisper) so it can't be missed or mistaken for "finished". */}
         {busy && !streaming && !recovering && (
-          <div className="my-1 flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            <span>{sawTokens ? status || 'Working…' : 'Processing input…'}</span>
-            {elapsed > 0 && <span className="opacity-60 tabular-nums">{elapsed}s</span>}
+          // A naked row (matches the flattened tool rows) — still ever-present until turnDone.
+          <div className="my-1.5 flex items-center gap-2 py-1 text-[13px] text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
+            <span>{sawTokens ? status || 'Working — running the next step…' : 'Reading your message and the project context…'}</span>
+            <span className="ml-auto tabular-nums text-xs text-muted-foreground/60">{elapsed}s</span>
           </div>
         )}
         <div ref={endRef} />
