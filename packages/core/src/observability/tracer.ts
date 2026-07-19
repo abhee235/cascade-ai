@@ -24,6 +24,10 @@ export type TraceEvent =
   | { t: 'delegate_nudge'; turn: number; readTokens: number } // ADR-050: bulk-read pressure crossed the threshold with zero delegation; reminder injected
   | { t: 'plan_nudge'; turn: number } // ADR-056 rung 2: writes began with no PLAN.md and no planner spawn; exact Subagent call injected
   | { t: 'degraded_retry'; turn: number } // empty terminal response (no text/thinking/tools) — backend recycled once and the turn re-asked
+  | { t: 'todo_gate'; turn: number; open: number } // terminal answer refused once: the model's own todo list still has `open` unfinished items
+  | { t: 'read_loop'; turn: number; path: string } // ADR-058: same file read N times with no Write/Edit to it — act-now reminder injected
+  | { t: 'stalled_verify'; turn: number } // ADR-058: edits pending unverified for N consecutive turns mid-flight — run-the-check reminder injected
+  | { t: 'post_edit_check'; turn: number; files: number } // ADR-059: harness type check after a mutating turn found errors — pushed to the model
   | { t: 'hook'; event: string; id: string; tool: string; decision: string; ms: number } // ADR-036: a project hook decided (allow|deny|ask) for a tool call
   | { t: 'turn_done'; turns: number }
   | { t: 'error'; message: string }

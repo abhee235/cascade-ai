@@ -144,3 +144,83 @@ body {
   margin: 0;
   font-family: var(--font-sans);
 }
+
+/* ── Chat transcript (scoped to the chat panel ONLY).
+   Design language: hierarchy from TYPE, not boxes. Muted prose, dark tracking-tight headings,
+   markerless custom-dot lists, 12px block rhythm, hairline everything. ── */
+.chat-transcript {
+  font-size: 14px;
+  line-height: 21px;
+}
+.chat-transcript .prose {
+  /* Main prose = 13px/21px w400 NEAR-BLACK
+     (rgb 24,24,27); muted gray belongs ONLY to step/log rows. */
+  color: var(--foreground);
+  font-size: 14px;
+  line-height: 21px;
+  max-width: none;
+}
+.chat-transcript .prose p {
+  margin: 0 0 12px;
+}
+.chat-transcript .prose h1,
+.chat-transcript .prose h2 {
+  /* A 20px tier would shout: local models emit ## constantly.
+     One quiet step up from body instead. */
+  font-size: 16px;
+  line-height: 22px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  color: var(--foreground);
+  margin: 14px 0 6px;
+}
+.chat-transcript .prose h3,
+.chat-transcript .prose h4 {
+  font-size: 14px;
+  line-height: 21px;
+  font-weight: 500;
+  color: var(--foreground);
+  margin: 14px 0 6px;
+}
+.chat-transcript .prose strong {
+  color: var(--foreground);
+  font-weight: 500; /* emphasis is w500, not bold-600 */
+}
+.chat-transcript .prose ul,
+.chat-transcript .prose ol {
+  list-style: none;
+  padding-left: 8px;
+  margin: 0 0 12px;
+}
+.chat-transcript .prose li {
+  position: relative;
+  padding-left: 14px;
+  margin: 3px 0;
+}
+.chat-transcript .prose li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.62em;
+  width: 4px;
+  height: 4px;
+  border-radius: 9999px;
+  background: var(--muted-foreground);
+  opacity: 0.55;
+}
+.chat-transcript .prose li::marker {
+  content: none;
+}
+.chat-transcript .prose :not(pre) > code {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--foreground);
+  background: var(--secondary);
+  border-radius: 6px;
+  padding: 1px 5px;
+}
+.chat-transcript .prose :not(pre) > code::before,
+.chat-transcript .prose :not(pre) > code::after {
+  content: none; /* strip the prose plugin's backticks */
+}

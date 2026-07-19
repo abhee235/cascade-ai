@@ -272,6 +272,12 @@ export const useStore = create<UiState>((set, get) => {
 
     handleEvent: (e) => {
       switch (e.type) {
+        case 'step':
+          // Core's explicit step-start (the dead-air contract): prefill begins NOW — restart the
+          // per-step timer and drop back to "reading input" until the first delta. NEVER touches
+          // `busy`: only turnDone may declare the work finished.
+          set({ stepStartedAt: Date.now(), sawTokens: false, recovering: null })
+          break
         case 'status':
           set({ status: e.text, recovering: null })
           break
@@ -410,6 +416,11 @@ export const useStore = create<UiState>((set, get) => {
           break
         case 'chatHistory':
           // M11: render a switched-to chat's saved transcript (flattened rows → transcript items).
+          // GUARD (measured in the first live walkthrough): the Home flow sends `open` + `submit`
+          // back-to-back, and the open's chatHistory reply (an EMPTY saved chat) landed AFTER the
+          // optimistic user message — wiping the pane while the plan stage ran, so the app looked
+          // stuck for minutes. A history load must never clobber an in-flight turn.
+          if (get().busy) break
           set({
             items: e.items.map((it, i): Item =>
               it.role === 'user'

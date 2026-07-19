@@ -69,6 +69,51 @@ export function shieldedResultIds(messages: Message[], keepCount: number): Set<s
   return new Set(ids.slice(-Math.max(1, keepCount))) // floor 1 = "always keep at least the last"
 }
 
+/** File-mutating tools — a successful call CONSUMES the pending read of the same file (verifyGate's set,
+ *  duplicated locally to keep the layers dependency-free). */
+const FILE_MUTATING = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
+
+/**
+ * UNCONSUMED-READ SHIELD (ADR-058, the Simmer live-lock): ids of the latest Read of each file that has NOT
+ * been Written/Edited since. The flat recency shield above protects "the last N results" — but a model that
+ * reads a file, then narrates/updates todos for two turns, watches that read get masked before it acts, and
+ * has to re-read (measured: the same 3 files re-read 5× each across 33 turns with zero edits, because every
+ * re-read raised the pressure that masked it again). A read whose file was since mutated is CONSUMED (the
+ * healthy cycle) and needs no protection; the read still waiting to drive an edit is the working set.
+ *
+ * Bounded on purpose: only the last `horizon` messages are scanned (a reference file read early and never
+ * edited — photos.ts — must not block the summarize boundary forever), and at most `cap` files are shielded
+ * (pressure must stay reclaimable). Never applied in survival mode (compactor policy: survival beats recency).
+ */
+export function unconsumedReadIds(messages: Message[], cap = 3, horizon = 16): Set<string> {
+  // Errored results can sit anywhere; one cheap pass so a failed read never wastes a shield slot.
+  const errored = new Set<string>()
+  for (const m of messages) {
+    const blocks = asBlocks(m)
+    if (!blocks) continue
+    for (const b of blocks) if (b.type === 'tool_result' && b.isError) errored.add(b.tool_use_id)
+  }
+  const lastRead = new Map<string, { id: string; pos: number }>()
+  const lastMutate = new Map<string, number>()
+  let pos = 0
+  for (let i = Math.max(0, messages.length - horizon); i < messages.length; i++) {
+    const blocks = asBlocks(messages[i]!)
+    if (!blocks) continue
+    for (const b of blocks) {
+      if (b.type !== 'tool_use') continue
+      pos++
+      const path = ((b.input ?? {}) as { file_path?: string }).file_path
+      if (typeof path !== 'string' || !path) continue
+      if (b.name === 'Read' && !errored.has(b.id)) lastRead.set(path, { id: b.id, pos })
+      else if (FILE_MUTATING.has(b.name)) lastMutate.set(path, pos)
+    }
+  }
+  const unconsumed = [...lastRead.entries()]
+    .filter(([path, read]) => (lastMutate.get(path) ?? -1) < read.pos)
+    .sort((a, b) => a[1].pos - b[1].pos)
+  return new Set(unconsumed.slice(-cap).map(([, read]) => read.id))
+}
+
 export type CompactionKind =
   | 'none'
   | 'collapsed'

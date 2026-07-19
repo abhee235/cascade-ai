@@ -13,17 +13,29 @@
 
 import { splitCommandSegments } from '../permissions/bashClassifier'
 import { parseRule, ruleMatches } from '../permissions/rules'
+import { displayPath, resolveInProject } from './projectPath'
 import type { Tool, ToolContext, ToolResult } from './Tool'
 
 /** Does this tool call satisfy at least one granted pattern? Bash is segment-aware (same as the
  *  permission gate): a compound command is only as trusted as its least-trusted segment, so EVERY
- *  segment must match a grant. File tools match on the input's file_path (`ruleMatches`). */
-function inputSatisfiesGrants(toolName: string, patterns: string[], input: unknown): boolean {
+ *  segment must match a grant. File tools match on the input's file_path, NORMALIZED to its
+ *  project-relative form first — measured (Simmer walkthrough): the planner wrote `/workspace/PLAN.md`
+ *  (the legal file via its sandbox-absolute alias) and the raw string match wrongly denied it. */
+function inputSatisfiesGrants(toolName: string, patterns: string[], input: unknown, ctx: ToolContext): boolean {
 	const rules = patterns.map((p) => `${toolName}(${p})`)
 	if (toolName === 'Bash') {
 		const command = (input as { command?: string } | null)?.command
 		const segments = typeof command === 'string' ? splitCommandSegments(command) : []
 		return segments.length > 0 && segments.every((seg) => rules.some((r) => ruleMatches(r, toolName, seg)))
+	}
+	const fp = (input as { file_path?: string } | null)?.file_path
+	if (typeof fp === 'string') {
+		try {
+			const relative = displayPath(ctx.cwd, resolveInProject(ctx.cwd, fp, ctx.sandbox?.root))
+			return rules.some((r) => ruleMatches(r, toolName, { ...(input as object), file_path: relative }))
+		} catch {
+			return false // outside the project ⇒ no grant can apply
+		}
 	}
 	return rules.some((r) => ruleMatches(r, toolName, input))
 }
@@ -56,7 +68,7 @@ function scopeTool(tool: Tool, patterns: string[]): Tool {
 	return {
 		...tool,
 		async call(input: unknown, ctx: ToolContext, onProgress?: (chunk: string) => void): Promise<ToolResult> {
-			if (inputSatisfiesGrants(tool.name, patterns, input)) return tool.call(input as never, ctx, onProgress)
+			if (inputSatisfiesGrants(tool.name, patterns, input, ctx)) return tool.call(input as never, ctx, onProgress)
 			return { content: grantDenial(tool.name, patterns, input), isError: true }
 		},
 	}

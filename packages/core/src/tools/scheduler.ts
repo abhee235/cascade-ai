@@ -116,6 +116,9 @@ export async function* scheduleTools(
       //    channel exists — otherwise fall through and the tool returns its no-channel error (headless). ──
       if (tool?.requiresUserInteraction?.() && ctx.ask) {
         const questions = tool.toQuestions?.(tu.input as never) ?? []
+        // FORENSICS: question-path tools were invisible in traces (measured: the Simmer routing question
+        // never appeared) — record the call like any other tool before parking on the user.
+        tracer.event({ t: 'tool_call', id: tu.id, name: tu.name, input: tu.input })
         yield { type: 'toolStart', id: tu.id, name: tu.name, summary: summary(tu, registry) }
         yield { type: 'question', id: tu.id, questions }
         const answers = await ctx.ask.request(tu.id) // ← BLOCKS until respondQuestion(tu.id, answers)

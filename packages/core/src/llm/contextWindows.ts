@@ -4,8 +4,8 @@
 // have known windows; local guesses stay conservative. An explicit cascade.contextWindow override beats both.
 
 // NOTE (ADR-039/038): the *usable* window is the model's allocated `num_ctx`, NOT its trained max — and two
-// variants of the same base can differ (qwen36-agentic pins num_ctx 32k via its Modelfile; coding-qwen36 pins
-// 128k). This static map can't see that, so SPECIFIC variants must precede the generic family rule (first match
+// variants of the same base can differ (qwen36-agentic and coding-qwen36 both pin 128k via their Modelfiles;
+// the generic qwen rule stays 32k). This static map can't see that, so SPECIFIC variants must precede the generic family rule (first match
 // wins). The real fix is /api/show `num_ctx` auto-detection (ADR-038, deferred) — which would retire this map.
 const WINDOWS: [RegExp, number][] = [
   [/gpt-4o|gpt-4\.1|gpt-4-turbo|o1|o3|o4/i, 128_000],
@@ -13,6 +13,7 @@ const WINDOWS: [RegExp, number][] = [
   [/gpt-3\.5/i, 16_385],
   [/claude/i, 200_000],
   [/coding-qwen ?3\.?6/i, 131_072], // coding-qwen36: Modelfile num_ctx 131072 (128K) — MUST precede the generic qwen36 rule
+  [/qwen ?36-agentic/i, 131_072], // qwen36-agentic: Modelfile num_ctx raised 32k → 131072 (2026-07-19, the Simmer live-lock: 16 compactions in 53 turns at 32k)
   [/qwen ?2\.5|qwen ?3|qwen2|qwen36/i, 32_768],
   [/llama ?3|llama3/i, 8_192],
   [/mistral|mixtral/i, 32_768],

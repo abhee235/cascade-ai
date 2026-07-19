@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { createProvider, createSession, type AgentDef, type CascadeSession, type Sandbox } from '@cascade/core'
+import { createProvider, createSession, JsonlTracer, type AgentDef, type CascadeSession, type Sandbox } from '@cascade/core'
 import type { ProjectInfo } from '@cascade/app-protocol'
 import { applyTemplate, readAiRules } from './templates.js'
 import { createPlannerSession, needsPlanStage } from './planStage.js'
@@ -81,6 +81,10 @@ const slug = (name: string) =>
 export const skillDirsFor = (dir: string) => [join(import.meta.dirname, '..', 'skills', 'builder'), join(dir, '.cascade', 'skills')]
 export const agentDirsFor = (dir: string) => [join(import.meta.dirname, '..', 'agents', 'builder'), join(dir, '.cascade', 'agents')]
 
+/** Per-project forensic traces (ADR-023, product path — the first live walkthrough was UNDIAGNOSABLE
+ *  without them). One JSONL per session under the project's own .cascade/traces/. */
+export const tracerFor = (dir: string, kind: 'builder' | 'planner') => new JsonlTracer(join(dir, '.cascade', 'traces', `${kind}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.jsonl`))
+
 export class ProjectManager {
   private readonly projects = new Map<string, Project>()
   private readonly createSessionFor: (dir: string, sandbox?: Sandbox, extraInstructions?: string) => CascadeSession
@@ -96,6 +100,11 @@ export class ProjectManager {
           cwd: dir,
           provider: createProvider({ provider: 'ollama', model: opts.model, baseUrl: opts.baseUrl }),
           model: opts.model,
+          tracer: tracerFor(dir, 'builder'), // product forensics (walkthrough lesson: no trace = no diagnosis)
+          // LATENCY (walkthrough forensics): curation adds hidden model calls (dead air) AND its memory
+          // writes mutate the system prompt mid-session — a prefix-cache breaker. A builder project gains
+          // little from cross-session memory; the seconds matter more.
+          autoMemory: false,
           sandbox, // 13.3: command tools run in the project's sandbox when present
           // Sandboxed ⇒ auto-allow (the builder is contained; it shouldn't prompt for every command/edit).
           // Without a sandbox we keep the default gate (the host is not isolated).
@@ -145,6 +154,7 @@ export class ProjectManager {
           model: this.opts.model,
           skillDirs: skillDirsFor(dir),
           sandbox,
+          tracer: tracerFor(dir, 'planner'), // stage forensics in the product too
         }))
     return build(project.dir, def, project.sandbox)
   }

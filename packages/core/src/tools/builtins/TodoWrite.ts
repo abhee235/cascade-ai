@@ -11,7 +11,10 @@ import type { Tool } from '../Tool'
 const todoSchema = z.object({
   content: z.string().min(1).describe('The task, imperative form (e.g. "Run the tests").'),
   status: z.enum(['pending', 'in_progress', 'completed']).describe('pending · in_progress · completed.'),
-  activeForm: z.string().min(1).describe('Present-continuous form shown while in progress (e.g. "Running the tests").'),
+  // OPTIONAL by measurement (ADR-048 tolerant-args family): qwen-class models omit activeForm on some items
+  // (especially completed ones) — 5 schema rejections in one Simmer run alone, each a wasted turn. The label
+  // is display sugar, not data: defaulting to `content` is strictly better than refusing the whole list.
+  activeForm: z.string().min(1).optional().describe('Present-continuous form shown while in progress (e.g. "Running the tests"). Optional — defaults to the task text.'),
 })
 
 const inputSchema = z.object({
@@ -47,21 +50,43 @@ export const TodoWriteTool: Tool<z.infer<typeof inputSchema>> = {
   isReadOnly: () => true, // no filesystem effect → auto-allowed, never prompts
   isConcurrencySafe: () => true,
   async call(input, ctx) {
+    // Normalize once at the door: every consumer below (store, reminder, UI) gets a complete TodoItem.
+    const todos = input.todos.map((t) => ({ ...t, activeForm: t.activeForm ?? t.content }))
+
+    // ADR-058 DROPPED-ITEM GUARD: full-list replacement means a weak model rewriting its list can silently
+    // lose still-open work (measured, Simmer: two rewrites dropped "Create DetailView", "Delete demo/" and
+    // "Build and verify" — the session then terminated early with the todo gate blind to them). Diff the
+    // incoming list against the stored one BEFORE replacing; vanished pending/in_progress items get named in
+    // the result so the model can restore them next call. Matching is normalized + substring-tolerant so a
+    // rephrased item doesn't false-positive.
+    const prev = ctx.todoStore?.get(ctx.depth ?? 0) ?? []
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+    const incoming = todos.map((t) => norm(t.content))
+    const dropped = prev.filter((t) => {
+      if (t.status === 'completed') return false // finishing work off the list is fine
+      const p = norm(t.content)
+      return !incoming.some((c) => c === p || c.includes(p) || p.includes(c))
+    })
+
     // ADR-034: store the authoritative list (per agent scope) so it survives compaction and a restart, and the
     // loop's periodic reminder + the UI read from it.
-    ctx.todoStore?.set(ctx.depth ?? 0, input.todos)
+    ctx.todoStore?.set(ctx.depth ?? 0, todos)
 
     // Enforce the invariants the model is only ASKED to keep — surface a correction it can act on next call,
     // rather than silently trusting the prompt.
-    const inProgress = input.todos.filter((t) => t.status === 'in_progress').length
-    const pending = input.todos.filter((t) => t.status === 'pending').length
+    const inProgress = todos.filter((t) => t.status === 'in_progress').length
+    const pending = todos.filter((t) => t.status === 'pending').length
     let note = ''
     if (inProgress > 1) note = ` ⚠ ${inProgress} tasks are in_progress — keep exactly ONE; set the rest back to pending or mark them completed.`
     else if (inProgress === 0 && pending > 0) note = ` ⚠ No task is in_progress — mark the next one in_progress before you work on it.`
+    if (dropped.length > 0)
+      note += ` ⚠ This update REMOVED ${dropped.length} unfinished task(s): ${dropped
+        .map((t) => `"${t.content}"`)
+        .join(', ')}. A rewrite must carry every task that is still open — if that was unintentional, send the list again including them; drop a task only when it is genuinely obsolete, and say why.`
 
     return {
       content: `Todos updated.${note} Keep the list current — mark tasks in_progress before starting and completed as soon as they are done.`,
-      display: { kind: 'todos', items: input.todos },
+      display: { kind: 'todos', items: todos },
     }
   },
 }

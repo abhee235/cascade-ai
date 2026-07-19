@@ -11,7 +11,8 @@
 // Rather than confining via permission deny-rules alone, we HARD-JAIL to the project because we own a Docker
 // root the model must reconcile.
 
-import { isAbsolute, relative, resolve, sep } from 'node:path'
+import { existsSync } from 'node:fs'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 /** A model-supplied path that points outside the project root. Returned to the model AS a tool error (never
  *  thrown past the tool) so it self-corrects to a relative path — the same self-correcting contract as our
@@ -68,6 +69,17 @@ export function resolveInProject(cwd: string, filePath: string, sandboxRoot?: st
       rel = rel.slice(a.length + 1)
       break
     }
+  }
+
+  // (B2) A bare absolute like "/src/components/HomeView.tsx" — the model dropped the '/workspace' prefix
+  //     but the FIRST segment is a real top-level entry of the project (src/, public/, index.html…).
+  //     Measured (Simmer 128k run 4): 21 calls denied for exactly this shape — the model then "corrected"
+  //     itself in circles and the 80-turn budget bled out on path friction. Re-root ONLY when the first
+  //     segment exists at the project root, so a genuine host path (/etc/passwd, /Users/…) still falls
+  //     through to (C) and is rejected; escapes like "/src/../../x" are also still caught by (C).
+  if (rel.startsWith('/')) {
+    const first = rel.slice(1).split('/')[0]
+    if (first && existsSync(join(root, first))) rel = rel.slice(1)
   }
 
   // (C) Resolve against the project root and confine. An absolute leftover (a real host path or an unknown

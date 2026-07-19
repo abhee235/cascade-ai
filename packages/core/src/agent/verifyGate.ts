@@ -73,6 +73,28 @@ export function resolveCheckCommand(cwd: string): string | undefined {
 	return undefined
 }
 
+// ── ADR-058: the MID-FLIGHT check nudge (the Simmer live-lock) ─────────────────────────────────────────────
+// The terminal gate only fires when the model STOPS calling tools — a live-lock never reaches it (measured:
+// 53 turns of tool calls, edits since turn 8, `npm run build` never run once). Compiler/test output is
+// compaction-PROOF ground truth: it arrives as a fresh tool result and re-derives everything the masked
+// reads knew, which is exactly what a context-starved model needs to converge.
+
+/** Consecutive turns of unverified-edit state before the mid-flight nudge fires (once per submit). */
+export const STALLED_VERIFY_TURNS = 5
+
+/** The mid-flight reminder — appended to the trailing tool_results message (ADR-034 channel). */
+export function buildStalledVerifyNudge(check?: CheckCommand): string {
+	const directive = check
+		? `Run \`${check.command}\` with the Bash tool NOW`
+		: 'Run the project check (its build or test command) with the Bash tool NOW'
+	return (
+		`<system-reminder>You have edited files but run no verification for ${STALLED_VERIFY_TURNS} turns. ` +
+		`${directive} — its error list is the ground truth for what to fix next. Fix only the FIRST error it ` +
+		'reports, run it again, and repeat. This is a background note, NOT a new request: do not reply to it — ' +
+		'run the check, then continue the ORIGINAL task.</system-reminder>'
+	)
+}
+
 /** The nudge, appended as a user turn (same channel as the ADR-034 reminder — reaches the model, not the UI).
  *  ADR-051: when the check command is KNOWN, the nudge is a DIRECTIVE naming it (weak models execute
  *  directives, not abstractions — measured); and it ends by re-anchoring to the task (the item-4 lesson:

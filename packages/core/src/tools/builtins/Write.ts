@@ -2,9 +2,10 @@
 
 
 import { z } from 'zod'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { Tool } from '../Tool'
+import { normalizeText } from '../fileState'
 import { lineDiff } from '../../utils/diff'
 import { displayPath, ProjectPathError, resolveInProject } from '../projectPath'
 
@@ -36,6 +37,13 @@ Prefer Edit for changing part of a file — Write replaces the ENTIRE file, so i
       const before = await readFile(path, 'utf8').catch(() => undefined) // undefined ⇒ new file
       await mkdir(dirname(path), { recursive: true }) // create parent dirs
       await writeFile(path, input.content, 'utf8')
+      // ADR-032: a successful Write IS the freshest possible knowledge of the file — record it, so a
+      // follow-up Edit doesn't get rejected with "modified since you read it" (measured, Simmer run 5:
+      // two Write→Edit pairs each paid a rejection + a re-read turn for a file the model itself just wrote).
+      if (ctx.readFileState) {
+        const st = await stat(path).catch(() => undefined)
+        ctx.readFileState.set(path, { content: normalizeText(input.content), timestamp: st?.mtimeMs ?? Date.now() })
+      }
       return {
         content: `Wrote ${input.content.length} chars to ${input.file_path}`,
         display: {

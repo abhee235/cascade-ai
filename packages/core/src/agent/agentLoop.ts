@@ -21,8 +21,10 @@ import { streamWithRecovery, type RecoveryOptions } from '../llm/resilience'
 import type { ToolUse } from '../tools/runTool'
 import { scheduleTools } from '../tools/scheduler'
 import { buildTodoReminder, shouldRemindTodos, type TodoReminderConfig } from './todoReminder'
-import { buildVerifyNudge, foldVerifyState, isVerifyCommand } from './verifyGate'
+import { buildStalledVerifyNudge, buildVerifyNudge, foldVerifyState, isVerifyCommand, STALLED_VERIFY_TURNS } from './verifyGate'
 import { buildDelegateNudgeText, foldReadPressure, READ_PRESSURE_FRACTION, sawSubagent } from './delegateNudge'
+import { buildReadLoopNudge, foldReadLoop } from './readLoopGate'
+import { editedTsFiles, postEditDiagnostics } from './postEditCheck'
 import { agentChildInstructions } from './agentDefs'
 
 export interface LoopDeps {
@@ -68,6 +70,10 @@ export interface LoopDeps {
   /** ADR-055: pre-rendered skills index for the system prompt (bodies load via the Skill tool). */
   skillsSection?: string
   contextFiles?: string[] // ADR-056 rung 5: files pinned into the system prompt, re-read fresh each turn
+  /** ADR-059: push type errors to the model after each mutating turn (diagnostics PUSHED, as an IDE does).
+   *  Default: ON when a sandbox exists (builder/eval — the check runs inside it), OFF on the bare host
+   *  (extension chat: the IDE already shows diagnostics, and a monorepo LanguageService build is costly). */
+  postEditCheck?: boolean
   /** ADR-055: the loaded skills — needed by named agents to PRELOAD skill bodies into child prompts. */
   skills?: import('../skills/skills').Skill[]
   /** ADR-056: named agent definitions the Subagent tool can spawn by name. */
@@ -183,6 +189,27 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   let plannerUsed = false
   // Degraded-backend guard: one recycle-and-retry per submit when a terminal response is entirely EMPTY.
   let emptyRetried = false
+  // Todo gate: continue-nudge when the model goes terminal with open todo items. RE-ARMING (measured,
+  // Simmer 128k submit 2): the old once-per-submit budget was spent on a turn-0 conversational answer;
+  // 7 turns later the model dropped the ball mid-fix with a THINKING-ONLY terminal ("Let me fix data.ts
+  // and then build the remaining views" — then silence) and the spent gate let it end. A silent stop after
+  // successful tool work is a NEW event: any successful call re-arms the gate, capped per submit.
+  let todoGateFirings = 0
+  let workedSinceTodoGate = false
+  const TODO_GATE_MAX_FIRINGS = 3
+  // The last FAILED tool call of the previous batch (name + error head) — when the model goes terminal
+  // right after a failed call, the gate names it so the retry is concrete, not aspirational.
+  let lastToolFailure: string | undefined
+  // ADR-059: the missing-node_modules directive fires once per submit (see the post-edit check below).
+  let depsNudged = false
+  // ADR-058 read-loop breaker: per-file successful-read counters, reset by a successful Write/Edit of the
+  // file. Only meaningful in loops that CAN mutate — an explore subagent's registry has no Write/Edit, so
+  // repeated reads there are its job, not a loop.
+  const readLoopCounts = new Map<string, number>()
+  const canMutate = registry.list().some((t) => t.name === 'Write' || t.name === 'Edit' || t.name === 'MultiEdit')
+  // ADR-058 mid-flight check nudge: consecutive turns spent in unverified-edit state; one reminder per submit.
+  let stalledVerifyTurns = 0
+  let stalledVerifyNudged = false
   const recycle = deps.provider.recover ? () => deps.provider.recover!(deps.model) : undefined
   // Wire-overhead calibration (ADR-052 companion): real prompt tokens minus our message estimate, EMA'd.
   // Undefined until the backend reports usage once; the static chars/4 overhead estimate is the floor.
@@ -230,6 +257,10 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     }
 
     yield { type: 'status', text: 'Thinking…' }
+    // Explicit STEP-START signal (the dead-air contract): prefill is about to begin — the phase where a
+    // local model re-reads the whole prompt and streams NOTHING for many seconds. UIs show "reading
+    // input…" from here until the first delta; ONLY turnDone ever means "finished".
+    yield { type: 'step', n: turn + 1 }
     const sentEstimate = estimateTokens(messages) // for wire-overhead calibration once real usage arrives
     // FORENSICS: record the FULL request we're about to send — the #1 thing you need when an answer
     // is wrong ("did the model even see the tool_result / the right system prompt?"). — ADR-023.
@@ -318,6 +349,33 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
         turn++
         continue // re-ask with the SAME messages (nothing was appended this turn)
       }
+      // TODO GATE (measured, Simmer walkthrough): the model ended with "Let me fix that and move on to
+      // Create AddForm" — an INTENTION, then silence, with its own todo list still holding open items.
+      // Prose-without-a-tool-call reads as terminal; the model's own checklist says otherwise. Refuse
+      // ONCE, naming the open items — same detect→remind idiom as the verify gate.
+      const openTodos = deps.todoStore?.get(depth).filter((td) => td.status !== 'completed') ?? []
+      const todoGateArmed = todoGateFirings === 0 || workedSinceTodoGate // successful work since the last firing re-arms it
+      if (deps.verifyGate !== false && openTodos.length > 0 && todoGateArmed && todoGateFirings < TODO_GATE_MAX_FIRINGS && turn + 1 < maxTurns) {
+        todoGateFirings++
+        workedSinceTodoGate = false
+        tracer.event({ t: 'todo_gate', turn, open: openTodos.length })
+        // A terminal right after a FAILED call is the model dropping the ball mid-recovery (measured:
+        // garbled Edit args → validation error → thinking-only silence). Name the failure so the retry
+        // is a concrete instruction, not a vibe.
+        const failureNote = lastToolFailure
+          ? ` Note: your last tool call FAILED — ${lastToolFailure}. Retry that call with corrected arguments as part of continuing.`
+          : ''
+        messages.push({
+          role: 'user',
+          content: `<system-reminder>Your own todo list still has ${openTodos.length} unfinished item(s): ${openTodos
+            .slice(0, 5)
+            .map((td) => `"${td.content}" (${td.status})`)
+            .join(', ')}. You stopped mid-task.${failureNote} CONTINUE working through them now — or, if an item is genuinely already done or obsolete, update it with TodoWrite and then finish. Do not reply to this note.</system-reminder>`,
+        })
+        yield { type: 'status', text: 'Unfinished todos — asking the agent to continue…' }
+        turn++
+        continue
+      }
       const unverified = editedSinceVerify || (deps.check?.declared === true && !verifiedEver)
       if (deps.verifyGate !== false && unverified && verifyNudges < verifyStrikes && turn + 1 < maxTurns) {
         verifyNudges++
@@ -338,7 +396,67 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     const results = yield* scheduleTools(toolUses, ctx)
     messages.push({ role: 'user', content: results }) // tool_results become the next turn's input
     editedSinceVerify = foldVerifyState(editedSinceVerify, toolUses, results, deps.check?.command) // ADR-049 gate state
+
+    // Todo-gate re-arm state: ANY tool attempt (even a failed one) re-arms — measured (Simmer 128k submit 3):
+    // the gate fired, the model complied with a TodoWrite whose args were corrupted (call FAILED), then went
+    // silent again — and success-only re-arming let that count as the end. A failed attempt is compliance,
+    // not stonewalling; the TODO_GATE_MAX_FIRINGS cap keeps re-arming bounded. Also remember the batch's
+    // last FAILED call (name + error head) so a stop-right-after-a-failure gets a concrete retry.
+    if (results.length > 0) workedSinceTodoGate = true
+    lastToolFailure = undefined
+    for (const r of results) {
+      if (r.type !== 'tool_result' || !r.isError) continue
+      const failedName = toolUses.find((tu) => tu.id === r.tool_use_id)?.name ?? 'a tool'
+      lastToolFailure = `${failedName}: ${r.content.slice(0, 200)}`
+    }
     if (toolUses.some((tu) => isVerifyCommand(tu, deps.check?.command))) verifiedEver = true // ADR-051: a declared check demands ≥1 real run
+
+    // ADR-059 POST-EDIT DIAGNOSTICS: the harness type-checks after a mutating turn and PUSHES the errors —
+    // the model never has to know the Lsp tool exists (measured: it never called it). Sandbox-routed like
+    // the Lsp tool; injects only when there are real errors; the verify gate still owns "done means built".
+    if (deps.postEditCheck ?? Boolean(deps.sandbox)) {
+      const edited = editedTsFiles(toolUses, results)
+      if (edited.length > 0) {
+        const note = await postEditDiagnostics(edited, { cwd: deps.cwd, sandbox: deps.sandbox })
+        // The missing-deps directive latches once per submit (installing takes turns — repeating the
+        // reminder on every further write while npm runs would just be noise).
+        if (note && !(note.missingDeps && depsNudged)) {
+          if (note.missingDeps) depsNudged = true
+          tracer.event({ t: 'post_edit_check', turn, files: edited.length })
+          appendReminder(messages, note.text)
+          yield { type: 'status', text: note.missingDeps ? 'Dependencies missing — asking the agent to npm install…' : 'Type errors after edit — feeding them back to the agent…' }
+        }
+      }
+    }
+
+    // ADR-058 READ-LOOP BREAKER (the Simmer live-lock): the Nth successful read of the same file with no
+    // Write/Edit of it in between means reads are being consumed by narration/compaction, not by action.
+    // Inject the act-now directive per crossing file (a mutation resets its counter, so a genuine new
+    // investigation of the same file later can fire again).
+    if (canMutate && deps.verifyGate !== false) {
+      for (const path of foldReadLoop(readLoopCounts, toolUses, results)) {
+        tracer.event({ t: 'read_loop', turn, path })
+        appendReminder(messages, buildReadLoopNudge(path))
+        yield { type: 'status', text: 'Read loop detected — asking the agent to edit instead of re-reading…' }
+      }
+    }
+
+    // ADR-058 MID-FLIGHT CHECK NUDGE: the terminal verify gate never fires while the model keeps calling
+    // tools — a live-lock session edits at turn 8 and never verifies through turn 53. After N consecutive
+    // turns of unverified-edit state, direct it to the check ONCE: compiler output is compaction-proof
+    // ground truth and re-derives everything the masked reads knew.
+    stalledVerifyTurns = editedSinceVerify ? stalledVerifyTurns + 1 : 0
+    if (
+      deps.verifyGate !== false &&
+      !stalledVerifyNudged &&
+      depth === 0 &&
+      stalledVerifyTurns >= STALLED_VERIFY_TURNS
+    ) {
+      stalledVerifyNudged = true
+      tracer.event({ t: 'stalled_verify', turn })
+      appendReminder(messages, buildStalledVerifyNudge(deps.check))
+      yield { type: 'status', text: 'Edits unverified for several turns — asking the agent to run the check…' }
+    }
 
     // ADR-050 rung 2: harness-detected delegation reminder. Recognition ("I should delegate") is
     // meta-cognition weak/mid models don't do — so the LOOP watches bulk-read pressure and reminds ONCE.

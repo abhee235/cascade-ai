@@ -13,7 +13,7 @@ function Center({ children }: { children: ReactNode }) {
 }
 
 export function PreviewPane() {
-  const { activeId, preview, startPreview, stopPreview, selectMode, toggleSelectMode } = useStore()
+  const { activeId, preview, startPreview, stopPreview, selectMode, toggleSelectMode, busy } = useStore()
   const [reloadKey, setReloadKey] = useState(0)
   const iframeRef = useRef<HTMLIFrameElement>(null)
 
@@ -55,6 +55,17 @@ export function PreviewPane() {
             onLoad={postMode}
             className="h-full w-full border-0 bg-white"
           />
+          {/* Building banner (walkthrough feedback): while the agent works, what's rendering may still be
+              the starter showcase — label it so it's never mistaken for the user's finished app. The
+              preview stays LIVE (Vite HMR swaps in the real app file-by-file as the agent writes it). */}
+          {busy && (
+            <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center">
+              <span className="mt-2 flex items-center gap-2 rounded-full border bg-background/90 px-3.5 py-1.5 text-xs font-medium shadow backdrop-blur">
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                Cascade is building your app — this preview updates live as code lands
+              </span>
+            </div>
+          )}
           {selectMode && (
             <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center">
               <span className="mt-2 rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground shadow">

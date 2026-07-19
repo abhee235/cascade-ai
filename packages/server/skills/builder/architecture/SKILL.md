@@ -25,6 +25,11 @@ own reads and edits cheap and precise.
 
 ## Views without a router
 
+**The house default is the view union below — do not introduce a routing library on your own.** If the
+USER explicitly asks for URL routing, honor that (their choice always wins) and install it properly.
+But never RECOMMEND one from an assumption about the codebase: no template file uses a router — if you
+believe the skeleton has one, you've lost context; Read src/App.tsx again before saying anything.
+
 One `view` state at the top, a discriminated union, and a switch in App:
 
 ```tsx

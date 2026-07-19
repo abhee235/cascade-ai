@@ -188,6 +188,141 @@ describe('watchdog — stall detection', () => {
 		expect(recycled).toBe(1) // exactly one recycle
 	})
 
+	it('TODO GATE: a terminal answer with open todos is refused once, then work continues (Simmer)', async () => {
+		// Measured: "Let me fix that and move on to Create AddForm" — intention, then silence, with open
+		// todos. The gate injects the open items once; a second terminal is accepted (no infinite loop).
+		const { runAgentLoop } = await import('../src/agent/agentLoop')
+		const { TodoStore } = await import('../src/tools/todoStore')
+		const todoStore = new TodoStore()
+		todoStore.set(0, [
+			{ content: 'Create AddForm', status: 'pending', activeForm: 'Creating AddForm' },
+			{ content: 'Wire views', status: 'in_progress', activeForm: 'Wiring views' },
+		])
+		let call = 0
+		const provider = {
+			id: 'fake',
+			async complete() {
+				return { text: '' }
+			},
+			async *stream(req: { messages: unknown[] }): AsyncIterable<StreamEvent> {
+				call++
+				if (call === 1) {
+					yield text('Let me fix that and move on to Create AddForm.') // intention → stop
+					yield { type: 'done', stopReason: 'end_turn' }
+					return
+				}
+				// The gate's reminder must be in the request now.
+				const hasNudge = JSON.stringify(req.messages).includes('unfinished item')
+				yield text(hasNudge ? 'CONTINUED AND FINISHED' : 'no nudge seen')
+				yield { type: 'done', stopReason: 'end_turn' }
+			},
+		}
+		const texts: string[] = []
+		for await (const ev of runAgentLoop([{ role: 'user', content: 'build it' }], { provider: provider as never, model: 'fake', cwd: process.cwd(), signal: new AbortController().signal, todoStore })) {
+			if (ev.type === 'message') texts.push(JSON.stringify(ev.message.content))
+		}
+		expect(call).toBe(2) // refused once, continued, then the second terminal was accepted (todos still open)
+		expect(texts.join(' ')).toContain('CONTINUED AND FINISHED')
+	})
+
+	it('TODO GATE re-arms after successful work, and names a failed call (Simmer 128k submit-2)', async () => {
+		// Measured: the once-per-submit budget was spent on a turn-0 conversational stop; 7 turns later —
+		// after a build run, a read, and a garbled failed Edit — the model went terminal THINKING-ONLY
+		// ("Let me fix data.ts…" then silence) and the spent gate let the session end. Successful tool work
+		// since the last firing must RE-ARM the gate; a stop right after a failed call must NAME that call.
+		const { runAgentLoop } = await import('../src/agent/agentLoop')
+		const { TodoStore } = await import('../src/tools/todoStore')
+		const todoStore = new TodoStore()
+		const items = [
+			{ content: 'Fix data.ts', status: 'in_progress' as const, activeForm: 'Fixing data.ts' },
+			{ content: 'Wire App.tsx', status: 'pending' as const, activeForm: 'Wiring App.tsx' },
+		]
+		todoStore.set(0, items)
+		const think = (thinking: string) => ({ type: 'thinking_delta' as const, thinking })
+		let call = 0
+		const provider = {
+			id: 'fake',
+			async complete() {
+				return { text: '' }
+			},
+			async *stream(): AsyncIterable<StreamEvent> {
+				call++
+				if (call === 1) {
+					// Work happens (TodoWrite succeeds) but the Edit FAILS (bad target) — then next turn stops.
+					yield { type: 'tool_use', id: 't1', name: 'TodoWrite', input: { todos: items } }
+					yield { type: 'tool_use', id: 't2', name: 'Edit', input: { file_path: 'nope-does-not-exist.ts', old_string: 'a', new_string: 'b' } }
+					yield { type: 'done', stopReason: 'tool_use' }
+					return
+				}
+				if (call === 2 || call === 4) {
+					// THINKING-ONLY terminal — an intention, zero visible text, zero tools. Not an answer.
+					yield think('Let me fix data.ts and then build the remaining views.')
+					yield { type: 'done', stopReason: 'end_turn' }
+					return
+				}
+				if (call === 3) {
+					yield { type: 'tool_use', id: 't3', name: 'TodoWrite', input: { todos: items } } // real work again → re-arms
+					yield { type: 'done', stopReason: 'tool_use' }
+					return
+				}
+				yield text('DONE NOW')
+				yield { type: 'done', stopReason: 'end_turn' }
+			},
+		}
+		const messages = [{ role: 'user' as const, content: 'finish the build' }]
+		for await (const _ of runAgentLoop(messages, { provider: provider as never, model: 'fake', cwd: process.cwd(), signal: new AbortController().signal, todoStore })) {
+			/* drain */
+		}
+		const history = JSON.stringify(messages)
+		expect(history.split('You stopped mid-task').length - 1).toBe(2) // fired at call 2 AND re-armed for call 4
+		expect(history).toContain('your last tool call FAILED — Edit:') // the failed Edit is named, retry is concrete
+		expect(call).toBe(5) // …and the model got to finish for real
+	})
+
+	it('TODO GATE: a FAILED attempt also re-arms — compliance with corrupted args is not stonewalling', async () => {
+		// Measured (Simmer 128k submit 3): gate fired → the model complied with a TodoWrite whose args were
+		// corrupted (activeForm missing → call FAILED) → silent again — and success-only re-arming accepted
+		// that as the end, one nudge short of recovery. Any attempt re-arms; the firings cap bounds it.
+		const { runAgentLoop } = await import('../src/agent/agentLoop')
+		const { TodoStore } = await import('../src/tools/todoStore')
+		const todoStore = new TodoStore()
+		todoStore.set(0, [{ content: 'Fix data.ts', status: 'in_progress', activeForm: 'Fixing data.ts' }])
+		const think = (thinking: string) => ({ type: 'thinking_delta' as const, thinking })
+		let call = 0
+		const provider = {
+			id: 'fake',
+			async complete() {
+				return { text: '' }
+			},
+			async *stream(): AsyncIterable<StreamEvent> {
+				call++
+				if (call === 1 || call === 3) {
+					yield think('One more go. I will fix data.ts completely.') // intention, then silence
+					yield { type: 'done', stopReason: 'end_turn' }
+					return
+				}
+				if (call === 2) {
+					// Compliance attempt with CORRUPTED args (the measured garbled-Edit shape — args missing
+					// entirely). Note: a TodoWrite missing only activeForm no longer fails (tolerant schema),
+					// so the still-invalid Edit is the right corruption to replay here.
+					yield { type: 'tool_use', id: 't1', name: 'Edit', input: { file_path: 'src/data.ts' } }
+					yield { type: 'done', stopReason: 'tool_use' }
+					return
+				}
+				yield text('RECOVERED AND DONE')
+				yield { type: 'done', stopReason: 'end_turn' }
+			},
+		}
+		const messages = [{ role: 'user' as const, content: 'finish it' }]
+		for await (const _ of runAgentLoop(messages, { provider: provider as never, model: 'fake', cwd: process.cwd(), signal: new AbortController().signal, todoStore })) {
+			/* drain */
+		}
+		const history = JSON.stringify(messages)
+		expect(history.split('You stopped mid-task').length - 1).toBe(2) // re-armed by the FAILED attempt
+		expect(history).toContain('your last tool call FAILED — Edit:') // and the broken call is named
+		expect(call).toBe(4)
+	})
+
 	it('abort during backoff resolves promptly instead of waiting out the delay', async () => {
 		const ctl = new AbortController()
 		let attempt = 0

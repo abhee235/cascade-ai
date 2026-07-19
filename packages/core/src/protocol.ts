@@ -58,7 +58,8 @@ export type ActivityEvent =
   | { type: 'toolProgress'; id: string; chunk: string } // live output from a running tool, e.g. Bash stdout (Phase 8)
   | { type: 'toolResult'; id: string; ok: boolean; preview: string; display?: ToolDisplay } // a tool finished (Phase 4; M2 display hint)
   | { type: 'message'; message: Message } // the finalized answer (authoritative; UI commits it)
-  | { type: 'turnDone'; steps: number }
+  | { type: 'turnDone'; steps: number } // the ONLY "we are finished" signal — everything else means still working
+  | { type: 'step'; n: number } // a model step is STARTING (prefill begins — the dead-air phase). UIs use it to show "reading input…" until the first delta; it must never clear the working state (only turnDone does)
   | { type: 'memory'; scope: string; text: string } // Phase 10: a fact auto-saved by self-curation (UI marker)
   | { type: 'compacted'; kind: string } // Phase 11: context was compacted ('masked' | 'summarized')
   | { type: 'recovering'; attempt: number; reason: string; delayMs: number } // Phase 12: retrying a failed model call (UI card)

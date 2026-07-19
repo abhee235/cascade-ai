@@ -85,6 +85,19 @@ describe('scopeToolsByGrants', () => {
 		expect(scoped!.activitySummary({} as never)).toBe('Write')
 	})
 
+	it('a scoped grant matches SANDBOX-ABSOLUTE aliases of the legal path (the Simmer planner bug)', async () => {
+		// Measured: the planner wrote "/workspace/PLAN.md" — the legal file via its sandbox alias — and the
+		// raw string match denied it. Grants must normalize to the project-relative form before matching.
+		const write = fakeTool('Write')
+		const [scoped] = scopeToolsByGrants([write], ['Write(PLAN.md)'])
+		const sandboxCtx = { cwd: 'C:/proj', abortSignal: new AbortController().signal, sandbox: { root: '/workspace' } } as unknown as ToolContext
+		const ok = await scoped!.call({ file_path: '/workspace/PLAN.md', content: '# plan' }, sandboxCtx)
+		expect(ok.isError).toBeFalsy()
+		expect(write.calls).toHaveLength(1)
+		const deny = await scoped!.call({ file_path: '/workspace/src/App.tsx', content: 'code' }, sandboxCtx)
+		expect(deny.isError).toBe(true) // normalization must not widen the grant
+	})
+
 	it('Bash grants scope by command prefix (reuses the rule grammar)', async () => {
 		const bash = fakeTool('Bash')
 		const [scoped] = scopeToolsByGrants([bash], ['Bash(git:*)'])

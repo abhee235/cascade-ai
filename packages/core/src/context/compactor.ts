@@ -15,6 +15,7 @@ import {
   microcompactToolResults,
   shieldedResultIds,
   snipLargeToolInputs,
+  unconsumedReadIds,
   type CompactionKind,
 } from './compactionLayers'
 
@@ -32,6 +33,7 @@ export {
   maskObservations,
   microcompactToolResults,
   snipLargeToolInputs,
+  unconsumedReadIds,
   compactionKindLabel,
   isClearedContent,
   COMPACTABLE_TOOLS,
@@ -253,6 +255,10 @@ export async function compactIfNeeded(
   const ceiling = Math.min(plan.hard, plan.effectiveWindow)
   const survival = force || usage >= ceiling
   const shield = shieldedResultIds(messages, survival ? 1 : plan.keepRecentResults)
+  // ADR-058: additionally shield the latest UNCONSUMED read per file (read, not yet acted on) — the flat
+  // last-N shield is often shallower than one multi-read turn, and evicting a read the model hasn't used
+  // yet forces the re-read loop. Capped + horizon-bounded inside; never in survival (survival beats recency).
+  if (!survival) for (const id of unconsumedReadIds(messages)) shield.add(id)
 
   // ── Cheap layers: escalate, stopping as soon as we're back under threshold. ──
   // These are length-preserving (they clear content / stub inputs, never drop messages), so `boundary` stays

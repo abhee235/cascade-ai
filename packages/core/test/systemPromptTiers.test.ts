@@ -29,7 +29,8 @@ describe('windowTier — 128k is its own band, distinct from 32k (ADR-037)', () 
 describe('coding-qwen36 window fix (was mis-read as 32k)', () => {
   it('resolves to 128k → full tier, compacts late (not at 22k)', () => {
     expect(contextWindowForModel('coding-qwen36:latest')).toBe(131_072)
-    expect(contextWindowForModel('qwen36-agentic:latest')).toBe(32_768) // sibling still 32k — not clobbered
+    expect(contextWindowForModel('qwen36-agentic:latest')).toBe(131_072) // raised 2026-07-19 (Simmer live-lock: 16 compactions/53 turns at 32k)
+    expect(contextWindowForModel('qwen3:36b')).toBe(32_768) // the generic family rule stays conservative
     const plan = resolveCompactionPlan({ model: 'coding-qwen36:latest' })
     expect(plan.window).toBe(131_072)
     expect(plan.tier).toBe('full')
