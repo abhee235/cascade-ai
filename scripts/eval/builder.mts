@@ -11,8 +11,8 @@
 // scenario's check.mjs run in the working copy (vite build exit 0 + built-bundle assertions — behavioural).
 // Slower + heavier than Tier-1 by nature: this is a nightly-class suite, not a per-save one.
 
-import { spawnSync } from 'node:child_process'
-import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
@@ -45,6 +45,12 @@ const { values: args } = parseArgs({
 		// Ops override of the scenario's timeout — a longer leash for a slow-but-honest config (measured:
 		// Q4_K_M at the 16k envelope needs ~3h for 6 rounds) without rewriting the fixture.
 		'timeout-ms': { type: 'string' },
+		// Survive the launching session closing. Measured TWICE: a background run whose owning shell died
+		// orphaned mid-flight — the runner wedged writing progress dots to the dead stdout pipe BEFORE the
+		// first trace event, while keep-awake held the box up for ~24h. --detach re-spawns the runner as its
+		// own detached process with stdout/stderr on a FILE (file writes can't block on a dead reader);
+		// progress is then observable via <runDir>/runner.log + traces, completion via results.jsonl.
+		detach: { type: 'boolean', default: false },
 	},
 })
 
@@ -131,6 +137,24 @@ if (!args.model) {
 const label = args.label ?? `builder-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}`
 const runDir = join(ROOT, 'eval', 'runs', label)
 mkdirSync(join(runDir, 'traces'), { recursive: true })
+
+// ── --detach: re-spawn as an independent process and exit (see the flag comment) ────────────────────────
+if (args.detach && !process.env.CASCADE_DETACHED) {
+	const logPath = join(runDir, 'runner.log')
+	const out = openSync(logPath, 'a')
+	// execArgv carries tsx's loader registration (--import/--require) — without it the child is PLAIN node
+	// and dies on the first extensionless TS import (measured on the first detached launch).
+	const child = spawn(process.execPath, [...process.execArgv, ...process.argv.slice(1).filter((a) => a !== '--detach')], {
+		detached: true,
+		stdio: ['ignore', out, out],
+		cwd: process.cwd(),
+		env: { ...process.env, CASCADE_DETACHED: '1' },
+		windowsHide: true,
+	})
+	child.unref()
+	console.log(`detached: PID ${child.pid} — progress → ${logPath}, verdict → ${join(runDir, 'results.jsonl')}`)
+	process.exit(0)
+}
 
 function withTemperature(p: ModelProvider, temperature: number): ModelProvider {
 	return {

@@ -340,6 +340,34 @@ units couldn't:
 Runner keep-awake (`scripts/eval/keepAwake.mts`, SetThreadExecutionState) now holds the box awake so the
 iterate durability run survives the 60-min sleep.
 
+### iterate-7 (Q4_K_M @ envelope, 3h, detached): 5/6 rounds VERIFIED — the system holds; the plan didn't
+
+**The headline:** five rounds of iterative feature-stacking, all five VERIFIED in the production bundle
+(the check fell only at R6, which the 3h ceiling clipped mid-round). 151+ min of building, 102 turns,
+**69+ compactions survived, ZERO traced errors.** Final code: 6 clean components + kit, App.tsx at 120
+lines (no monolith regression across 5 rounds), ONE `Product` + ONE `CartItem` interface end-to-end
+(stable data model), no routers/backends smuggled in, localStorage only where R4's theme required it.
+The agentic system — skills, layered compaction, watchdog/recovery, verify gate — sustains long
+iterative building on a 36B at the hardware envelope. R1 17min, R2 73min (the whale), R3 28min, R4
+26min, R5 ~17min + stall.
+
+**The honest asterisk:** this run does NOT credit the plan pin. The planner stage silently degraded
+(3 read-only turns, then EMPTY responses — the classic post-load degradation that only errors, never
+empty successes, can trigger recover() from), and `ensurePlanPersisted` faithfully preserved a 64-char
+junk fragment ("Let me first examine the existing project state…") which was then pinned all run. The
+observed consistency is attributable to the skills + architecture rules + model capability.
+
+**New gaps (next batch):** (1) `ensurePlanPersisted` must require a MINIMUM VIABLE plan (heading +
+length floor) — a junk PLAN.md is worse than none: it suppresses the rung-2 nudge AND pins noise;
+(2) empty-response degradation should count toward the recover() trigger (today only thrown errors do);
+(3) compactor retry/self-heal events should reach the tracer (a silent self-heal is indistinguishable
+from a wedge — the babysitter double-recycled because of this).
+
+**Ops learnings shipped this run:** --detach must carry `process.execArgv` (tsx loader) or the child is
+plain node; keep-awake parent-watchdog proven live (orphan released on its next 60s check); the
+per-attempt deadline in completeWithRecovery (body-wedge: headers arrive, body never does — measured
+40-min hang with every guard unfireable) landed mid-arc and runs from the next launch onward.
+
 ### The hardware envelope (iterate-3→6 + probes): the 36B Q4_K_M is a 24GB model on a 16GB card
 
 The tuning arc that followed iterate-2's crashes, one lever per run:

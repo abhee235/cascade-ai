@@ -12,11 +12,15 @@ import { spawn, type ChildProcess } from 'node:child_process'
 
 // ES_CONTINUOUS 0x80000000 (keep the state until reset) | ES_SYSTEM_REQUIRED 0x1 (no idle sleep) |
 // ES_AWAYMODE_REQUIRED 0x40 (also defeat hibernate / away mode).
-const PS = [
-	`Add-Type -Namespace Win32 -Name Power -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint e);';`,
-	`[Win32.Power]::SetThreadExecutionState(0x80000000 -bor 0x1 -bor 0x40) | Out-Null;`,
-	`while ($true) { Start-Sleep -Seconds 60 }`,
-].join(' ')
+// The loop WATCHDOGS THE PARENT: if the runner dies without calling release() (measured: an orphaned
+// run held the box awake for ~24h doing nothing), the hold releases within a minute of the parent
+// vanishing — thread exit resets the execution state, no cleanup required.
+const psScript = (parentPid: number) =>
+	[
+		`Add-Type -Namespace Win32 -Name Power -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint e);';`,
+		`[Win32.Power]::SetThreadExecutionState(0x80000000 -bor 0x1 -bor 0x40) | Out-Null;`,
+		`while (Get-Process -Id ${parentPid} -ErrorAction SilentlyContinue) { Start-Sleep -Seconds 60 }`,
+	].join(' ')
 
 /** Start holding the machine awake. Returns a `release()` — call it (or let the process exit) to let the
  *  machine sleep again. Idempotent-ish: release() is safe to call more than once. */
@@ -24,7 +28,7 @@ export function keepAwake(): { release: () => void } {
 	if (process.platform !== 'win32') return { release: () => {} }
 	let child: ChildProcess | undefined
 	try {
-		child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', PS], { stdio: 'ignore', windowsHide: true })
+		child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psScript(process.pid)], { stdio: 'ignore', windowsHide: true })
 		child.unref() // don't keep the runner alive on account of the keep-awake child
 	} catch {
 		/* no PowerShell → the run proceeds unprotected rather than crashing */

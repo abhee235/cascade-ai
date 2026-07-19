@@ -112,12 +112,25 @@ export async function completeWithRecovery<T>(call: () => Promise<T>, opts: Reco
   const base = opts.baseDelayMs ?? 500
   const max = opts.maxDelayMs ?? 8_000
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  // Per-attempt DEADLINE (measured, iterate-7 live: the backend sent headers then wedged mid-body — a
+  // non-streaming complete() has no inter-byte timeout, so the await hung 40+ min and NO guard could fire,
+  // because every guard here lives in the catch of a call that never returns). The deadline converts a
+  // body-hang into a StallError → transient → the recover/recycle path. The orphaned in-flight promise is
+  // detached (its eventual rejection is swallowed); recover()'s reload kills it server-side anyway.
+  const attemptMs = opts.stallTimeoutMs ?? 300_000
   let attempts = 0
   let recoveries = 0
   const maxRecoveries = opts.maxRecoveries ?? 3
   while (true) {
+    let deadline: ReturnType<typeof setTimeout> | undefined
     try {
-      return await call()
+      const attempt = call()
+      attempt.catch(() => {}) // if the deadline wins, the orphan's late rejection must not be unhandled
+      const raced =
+        attemptMs > 0
+          ? await Promise.race([attempt, new Promise<never>((_, reject) => (deadline = setTimeout(() => reject(new StallError(attemptMs)), attemptMs)))])
+          : await attempt
+      return raced
     } catch (err) {
       const kind = classifyError(err)
       if (kind !== 'transient' || attempts >= maxRetries) throw err instanceof RecoveryError ? err : new RecoveryError(err)
@@ -135,6 +148,8 @@ export async function completeWithRecovery<T>(call: () => Promise<T>, opts: Reco
       }
       if (opts.signal?.aborted) throw err instanceof RecoveryError ? err : new RecoveryError(err)
       await sleep(delayMs)
+    } finally {
+      if (deadline) clearTimeout(deadline)
     }
   }
 }

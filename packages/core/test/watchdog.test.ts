@@ -102,6 +102,23 @@ describe('watchdog — stall detection', () => {
 		expect(recovered).toBeGreaterThanOrEqual(3) // resets bridged what a plain budget could not
 	})
 
+	it('completeWithRecovery: a BODY-HANG trips the per-attempt deadline and recovers (iterate-7 live)', async () => {
+		// Measured: headers arrived, then the body never did — a non-streaming complete() has no inter-byte
+		// timeout, so the await hung 40+ min with every guard unfireable. The deadline converts the hang
+		// into a StallError → transient → retry; the next attempt succeeds.
+		let call = 0
+		const result = await completeWithRecovery(
+			() => {
+				call++
+				if (call === 1) return new Promise<never>(() => {}) // hangs forever — the wedge
+				return Promise.resolve('summary')
+			},
+			{ stallTimeoutMs: 50, sleep: async () => {}, baseDelayMs: 1 },
+		)
+		expect(result).toBe('summary')
+		expect(call).toBe(2) // the hung attempt was abandoned, not awaited to death
+	})
+
 	it('completeWithRecovery fails fast on fatal errors (no retry burn)', async () => {
 		let call = 0
 		await expect(
