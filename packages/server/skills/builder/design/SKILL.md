@@ -79,6 +79,9 @@ use `flex flex-col gap-*`, never margin stacks.
 - Products without a matching photo, avatars, abstract covers: `<ArtImage seed={name} kind="product" />`
   — same seed always renders the same token-colored art, in every preset and dark mode.
 - An emoji is never an image. An empty `bg-muted` box is never an image.
+- Storing a photo name on your data? The type ALREADY EXISTS: `import type { PhotoName } from
+  '@/lib/photos'`. Never re-declare it or invent keys from memory — hand-typed name unions drift from
+  the real assets and break the build. Read `photos.ts` (or the reference) for the actual names.
 
 ## 7. Dark mode
 

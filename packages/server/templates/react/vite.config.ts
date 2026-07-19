@@ -34,7 +34,11 @@ export default defineConfig(({ command }) => ({
   server: {
     host: true,
     // The project dir is a host bind-mount; native fs events don't cross it, so poll for edits.
-    watch: { usePolling: true, interval: 120 },
+    // `ignored`: server bookkeeping lives INSIDE the workspace (.cascade/ traces/todos/chats append every
+    // few seconds during a build) and `tsc -b` drops tsconfig.tsbuildinfo — none of it is app code, but any
+    // watched change outside the module graph makes Vite FULL-RELOAD the page (measured: the preview
+    // reloaded on every trace append and looked permanently "loading" for the whole session).
+    watch: { usePolling: true, interval: 120, ignored: ['**/.cascade/**', '**/tsconfig.tsbuildinfo', '**/PLAN.md', '**/AI_RULES.md'] },
     // The dev server is published on a random host port; tell the HMR client to use it (else it tries 5173).
     hmr: hmrClientPort ? { clientPort: hmrClientPort } : true,
   },

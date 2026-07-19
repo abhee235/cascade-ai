@@ -46,6 +46,14 @@ dependency — view switching covers everything these apps need.
 - Local state (an input's text, an open/closed flag) lives in the component that owns it.
 - Derived values (totals, counts, filtered lists) are computed with `useMemo` — NEVER stored as state.
 
+## Types — one owner per type
+
+A type is declared ONCE, in the module that owns the data, and IMPORTED everywhere else.
+`photos.ts` owns `PhotoName`; your `types.ts` owns the domain models. NEVER re-type another module's
+keys by hand — a hand-copied `type PhotoName = 'cake' | 'coffee' | …` WILL drift from the real assets
+and break the build (measured: it did). Write `import type { PhotoName } from '@/lib/photos'` and pick
+names from the generated blocks/photos reference, never from memory.
+
 ## Workflow per feature — copy this checklist into your response and tick it as you go
 
 ```

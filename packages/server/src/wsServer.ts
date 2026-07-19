@@ -65,8 +65,17 @@ function historyToItems(messages: Message[]): ChatHistoryItem[] {
   const items: ChatHistoryItem[] = []
   for (const m of messages) {
     if (m.role === 'user') {
-      const text = typeof m.content === 'string' ? m.content : m.content.filter((b) => b.type === 'text').map((b) => (b as { text: string }).text).join('')
-      if (text.trim()) items.push({ role: 'user', text: text.trim() })
+      // Harness-injected <system-reminder> turns/blocks (todo gate, verify nudges, post-edit checks) are
+      // invisible in the live UI — they must not resurface as fake user bubbles on reload.
+      const text =
+        typeof m.content === 'string'
+          ? m.content
+          : m.content
+              .filter((b) => b.type === 'text')
+              .map((b) => (b as { text: string }).text)
+              .filter((t) => !t.trimStart().startsWith('<system-reminder>'))
+              .join('')
+      if (text.trim() && !text.trimStart().startsWith('<system-reminder>')) items.push({ role: 'user', text: text.trim() })
     } else {
       for (const b of m.content) {
         if (b.type === 'text' && b.text.trim()) items.push({ role: 'assistant', text: b.text.trim() })
@@ -160,12 +169,27 @@ export function handleConnection(
     activeChatId = id
     active.loadHistory(chatStore.messages(dir, id))
     sendChats()
-    send({ type: 'chatHistory', items: historyToItems(active.getHistory()) })
+    // High-fidelity path: replay the ActivityEvents the client rendered live (identical transcript by
+    // construction). The flattened items ride along as the fallback for pre-log chats.
+    const events = chatStore.events(dir, id)
+    send({ type: 'chatHistory', items: historyToItems(active.getHistory()), events: events.length ? events : undefined })
   }
   // M11: persist the current chat's conversation (and derive its title from the first user message).
   const saveChat = (firstUserText?: string) => {
     const dir = activeId && manager.dirOf(activeId)
     if (dir && chatStore && active && activeChatId) chatStore.save(dir, activeChatId, active.getHistory(), firstUserText)
+  }
+  // The REPLAY LOG (reload = live, measured gap: reloaded chats dropped thinking, diffs, tool status, and
+  // leaked <system-reminder> walls). Only COMMITTED render events are logged — streaming deltas and
+  // transient status are re-derivable noise; `question` is skipped (a replayed question card would look
+  // answerable when the loop is long gone).
+  const REPLAY_TYPES = new Set(['toolStart', 'toolResult', 'message', 'memory', 'compacted'])
+  const logReplay = (entry: import('@cascade/app-protocol').ChatReplayEntry) => {
+    const dir = activeId && manager.dirOf(activeId)
+    if (dir && chatStore && activeChatId) chatStore.appendEvent(dir, activeChatId, entry)
+  }
+  const logEvent = (ev: { type: string }) => {
+    if (REPLAY_TYPES.has(ev.type)) logReplay({ event: ev })
   }
 
   // Return the active session, or nudge the user to open one. Captured into a const at each call site so
@@ -224,12 +248,17 @@ export function handleConnection(
           // work). Its events (incl. AskUserQuestion) stream to the client on the same pipe; its
           // turnDone is swallowed so the UI sees ONE turn. Plan failure never blocks the build — the
           // builder proceeds and the core nudge remains as the in-session safety net.
+          logReplay({ user: msg.text }) // the user row of the replay, FIRST — matching the live optimistic render
           const planner = activeId ? manager.planSessionFor(activeId) : undefined
           if (planner) {
             staging = planner
             send({ type: 'status', text: 'Planning first — writing PLAN.md…' })
             try {
-              for await (const ev of planner.submit(msg.text)) if (ev.type !== 'turnDone') send(ev)
+              for await (const ev of planner.submit(msg.text)) {
+                if (ev.type === 'turnDone') continue
+                send(ev)
+                logEvent(ev)
+              }
             } finally {
               staging = undefined
               const dir = activeId && manager.dirOf(activeId)
@@ -243,7 +272,10 @@ export function handleConnection(
               break
             }
           }
-          for await (const ev of s.submit(msg.text, msg.images)) send(ev) // M11: images = attached data-URIs
+          for await (const ev of s.submit(msg.text, msg.images)) {
+            send(ev) // M11: images = attached data-URIs
+            logEvent(ev)
+          }
           sendTree() // the agent may have created/edited files — refresh the tree
           saveChat(msg.text) // M11: persist the turn to the active chat (+ title it from the first message)
           sendChats() // the title may have changed

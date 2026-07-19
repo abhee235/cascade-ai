@@ -11,7 +11,9 @@ const TSC_LINE = /^(.+?)\((\d+),(\d+)\):\s+error\s+TS\d+:\s+(.+)$/
 export async function runCheck(sandbox: Sandbox): Promise<Problem[]> {
   // --pretty false keeps each error on one line (no colour/codeframe) so it parses cleanly. 2>&1 because tsc
   // writes some output to stderr. A non-zero exit just means "there were errors" — we read them from output.
-  const { output } = await sandbox.exec('npx tsc --noEmit --pretty false 2>&1')
+  // node_modules/.bin/tsc, never bare `npx tsc`: without a local install npx fetches the FAKE tsc package
+  // ("This is not the tsc command you are looking for") and the panel would silently show zero problems.
+  const { output } = await sandbox.exec('node_modules/.bin/tsc --noEmit --pretty false 2>&1')
   const problems: Problem[] = []
   for (const raw of output.split('\n')) {
     const m = TSC_LINE.exec(raw.trim())

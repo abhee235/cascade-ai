@@ -31,8 +31,15 @@ export type Version = { id: string; summary: string; createdAt: string }
 export type ChatMeta = { id: string; title: string; createdAt: string; updatedAt: string }
 
 /** A flattened transcript row sent when switching to a saved chat (M11) — the server derives these from the
- *  chat's core messages so the protocol stays decoupled from core's Message shape. */
+ *  chat's core messages so the protocol stays decoupled from core's Message shape. LEGACY fallback: chats
+ *  recorded before the replay log existed render from these reduced rows. */
 export type ChatHistoryItem = { role: 'user' | 'assistant' | 'tool'; text: string; name?: string }
+
+/** One replayable transcript entry: the user's submit text, or a relayed session event exactly as it was
+ *  streamed live. The client re-dispatches `event` through the SAME reducer that rendered the live session,
+ *  so a reloaded chat renders identically to how it was built — by construction, not by reconstruction.
+ *  `event` is opaque here (an ActivityEvent) to keep the protocol decoupled from core's event shape. */
+export type ChatReplayEntry = { user: string } | { event: unknown }
 
 /** Builder → client. App/workspace-level events, distinct from a session's ActivityEvents.
  *  Future variants (added in their phases) — keep the discriminated union open:
@@ -56,7 +63,7 @@ export type BuilderEvent =
   | { type: 'problems'; problems: Problem[]; checking?: boolean } // type-check results for the Problems panel (M5.3)
   | { type: 'versions'; versions: Version[] } // checkpoint history for the Versions panel (M6)
   | { type: 'chats'; chats: ChatMeta[]; activeId: string } // the active project's chat list (M11)
-  | { type: 'chatHistory'; items: ChatHistoryItem[] } // the switched-to chat's transcript to render (M11)
+  | { type: 'chatHistory'; items: ChatHistoryItem[]; events?: ChatReplayEntry[] } // the switched-to chat's transcript; `events` = high-fidelity replay log (items = legacy fallback)
   | { type: 'allChats'; groups: { project: ProjectInfo; chats: ChatMeta[] }[] } // every project's chats, for the Chats page
   | { type: 'terminalData'; id: string; data: string } // a chunk of a terminal session's PTY output (M7)
   | { type: 'terminalExit'; id: string } // a terminal session's shell ended (M7)

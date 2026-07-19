@@ -3,16 +3,23 @@
 // conversation lives in chat-<id>.json. The wsServer swaps a session's history (getHistory/loadHistory) when
 // switching chats, so each chat has its own agent context. Server-only; the web app sees only chat metadata.
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import type { Message } from '@cascade/core'
-import type { ChatMeta } from '@cascade/app-protocol'
+import type { ChatMeta, ChatReplayEntry } from '@cascade/app-protocol'
 
 const cascadeDir = (projectDir: string) => join(projectDir, '.cascade')
 const indexPath = (projectDir: string) => join(cascadeDir(projectDir), 'chats.json')
 const chatPath = (projectDir: string, id: string) => join(cascadeDir(projectDir), `chat-${id}.json`)
+/** The chat's REPLAY LOG — the ActivityEvents the client rendered live, appended as JSONL. On reopen these
+ *  are re-dispatched through the same client reducer, so a reloaded transcript renders exactly as it was
+ *  built (the flattened chat-<id>.json rows remain only as the pre-log legacy fallback). */
+const eventsPath = (projectDir: string, id: string) => join(cascadeDir(projectDir), `chat-${id}.events.jsonl`)
 const newId = () => randomBytes(4).toString('hex')
+
+/** Soft cap on replayed entries — a marathon chat replays its most recent slice, not an unbounded file. */
+const MAX_REPLAY_ENTRIES = 3000
 
 function readJson<T>(path: string, fallback: T): T {
   try {
@@ -86,6 +93,32 @@ export class ChatStore {
     }
   }
 
+  /** Append one replay entry (best-effort — persistence must never break a live turn). */
+  appendEvent(projectDir: string, id: string, entry: ChatReplayEntry): void {
+    try {
+      mkdirSync(cascadeDir(projectDir), { recursive: true })
+      appendFileSync(eventsPath(projectDir, id), `${JSON.stringify(entry)}\n`)
+    } catch {
+      /* a full disk or locked file loses replay fidelity, not the session */
+    }
+  }
+
+  /** The chat's replay log (empty for pre-log chats → caller falls back to the flattened rows). */
+  events(projectDir: string, id: string): ChatReplayEntry[] {
+    try {
+      const lines = readFileSync(eventsPath(projectDir, id), 'utf8').trim().split('\n')
+      return lines.slice(-MAX_REPLAY_ENTRIES).flatMap((l) => {
+        try {
+          return [JSON.parse(l) as ChatReplayEntry]
+        } catch {
+          return [] // a torn tail line (crash mid-append) is skipped, not fatal
+        }
+      })
+    } catch {
+      return []
+    }
+  }
+
   rename(projectDir: string, id: string, title: string): void {
     const chats = this.readIndex(projectDir)
     const meta = chats.find((c) => c.id === id)
@@ -98,5 +131,6 @@ export class ChatStore {
   delete(projectDir: string, id: string): void {
     this.writeIndex(projectDir, this.readIndex(projectDir).filter((c) => c.id !== id))
     if (existsSync(chatPath(projectDir, id))) rmSync(chatPath(projectDir, id))
+    if (existsSync(eventsPath(projectDir, id))) rmSync(eventsPath(projectDir, id))
   }
 }

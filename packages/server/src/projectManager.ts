@@ -114,7 +114,10 @@ export class ProjectManager {
           // instead keep using tools until the whole app is built. This OVERRIDES the concise default.
           extraInstructions: [BUILDER_BEHAVIOR, extraInstructions].filter(Boolean).join('\n\n'),
           // A full build is many model round-trips (one per file batch); the chat default of 10 is far too low.
-          maxTurns: 80,
+          // 80 → 500 (2026-07-20): run 4 hit the 80 cap mid-fix-loop with ~30 turns lost to friction the
+          // harness has since fixed — the cap is a runaway BACKSTOP, not a working budget, so it must sit
+          // far above any legitimate build. The gates (todo/verify/read-loop) are what end a stuck session.
+          maxTurns: 500,
           // ADR-036 SAFETY: the project dir is MODEL-WRITABLE, but hook commands spawn on the HOST — never
           // load a hooks.json the builder itself could have written (sandbox escape at the next open()).
           loadProjectHooks: false,
