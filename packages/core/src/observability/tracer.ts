@@ -23,6 +23,7 @@ export type TraceEvent =
   | { t: 'verify_gate'; turn: number } // ADR-049: terminal answer refused — edits happened, nothing verified them; nudge injected
   | { t: 'delegate_nudge'; turn: number; readTokens: number } // ADR-050: bulk-read pressure crossed the threshold with zero delegation; reminder injected
   | { t: 'plan_nudge'; turn: number } // ADR-056 rung 2: writes began with no PLAN.md and no planner spawn; exact Subagent call injected
+  | { t: 'degraded_retry'; turn: number } // empty terminal response (no text/thinking/tools) — backend recycled once and the turn re-asked
   | { t: 'hook'; event: string; id: string; tool: string; decision: string; ms: number } // ADR-036: a project hook decided (allow|deny|ask) for a tool call
   | { t: 'turn_done'; turns: number }
   | { t: 'error'; message: string }

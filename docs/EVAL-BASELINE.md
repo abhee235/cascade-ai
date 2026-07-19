@@ -415,3 +415,28 @@ the core positive result; a clean full 6-round consistency demo is blocked only 
 crashing llama-server under sustained load (an infra/hardware issue, orthogonal to Cascade). Follow-up:
 either stabilise the backend (Ollama num_ctx/flash-attn tuning, model reload) or run the consistency
 demo on a more stable model.
+
+## Rung 11 — design system v2 measured (design-v2..v4, 2026-07-19, user-approved runs)
+
+The design-lint ladder on builder-shop (qwen36-agentic @ 16k/384), one skill-text fix per run:
+
+- **design-v2** (833s): the pipeline WORKS — planner emitted a correct 7th-section Design line
+  (`preset: premium; catalog: NavBar+Section+MediaCard grid; imagery: photoFor/ArtImage`); NavBar +
+  ArtImage + token colors adopted; ZERO emoji; visually transformed vs the pre-design baseline.
+  Lint: hand-rolled product cards/empty-state (blocks KNOWN but reference UNFETCHED) + two decorative
+  raw colors (text-amber-600 stars, text-green-500 stock).
+  → Fix: workhorse block examples INLINED in the design skill; explicit color substitutes.
+- **design-v3** (702s): ArtImage adoption via the inline example PROVED inline-examples-drive-behavior —
+  but cards/header still hand-rolled, and the diagnosis found a SKILL CONFLICT: the architecture
+  skill's file-layout example literally named `Header.tsx, ProductCard.tsx` as the expected components.
+  Concrete example beat abstract instruction (the recurring lesson, now cross-skill).
+  → Fix: aligned ALL THREE sources of truth (architecture layout + checklist, design checklist,
+  planner Components spec): "NEVER re-implement what a block provides (header→NavBar, product
+  card→MediaCard, empty→EmptyState)".
+- **design-v4** (1189s): ✅ **SOLVED — full check + design-lint CLEAN.** navbar + media-card + empty-state
+  markers in the bundle; five files import from @/components/blocks; MediaCard grid mixes product PHOTOS
+  (photoFor) with ArtImage art; zero raw colors; zero errors; 4 compactions handled. The ladder:
+  v2 two failures → v3 one root cause → v4 clean, one skill-text fix per rung.
+
+Class insight: a design system for weak models is only as strong as its most concrete example — every
+skill that shows a file layout or component name is a source of truth, and they must all agree.

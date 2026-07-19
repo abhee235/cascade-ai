@@ -34,8 +34,23 @@ FIRST, then fill their slots with the kit:
 - `EmptyState` — REQUIRED for every list's empty case. `Footer` — landing pages end with one.
 - `ArtImage` — deterministic token-colored SVG art (see Imagery).
 
-Load `Skill {name: "design", file: "reference/blocks.md"}` for exact props + the canonical page
-assembly. For kit components (Dialog, Select, Table…): `Skill {name: "design", file: "reference/components.md"}`.
+**Never hand-roll a card grid or an empty state — these two are the workhorses, copy them:**
+
+```tsx
+import { MediaCard } from '@/components/blocks/MediaCard'
+import { EmptyState } from '@/components/blocks/EmptyState'
+import { ArtImage } from '@/components/blocks/ArtImage'
+
+<MediaCard media={<ArtImage seed={p.name} kind="product" />} title={p.name} meta={p.category}
+  aside={`$${p.price.toFixed(2)}`} onClick={() => open(p)}
+  actions={<Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); add(p) }}>Add to cart</Button>} />
+
+{items.length === 0 && <EmptyState icon={ShoppingCart} title="Your cart is empty"
+  description="Find something you'll keep." action={<Button variant="outline" onClick={goCatalog}>Browse</Button>} />}
+```
+
+Other blocks' exact props + the canonical page assembly: `Skill {name: "design", file: "reference/blocks.md"}`.
+For kit components (Dialog, Select, Table…): `Skill {name: "design", file: "reference/components.md"}`.
 
 ## 4. Color discipline
 
@@ -44,6 +59,9 @@ Token utilities ONLY: `bg-background text-foreground`, `bg-card`, `bg-primary te
 NO `bg-blue-600`, no `bg-white`/`bg-black`, no hex, no arbitrary values. **One strong accent**: use
 `bg-primary` (default Button) for THE one main CTA per screenful; everything else stays quiet
 (`secondary`/`outline`/`ghost`). Charts and decorative variety: `chart-1..5` tokens only.
+Common traps — the SUBSTITUTES are: star ratings → `text-primary` (never text-amber-*); success/"in
+stock" → `text-primary` or a `<Badge variant="secondary">` (never text-green-*); warnings/errors →
+`text-destructive` (never text-red-*).
 
 ## 5. Type & rhythm
 
@@ -76,7 +94,7 @@ popups after the click).
 ## Design pass — run this checklist before calling any UI work done
 
 - [ ] Page assembled from blocks (NavBar + Hero/PageHeader + Sections + Footer where it's a landing)
-- [ ] Zero raw colors in your diff (no bg-white/black, no -500/-600 shades, no hex)
+- [ ] Zero raw colors in your diff (no bg-white/black, -500/-600 shades, hex — stars/stock/success = text-primary)
 - [ ] Every image is photo()/photoFor()/<ArtImage> — zero emoji-as-image
 - [ ] Exactly one bg-primary CTA per screenful; empty lists show <EmptyState>
 - [ ] Checked once in light AND dark mode before done

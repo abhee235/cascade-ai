@@ -98,6 +98,12 @@ function lastAssistantText(history: Message[]): string {
  * final message (which IS the plan), stripped to the first markdown heading so any "I'm in planner mode…"
  * preamble is dropped. Belt (the grant) and suspenders (this). Returns true if a plan now exists on disk.
  */
+/** MINIMUM VIABLE PLAN (iterate-7 forensics): a degraded planner session once yielded a 64-char
+ *  conversational fragment which was faithfully persisted — and a junk PLAN.md is WORSE than none: it
+ *  suppresses the rung-2 plan nudge AND pins noise into every builder turn. A plan must have a heading
+ *  and enough body to plausibly carry the sections. */
+const MIN_PLAN_CHARS = 200
+
 export function ensurePlanPersisted(dir: string, session: CascadeSession): boolean {
   const planPath = join(dir, 'PLAN.md')
   if (existsSync(planPath)) return true // the planner wrote it — the clean, structured path
@@ -105,7 +111,9 @@ export function ensurePlanPersisted(dir: string, session: CascadeSession): boole
   if (!text) return false // the planner produced nothing to persist
   // Drop any conversational preamble before the plan proper (the first markdown heading, e.g. "# … Plan").
   const headingAt = text.search(/^#{1,3} /m)
-  const plan = headingAt >= 0 ? text.slice(headingAt) : text
+  if (headingAt < 0) return false // no heading anywhere ⇒ this is chatter, not a plan
+  const plan = text.slice(headingAt)
+  if (plan.length < MIN_PLAN_CHARS) return false // fragment ⇒ leave NO file (the nudge stays armed)
   writeFileSync(planPath, plan)
   return true
 }

@@ -34,7 +34,7 @@ Do exactly this:
      otherwise>` + each view as a BLOCK composition + imagery source. Example:
      `preset: premium; catalog: NavBar+PageHeader+MediaCard grid; detail: Section; imagery: ArtImage(product), photoFor('food') hero`
    - **Data model** — TypeScript interface signatures only (names + fields); one line: where seed lives.
-   - **Components** — `src/components/X.tsx` — one clause each; note the blocks/kit pieces it composes.
+   - **Components** — `src/components/X.tsx` — one clause each; note the blocks/kit pieces it composes. NEVER plan a component a block already provides (header→NavBar, product card→MediaCard, empty→EmptyState).
    - **State** — one line each: what's in App, what's in a hook, what persists.
    - **Out of scope** — a comma list (no backend, no auth, …).
 3. Honor the user's clarifying answers exactly — if they said no auth, OUT OF SCOPE lists "auth".

@@ -12,7 +12,9 @@ src/
   App.tsx               ← composition root ONLY: view switching + top-level state. Keep under 100 lines.
   components/ui/        ← the shadcn/ui kit (READ-ONLY — never edit or recreate these)
   components/blocks/    ← the page-section blocks: NavBar, Hero, MediaCard… (READ-ONLY — compose via props)
-  components/           ← YOUR components, one per file: Header.tsx, ProductCard.tsx, CartView.tsx…
+  components/           ← YOUR view-level components, one per file: CatalogView.tsx, CartView.tsx, CheckoutForm.tsx…
+                          NEVER re-implement a block here: page header → <NavBar>, product/listing card →
+                          <MediaCard>, empty message → <EmptyState> (import from @/components/blocks)
   lib/                  ← pure logic: types.ts, data.ts (seed data), photos.ts (bundled imagery)
   hooks/                ← custom hooks when state logic repeats (useCart.ts, useLocalStorage.ts)
   demo/                 ← the starter showcase — DELETE this dir (and rewrite App.tsx) when building the real app
@@ -45,7 +47,7 @@ dependency — view switching covers everything these apps need.
 Feature progress:
 - [ ] 1. Skills read (this one + the matching recipe for the feature)
 - [ ] 2. Types + seed data updated (lib/types.ts, lib/data.ts)
-- [ ] 3. Components built/extended (small files, kit-composed)
+- [ ] 3. Components built/extended (small files, composed FROM blocks + kit — no hand-rolled cards/headers/empty states)
 - [ ] 4. Wired into App's view switch
 - [ ] 5. `npm run build` passes
 ```

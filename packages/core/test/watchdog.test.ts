@@ -133,6 +133,61 @@ describe('watchdog — stall detection', () => {
 		expect(call).toBe(1)
 	})
 
+	it('an EMPTY terminal response triggers one recycle-and-retry through the real loop (iterate-7)', async () => {
+		// A crashed-then-reloaded backend returns SUCCESSFUL but EMPTY responses — no error, so recovery
+		// never fires and the session silently ends with nothing. The loop now recycles once and re-asks.
+		const { runAgentLoop } = await import('../src/agent/agentLoop')
+		let call = 0
+		let recycled = 0
+		const provider = {
+			id: 'fake',
+			recover: async () => void recycled++,
+			async complete() {
+				return { text: '' }
+			},
+			async *stream(): AsyncIterable<StreamEvent> {
+				call++
+				if (call === 1) {
+					yield { type: 'done', stopReason: 'end_turn' } // ENTIRELY empty response
+					return
+				}
+				yield text('real answer after recycle')
+				yield { type: 'done', stopReason: 'end_turn' }
+			},
+		}
+		const events: string[] = []
+		for await (const ev of runAgentLoop([{ role: 'user', content: 'plan this' }], { provider: provider as never, model: 'fake', cwd: process.cwd(), signal: new AbortController().signal, verifyGate: false })) {
+			if (ev.type === 'message') events.push(JSON.stringify(ev.message.content))
+		}
+		expect(call).toBe(2) // re-asked after the recycle
+		expect(recycled).toBe(1)
+		expect(events.join(' ')).toContain('real answer after recycle')
+	})
+
+	it('a SECOND empty terminal is accepted (no infinite recycle loop)', async () => {
+		const { runAgentLoop } = await import('../src/agent/agentLoop')
+		let call = 0
+		let recycled = 0
+		const provider = {
+			id: 'fake',
+			recover: async () => void recycled++,
+			async complete() {
+				return { text: '' }
+			},
+			async *stream(): AsyncIterable<StreamEvent> {
+				call++
+				yield { type: 'done', stopReason: 'end_turn' } // empty forever
+			},
+		}
+		let done = false
+		for await (const ev of runAgentLoop([{ role: 'user', content: 'x' }], { provider: provider as never, model: 'fake', cwd: process.cwd(), signal: new AbortController().signal, verifyGate: false })) {
+			if (ev.type === 'turnDone') done = true
+		}
+		expect(done).toBe(true) // terminated honestly
+		expect(call).toBe(2) // exactly one retry
+		expect(recycled).toBe(1) // exactly one recycle
+	})
+
 	it('abort during backoff resolves promptly instead of waiting out the delay', async () => {
 		const ctl = new AbortController()
 		let attempt = 0

@@ -131,7 +131,7 @@ async function summarize(older: Message[], deps: CompactDeps): Promise<string> {
   // recycle the backend at ≥2 consecutive failures, reset the budget when the recycle verifies healthy.
   const res = await completeWithRecovery(
     () => deps.provider.complete({ messages: [{ role: 'user', content: serialize(older) }], model: deps.model, system: COMPACT_SYSTEM }, deps.signal),
-    { signal: deps.signal, recover: deps.recover, sleep: deps.sleepForTest },
+    { signal: deps.signal, recover: deps.recover, sleep: deps.sleepForTest, onRetry: deps.onRetry },
   )
   return res.text.trim()
 }
@@ -150,6 +150,9 @@ export interface CompactDeps {
   overheadTokens?: number
   /** WATCHDOG hook for the summarize call (same one the main loop uses — recycle a wedged backend). */
   recover?: () => Promise<void>
+  /** Self-heal VISIBILITY (iterate-7: the babysitter double-recycled because in-flight summarize
+   *  retries are invisible from outside) — wired by the session to a tracer error event. */
+  onRetry?: (info: { attempt: number; delayMs: number }) => void
   /** Injectable backoff sleep for deterministic tests. */
   sleepForTest?: (ms: number) => Promise<void>
 }

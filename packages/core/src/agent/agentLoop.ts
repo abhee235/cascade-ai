@@ -181,6 +181,9 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   let subagentUsed = false
   let planNudged = false
   let plannerUsed = false
+  // Degraded-backend guard: one recycle-and-retry per submit when a terminal response is entirely EMPTY.
+  let emptyRetried = false
+  const recycle = deps.provider.recover ? () => deps.provider.recover!(deps.model) : undefined
   // Wire-overhead calibration (ADR-052 companion): real prompt tokens minus our message estimate, EMA'd.
   // Undefined until the backend reports usage once; the static chars/4 overhead estimate is the floor.
   let wireOverhead: number | undefined
@@ -239,7 +242,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     for await (const ev of streamWithRecovery(makeStream, {
       ...deps.recovery,
       signal: deps.signal,
-      recover: deps.provider.recover ? () => deps.provider.recover!(deps.model) : undefined, // WATCHDOG: recycle a degraded backend
+      recover: recycle, // WATCHDOG: recycle a degraded backend
       onOverflow: deps.compact
         ? async () => {
             // Reactive overflow: force compaction regardless of the threshold (ADR-039 `force`) — the model just
@@ -299,6 +302,22 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     // edits exist, or a DECLARED check was never run → inject a nudge turn and loop; after the strike
     // budget the answer is accepted unconditionally (the model may legitimately say "no tests exist here").
     if (toolUses.length === 0) {
+      // DEGRADED-BACKEND retry (iterate-7 forensics): a crashed-then-reloaded local backend can return
+      // SUCCESSFUL but EMPTY responses — no error is thrown, so the recovery machinery never fires, and
+      // the session silently ends with nothing (the planner stage died exactly this way). An empty
+      // terminal (no text, no thinking, no tools) is not an answer: recycle the backend once and re-ask.
+      if (!text.trim() && !thinking.trim() && !emptyRetried && recycle && turn + 1 < maxTurns) {
+        emptyRetried = true
+        tracer.event({ t: 'degraded_retry', turn })
+        try {
+          await recycle()
+        } catch {
+          /* best-effort — the retry proceeds regardless */
+        }
+        yield { type: 'status', text: 'Empty response — recycling the model and retrying…' }
+        turn++
+        continue // re-ask with the SAME messages (nothing was appended this turn)
+      }
       const unverified = editedSinceVerify || (deps.check?.declared === true && !verifiedEver)
       if (deps.verifyGate !== false && unverified && verifyNudges < verifyStrikes && turn + 1 < maxTurns) {
         verifyNudges++

@@ -133,9 +133,33 @@ describe('ensurePlanPersisted', () => {
 		await session.dispose()
 	})
 
+	it('MIN-VIABLE-PLAN: a junk fragment is NOT persisted — no file, the nudge stays armed (iterate-7)', async () => {
+		// A degraded stage once produced "Let me first examine the existing project state…" (64 chars) which
+		// got persisted — suppressing the plan nudge AND pinning noise. Fragments must leave NO file.
+		const dir = mkdtempSync(join(tmpdir(), 'persist-'))
+		const session = createPlannerSession(def, { dir, provider: spokenPlanProvider('Let me first examine the existing project state before building.'), model: 'fake', skillDirs: [SKILLS] })
+		for await (const _ of session.submit('Build a shop')) {
+			/* drain */
+		}
+		expect(ensurePlanPersisted(dir, session)).toBe(false)
+		expect(existsSync(join(dir, 'PLAN.md'))).toBe(false) // junk is NOT better than nothing
+		await session.dispose()
+	})
+
+	it('MIN-VIABLE-PLAN: headed but too-short output is also rejected', async () => {
+		const dir = mkdtempSync(join(tmpdir(), 'persist-'))
+		const session = createPlannerSession(def, { dir, provider: spokenPlanProvider('# Shop — Plan\nTBD'), model: 'fake', skillDirs: [SKILLS] })
+		for await (const _ of session.submit('Build a shop')) {
+			/* drain */
+		}
+		expect(ensurePlanPersisted(dir, session)).toBe(false)
+		expect(existsSync(join(dir, 'PLAN.md'))).toBe(false)
+		await session.dispose()
+	})
+
 	it('falls back to the final message when the planner SPOKE the plan instead of writing it (planner-6)', async () => {
 		const dir = mkdtempSync(join(tmpdir(), 'persist-'))
-		const spoken = "I'm in planner mode so I can't build. Here's the plan:\n\n# Shop — Plan\n## Goal\nA storefront.\n## Views\n- Catalog"
+		const spoken = "I'm in planner mode so I can't build. Here's the plan:\n\n# Shop — Plan\n## Goal\nA storefront for small-batch goods with catalog, cart and checkout.\n## Views\n- Catalog — grid of products\n- Cart — line items and totals\n## Data model\ninterface Product { id: string; name: string; price: number }\n## Out of scope\nbackend, auth"
 		const session = createPlannerSession(def, { dir, provider: spokenPlanProvider(spoken), model: 'fake', skillDirs: [SKILLS] })
 		for await (const _ of session.submit('Build a shop')) {
 			/* drain — planner writes NOTHING, just talks */

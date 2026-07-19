@@ -300,6 +300,8 @@ export function createSession(opts: SessionOptions): CascadeSession {
             // WATCHDOG (iterate-5): the summarize call gets the SAME recycle hook as the main model call —
             // an unguarded summarize was how a wedged backend killed whole rounds.
             recover: opts.provider.recover ? () => opts.provider.recover!(opts.model) : undefined,
+            // Self-heal visibility (iterate-7): summarize retries land in the trace like the loop's own.
+            onRetry: (info) => tracer.event({ t: 'error', message: `recover(compact summarize) attempt ${info.attempt}, wait ${info.delayMs}ms` }),
             // Coupled curation: harvest durable facts from the OLDER messages right before they're summarized away.
             onDiscard: autoMemory ? async (older) => void (await curate(older)) : undefined,
           },
