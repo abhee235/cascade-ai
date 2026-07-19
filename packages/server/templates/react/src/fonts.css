@@ -1,0 +1,20 @@
+/* Bundled variable fonts (OFL — see assets/fonts/LICENSE.txt). Local files: the template must render
+   identically offline and across OSes — system stacks would make the premium look mushy on Windows.
+   Weight axes are variable (wght 100–900 for Inter, 100–900 + optical sizing for Fraunces), so every
+   font-weight utility works from these two files. */
+
+@font-face {
+	font-family: 'Inter Variable';
+	font-style: normal;
+	font-weight: 100 900;
+	font-display: swap;
+	src: url('./assets/fonts/inter-var-latin.woff2') format('woff2-variations');
+}
+
+@font-face {
+	font-family: 'Fraunces Variable';
+	font-style: normal;
+	font-weight: 100 900;
+	font-display: swap;
+	src: url('./assets/fonts/fraunces-var-latin.woff2') format('woff2-variations');
+}

@@ -1,0 +1,5 @@
+Bundled starter photos — sourced from Unsplash (https://unsplash.com), used under the Unsplash License
+(free to use for commercial and noncommercial purposes; https://unsplash.com/license).
+
+These are generic starter images for generated app prototypes. Replace them with your own product
+photography for production use.

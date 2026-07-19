@@ -1,24 +1,50 @@
-import { useState } from 'react'
+// Starter showcase — replace this with your app (and delete src/demo/). It demonstrates the house
+// architecture: App is a small composition root; views switch via a discriminated union; the page is
+// assembled from blocks (src/components/blocks) + the ui kit, styled only with design tokens.
+
+import { useEffect, useState } from 'react'
+import { Moon, Sparkles, Sun } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
+import { NavBar } from '@/components/blocks/NavBar'
+import { GalleryKit } from '@/demo/GalleryKit'
+import { GalleryLanding } from '@/demo/GalleryLanding'
+
+type View = 'landing' | 'kit'
 
 export default function App() {
-  const [count, setCount] = useState(0)
-  return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background text-foreground">
-      <Card className="w-80">
-        <CardHeader>
-          <CardTitle>Your app starts here</CardTitle>
-          <CardDescription>
-            Edit <code className="rounded bg-muted px-1.5 py-0.5">src/App.tsx</code> and ask Cascade to build something.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex items-center gap-3">
-          <Button onClick={() => setCount((c) => c + 1)}>count is {count}</Button>
-          <Badge variant="secondary">shadcn/ui ready</Badge>
-        </CardContent>
-      </Card>
-    </main>
-  )
+	const [view, setView] = useState<View>('landing')
+	const [dark, setDark] = useState(() => localStorage.getItem('theme') === 'dark')
+
+	useEffect(() => {
+		document.documentElement.classList.toggle('dark', dark)
+		localStorage.setItem('theme', dark ? 'dark' : 'light')
+	}, [dark])
+
+	return (
+		<main className="min-h-screen bg-background text-foreground">
+			<NavBar
+				brand={
+					<>
+						<Sparkles className="size-4 text-primary" /> Meridian
+					</>
+				}
+				links={
+					<>
+						<button type="button" onClick={() => setView('landing')} className={`text-sm transition-colors ${view === 'landing' ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+							The look
+						</button>
+						<button type="button" onClick={() => setView('kit')} className={`text-sm transition-colors ${view === 'kit' ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+							The kit
+						</button>
+					</>
+				}
+				actions={
+					<Button variant="ghost" size="icon" aria-label="Toggle dark mode" onClick={() => setDark((d) => !d)}>
+						{dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+					</Button>
+				}
+			/>
+			{view === 'landing' ? <GalleryLanding /> : <GalleryKit />}
+		</main>
+	)
 }

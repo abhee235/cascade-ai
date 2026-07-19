@@ -11,9 +11,11 @@ whenToUse: ALWAYS load before the FIRST file write of any session, and again bef
 src/
   App.tsx               ← composition root ONLY: view switching + top-level state. Keep under 100 lines.
   components/ui/        ← the shadcn/ui kit (READ-ONLY — never edit or recreate these)
+  components/blocks/    ← the page-section blocks: NavBar, Hero, MediaCard… (READ-ONLY — compose via props)
   components/           ← YOUR components, one per file: Header.tsx, ProductCard.tsx, CartView.tsx…
-  lib/                  ← pure logic: types.ts, data.ts (seed data), utils helpers
+  lib/                  ← pure logic: types.ts, data.ts (seed data), photos.ts (bundled imagery)
   hooks/                ← custom hooks when state logic repeats (useCart.ts, useLocalStorage.ts)
+  demo/                 ← the starter showcase — DELETE this dir (and rewrite App.tsx) when building the real app
 ```
 
 **Hard rule: no file over ~150 lines.** When a file grows, extract a component. Small files keep your

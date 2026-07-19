@@ -4,6 +4,7 @@
 import { spawnSync } from 'node:child_process'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { runDesignLint } from '../_lib/designLint.mjs'
 
 const build = spawnSync(process.execPath, [join('node_modules', 'vite', 'bin', 'vite.js'), 'build'], { encoding: 'utf8', timeout: 180_000 })
 if (build.status !== 0) {
@@ -35,4 +36,6 @@ if (literalPrices < 4 && priceFields < 6) {
 	console.error(`built bundle shows ${literalPrices} literal prices and ${priceFields} price fields — the ≥6-product catalog looks missing/stubbed`)
 	process.exit(1)
 }
+// Design-system v2: objective design assertions (tokens-only colors, block assembly, real imagery).
+if (runDesignLint(bundle, { blocks: ['navbar', 'media-card', 'empty-state'] }) > 0) process.exit(1)
 console.log('builder-shop check passed')

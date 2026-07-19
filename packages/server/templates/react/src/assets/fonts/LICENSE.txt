@@ -1,0 +1,9 @@
+Bundled fonts — both licensed under the SIL Open Font License 1.1 (OFL):
+
+- Inter Variable (inter-var-latin.woff2) — Copyright 2020 The Inter Project Authors
+  https://github.com/rsms/inter
+- Fraunces Variable (fraunces-var-latin.woff2) — Copyright 2020 The Fraunces Project Authors
+  https://github.com/undercasetype/Fraunces
+
+Latin subsets obtained via Fontsource (https://fontsource.org). The OFL permits bundling,
+redistribution, and commercial use. Full license text: https://openfontlicense.org

@@ -1,47 +1,82 @@
 ---
 name: design
-description: How to build every piece of UI here: compose the installed shadcn/ui kit with the design tokens. Includes the generated per-component reference.
-whenToUse: Load when the task mentions ANY of: page, screen, button, card, modal, dialog, menu, input, list, grid, layout, style, color, theme, dark mode, icon, look and feel. If the task will render anything, load this first.
+description: The design system: theme presets, page blocks, the shadcn/ui kit, tokens, type, and imagery. How to make every screen look DESIGNED, not scaffolded. Includes generated references for the kit and the blocks.
+whenToUse: Load when the task mentions ANY of: page, screen, button, card, modal, dialog, menu, input, list, grid, layout, style, color, theme, preset, font, dark mode, icon, image, photo, hero, landing, polish, look and feel. If the task will render anything, load this first.
 ---
-# Design — this project uses shadcn/ui. Compose it; never hand-roll.
+# Design — this project HAS a design system. Compose it; never improvise styling.
 
-## The kit (already installed at `src/components/ui/` — import, don't recreate)
+## 1. The design system
 
-Button, Card(+Header/Title/Description/Content/Footer), Input, Label, Badge, Dialog, DropdownMenu,
-Select, Tabs, Table, Textarea, Checkbox, Switch, Separator, Skeleton, Tooltip.
+Tokens (colors, fonts, radius, shadows) live in `src/themes/<preset>.css`; the ACTIVE preset is the one
+`@import './themes/….css'` line in `src/index.css`. Components consume tokens via utilities
+(`bg-primary`, `text-muted-foreground`…). **Never edit token values, never write raw colors.**
 
-```tsx
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-```
+## 2. Theme presets
 
-**NEVER** write a raw `<button className="rounded bg-blue-600 …">` — that's `<Button>`. Never build a
-modal from divs — that's `<Dialog>`. Icons: `import { ShoppingCart } from 'lucide-react'`.
+Installed presets = the files in `src/themes/`. Pick by matching the USER'S adjectives; no match ⇒ keep
+`premium` (the default, already active — you change NOTHING for it).
 
-**Exact props, variants, and canonical usage for EVERY component** — generated from the kit's own
-source: load `Skill {name: "design", file: "reference/components.md"}` before composing anything
-non-trivial (Dialog, Select, Table, DropdownMenu especially).
+| preset | character — pick when the user says… |
+|---|---|
+| `premium` | DEFAULT. Refined, minimal, elegant, luxury, professional, SaaS, boutique |
 
-## Color = tokens only. Never invent colors.
+To apply a different preset: edit the ONE `@import './themes/….css'` line in `src/index.css`. That is
+the entire operation — colors, fonts, radius, and shadows all follow.
 
-Use ONLY token utilities: `bg-background text-foreground`, `bg-card`, `bg-primary
-text-primary-foreground`, `bg-muted text-muted-foreground`, `bg-secondary`, `text-destructive`,
-`border-border`. NO `bg-blue-600`, no hex, no arbitrary values. The palette stays consistent and dark
-mode works for free.
+## 3. Blocks — pages are BLOCK COMPOSITIONS
 
-**Dark mode**: toggle the `dark` class on `document.documentElement`; persist with localStorage.
-Because everything uses tokens, that one class restyles the whole app.
+`src/components/blocks/` (READ-ONLY, like the kit) are the page sections. Assemble pages from blocks
+FIRST, then fill their slots with the kit:
 
-## Layout rhythm
+- `NavBar` — every page's header (brand, links, actions). `Hero` — landing headline (split|centered|bleed).
+- `Section` — every content band (eyebrow/heading/muted tone). `PageHeader` — app-view headers.
+- `FeatureGrid` — icon+title cards. `MediaCard` — product/article/listing cards. `StatStrip` — big numbers.
+- `EmptyState` — REQUIRED for every list's empty case. `Footer` — landing pages end with one.
+- `ArtImage` — deterministic token-colored SVG art (see Imagery).
 
-- Page: `<main className="min-h-screen bg-background text-foreground">`, content in
-  `<div className="mx-auto max-w-5xl p-6">`.
-- Grids: `grid gap-4 sm:grid-cols-2 lg:grid-cols-3`. Stacks: `flex flex-col gap-4` (gap, not margins).
-- Type scale: page title `text-2xl font-bold tracking-tight`, section `text-lg font-semibold`,
-  secondary text `text-sm text-muted-foreground`. Nothing bigger than `text-3xl`.
+Load `Skill {name: "design", file: "reference/blocks.md"}` for exact props + the canonical page
+assembly. For kit components (Dialog, Select, Table…): `Skill {name: "design", file: "reference/components.md"}`.
 
-## Every list view needs its states
+## 4. Color discipline
 
-- **Empty**: a centered `text-muted-foreground` message + a CTA button — never a blank region.
-- **Feedback**: after an action, show it (badge count changes, a confirmation line, a disabled state).
-- Disabled buttons for invalid actions (`disabled={cart.length === 0}`) instead of error popups.
+Token utilities ONLY: `bg-background text-foreground`, `bg-card`, `bg-primary text-primary-foreground`,
+`bg-muted text-muted-foreground`, `bg-secondary`, `bg-accent`, `text-destructive`, `border-border`.
+NO `bg-blue-600`, no `bg-white`/`bg-black`, no hex, no arbitrary values. **One strong accent**: use
+`bg-primary` (default Button) for THE one main CTA per screenful; everything else stays quiet
+(`secondary`/`outline`/`ghost`). Charts and decorative variety: `chart-1..5` tokens only.
+
+## 5. Type & rhythm
+
+Display headlines (Hero, Section headings): `font-serif tracking-tight` — the serif is the personality;
+don't use it for body text. App views cap at `text-3xl`; only Hero goes `text-4xl/5xl`. Body = default
+sans. Muted small (`text-sm text-muted-foreground`) for meta/captions. Spacing: blocks encode the rhythm
+(Section = `py-16/20`, container `max-w-6xl px-6`) — don't fight it with custom margins; inside cards
+use `flex flex-col gap-*`, never margin stacks.
+
+## 6. Imagery — never an emoji, never a gray box
+
+- Real-world subjects (hero shots, lifestyle, journal cards): the bundled photo pack —
+  `import { photo, photoFor } from '@/lib/photos'`; `photo('nature-mountain')` or
+  `photoFor(seed, 'food')` (categories: food, product, workspace, nature, interior, people, texture).
+- Products without a matching photo, avatars, abstract covers: `<ArtImage seed={name} kind="product" />`
+  — same seed always renders the same token-colored art, in every preset and dark mode.
+- An emoji is never an image. An empty `bg-muted` box is never an image.
+
+## 7. Dark mode
+
+Toggle the `dark` class on `document.documentElement`; persist in localStorage. Every token, block, and
+ArtImage adapts automatically — if something looks wrong in dark, you used a raw color; fix the color.
+
+## 8. States & feedback
+
+Every list view needs: an EmptyState (`<EmptyState icon title description action/>` — always one useful
+CTA), feedback after actions (toast/inline text), and disabled buttons for invalid actions (not error
+popups after the click).
+
+## Design pass — run this checklist before calling any UI work done
+
+- [ ] Page assembled from blocks (NavBar + Hero/PageHeader + Sections + Footer where it's a landing)
+- [ ] Zero raw colors in your diff (no bg-white/black, no -500/-600 shades, no hex)
+- [ ] Every image is photo()/photoFor()/<ArtImage> — zero emoji-as-image
+- [ ] Exactly one bg-primary CTA per screenful; empty lists show <EmptyState>
+- [ ] Checked once in light AND dark mode before done

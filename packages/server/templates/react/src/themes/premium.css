@@ -1,0 +1,95 @@
+/* THEME PRESET: premium — refined warm neutrals, one deep-violet accent, editorial serif display.
+   Character: restrained, confident, expensive. Generous whitespace does the talking; color is spent
+   on exactly one accent. Fraunces (serif) owns display headlines; Inter owns everything else.
+
+   CONTRACT (every preset in src/themes/ defines this exact variable set, light AND dark):
+   color roles (shadcn) · font trio · radius · shadow color/opacity · display tracking.
+   To ACTIVATE a preset: edit the single `@import './themes/….css'` line in src/index.css.
+   Never edit token values inside components — compose with token utilities only. */
+
+:root {
+	--radius: 0.75rem;
+
+	/* Warm off-white paper, near-black warm ink. Hue 80 = a whisper of warmth in every neutral. */
+	--background: oklch(0.985 0.002 80);
+	--foreground: oklch(0.17 0.012 80);
+	--card: oklch(1 0 0);
+	--card-foreground: oklch(0.17 0.012 80);
+	--popover: oklch(1 0 0);
+	--popover-foreground: oklch(0.17 0.012 80);
+
+	/* THE accent — deep violet. Spent on one primary CTA per screenful, the ring, and little else. */
+	--primary: oklch(0.48 0.19 292);
+	--primary-foreground: oklch(0.98 0.01 292);
+
+	--secondary: oklch(0.955 0.004 80);
+	--secondary-foreground: oklch(0.25 0.02 80);
+	--muted: oklch(0.955 0.004 80);
+	--muted-foreground: oklch(0.48 0.02 80);
+
+	/* Accent = a violet-tinted wash for hovers/selection surfaces (not the CTA color). */
+	--accent: oklch(0.94 0.035 292);
+	--accent-foreground: oklch(0.35 0.15 292);
+
+	--destructive: oklch(0.577 0.245 27.325);
+	--destructive-foreground: oklch(0.985 0 0);
+
+	--border: oklch(0.915 0.006 80);
+	--input: oklch(0.915 0.006 80);
+	--ring: oklch(0.6 0.15 292);
+
+	/* Charts: violet-led, then teal / honey / clay / slate — harmonious, not rainbow. */
+	--chart-1: oklch(0.55 0.18 292);
+	--chart-2: oklch(0.65 0.12 190);
+	--chart-3: oklch(0.75 0.14 85);
+	--chart-4: oklch(0.6 0.16 20);
+	--chart-5: oklch(0.5 0.08 250);
+
+	--font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+	--font-serif: 'Fraunces Variable', Georgia, serif;
+	--font-mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
+
+	/* Whisper-quiet violet-tinted shadows (composed into shadow-sm..xl in index.css). */
+	--shadow-color: oklch(0.3 0.08 292);
+	--shadow-opacity: 0.08;
+
+	--tracking-display: -0.02em;
+}
+
+.dark {
+	/* Violet-tinted near-black, not flat gray — the accent hue carries into the dark surfaces. */
+	--background: oklch(0.155 0.015 292);
+	--foreground: oklch(0.96 0.005 80);
+	--card: oklch(0.2 0.018 292);
+	--card-foreground: oklch(0.96 0.005 80);
+	--popover: oklch(0.2 0.018 292);
+	--popover-foreground: oklch(0.96 0.005 80);
+
+	--primary: oklch(0.72 0.16 292);
+	--primary-foreground: oklch(0.17 0.03 292);
+
+	--secondary: oklch(0.26 0.02 292);
+	--secondary-foreground: oklch(0.96 0.005 80);
+	--muted: oklch(0.26 0.02 292);
+	--muted-foreground: oklch(0.72 0.015 80);
+
+	--accent: oklch(0.3 0.05 292);
+	--accent-foreground: oklch(0.85 0.08 292);
+
+	--destructive: oklch(0.704 0.191 22.216);
+	--destructive-foreground: oklch(0.985 0 0);
+
+	--border: oklch(1 0 0 / 10%);
+	--input: oklch(1 0 0 / 15%);
+	--ring: oklch(0.65 0.14 292);
+
+	--chart-1: oklch(0.68 0.16 292);
+	--chart-2: oklch(0.7 0.12 190);
+	--chart-3: oklch(0.8 0.13 85);
+	--chart-4: oklch(0.68 0.14 20);
+	--chart-5: oklch(0.62 0.08 250);
+
+	/* Shadows read differently on dark — deeper, still quiet. */
+	--shadow-color: oklch(0 0 0);
+	--shadow-opacity: 0.35;
+}

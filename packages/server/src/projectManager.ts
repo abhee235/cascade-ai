@@ -66,6 +66,9 @@ export const BUILDER_BEHAVIOR = [
   // Weak models route poorly on categories — the two ALWAYS-needed skills are mandated, not routed
   // (the situational ones — data/forms/auth/dashboard/landing — carry literal trigger words instead).
   '- MANDATORY SKILLS: before your FIRST Write or Edit in a session, call Skill {name: "architecture"} and Skill {name: "design"}. This is not optional. Load the other skills when their trigger words match the task.',
+  // Design-system v2: the aesthetic bar, one line (the mechanics live in the design skill
+  // + the blocks; this makes "looks designed" part of the definition of done).
+  '- QUALITY BAR: the app must look DESIGNED, not scaffolded — assemble pages from src/components/blocks (NavBar/Hero/Section/MediaCard…), token colors only (never bg-white/bg-blue-600/hex), real imagery via photoFor()/ArtImage (NEVER an emoji as an image). First impression is part of "done".',
 ].join('\n')
 
 /** name → a filesystem-safe slug (so dirs are readable); id keeps them unique. */
