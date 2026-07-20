@@ -18,14 +18,25 @@ Smoke:
 - [ ] 4. Fix what you saw; build; re-check the one thing you fixed
 ```
 
-## Judging a screenshot — the checklist
+## Judging a screenshot — write a verdict for EVERY line
 
-- Composed from blocks? (real NavBar/hero/cards — not unstyled text)
-- Token colors only — no raw white/black boxes, no default-blue links
-- Real imagery (photos/ArtImage) — no broken-image icons, no empty gray boxes
-- One primary CTA per screen; empty states show a designed EmptyState, not blank space
-- Name problems CONCRETELY ("the cards repeat the same photo", "the badge styles are inconsistent")
-  and fix them — a vague "looks good" wastes the screenshot.
+"Looks good / looks clean / looks great" is NOT a verdict — it is how you MISS things. For each item
+below, write one concrete sentence naming what you actually see. If you can't point to specific pixels,
+you didn't look. A screenshot with zero problems named is a screenshot you wasted.
+
+- **Imagery — the #1 miss.** COUNT the distinct images. Do any repeat across different cards/items? Does
+  each image actually MATCH its label (a "Ratatouille" card must not show a noodle bowl)? Repeated or
+  mismatched photos are a bug even when each image loads fine — fix the data/`photoFor` mapping so every
+  item gets a distinct, on-topic image. (No broken-icon ≠ good imagery.)
+- **Consistency across states.** Put the variants side by side: do all the difficulty/status BADGES share
+  one style (all solid, or all outline — not "Medium" solid-purple next to "Hard" white-outline)? Do all
+  cards share one height, radius, shadow? Drift between siblings is the tell.
+- **Composed from blocks** — real NavBar/hero/cards, not unstyled text or hand-rolled boxes.
+- **Token colors only** — no raw white/black boxes, no default-blue links.
+- **One primary CTA** per screen; empty states show a designed EmptyState, not blank space.
+- **Spacing & alignment** — consistent gaps, nothing clipped, cramped, or overflowing.
+
+After writing the verdicts, FIX every problem you named, then re-check the one you fixed.
 
 ## Rules
 
