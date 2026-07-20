@@ -67,6 +67,9 @@ export interface ToolResult {
   isError?: boolean
   /** M2: a generic UI rendering hint (e.g. a file-edit diff) — passed through to the frontend, not the model. */
   display?: import('../protocol').ToolDisplay
+  /** ADR-060: data-URI images the MODEL should SEE (vision). The loop attaches them as image blocks on the
+   *  tool_results user message — tool_result content itself is text-only on every provider wire. */
+  images?: string[]
 }
 
 export interface Tool<I = unknown> {

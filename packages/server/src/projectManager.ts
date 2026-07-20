@@ -14,6 +14,8 @@ import { createProvider, createSession, JsonlTracer, type AgentDef, type Cascade
 import type { ProjectInfo } from '@cascade/app-protocol'
 import { applyTemplate, readAiRules } from './templates.js'
 import { createPlannerSession, needsPlanStage } from './planStage.js'
+import { createBrowserTool } from './browserTool.js'
+import { hasVision } from './modelCaps.js'
 
 /** Initialize a git repo in `dir` with one commit — the baseline for checkpoints (Phase 18). Best-effort. */
 function gitInit(dir: string): void {
@@ -90,9 +92,18 @@ export class ProjectManager {
   private readonly createSessionFor: (dir: string, sandbox?: Sandbox, extraInstructions?: string) => CascadeSession
   private readonly metaFile: string
 
+  /** ADR-060: does the configured model report `vision`? Resolved once in the background at construction —
+   *  session factories are sync, and the answer is stable for a server's lifetime. Until it resolves the
+   *  flag is false, so a session created in the first second simply doesn't get the Browser tool (inert
+   *  default; the next session will). */
+  private visionOk = false
+
   constructor(private readonly opts: ProjectManagerOptions) {
     mkdirSync(opts.root, { recursive: true })
     this.metaFile = join(opts.root, 'projects.json')
+    void hasVision(opts.model, opts.baseUrl).then((v) => {
+      this.visionOk = v
+    })
     this.createSessionFor =
       opts.createSessionFor ??
       ((dir, sandbox, extraInstructions) =>
@@ -135,6 +146,13 @@ export class ProjectManager {
           // contract is ALWAYS in context (measured: the builder read it 0 times when only on disk), and
           // survives compaction across iterate rounds (the whole reason a durable plan exists).
           contextFiles: [join(dir, 'PLAN.md')],
+          // ADR-060: the Browser tool — the agent LOOKS at the app it built (a11y snapshots + vision
+          // screenshots). Gated on the model reporting `vision` AND a Docker sandbox (the tool resolves
+          // the preview port from it); absent either, the tool is never advertised.
+          extraTools:
+            this.visionOk && sandbox && 'getHostPort' in sandbox
+              ? [createBrowserTool({ sandbox: sandbox as import('./dockerSandbox.js').DockerSandbox })]
+              : undefined,
         }))
     this.load()
   }

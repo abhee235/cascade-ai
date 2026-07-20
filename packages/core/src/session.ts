@@ -40,6 +40,10 @@ export interface SessionOptions {
    *  top-level session, e.g. the server's plan stage). Absent ⇒ full registry. Generic mechanism: core
    *  doesn't know WHY a caller narrows the set. */
   tools?: string[]
+  /** ADR-060: caller-provided EXTRA tools joined into the registry (e.g. the server's vision-gated Browser
+   *  tool, which needs Playwright + the preview URL — capabilities core can't own). Subject to the same
+   *  `tools` grant scoping as everything else. */
+  extraTools?: import('./tools/Tool').Tool[]
   /** Optional forensic trace sink (ADR-023). Omit ⇒ NoopTracer (no output). */
   tracer?: Tracer
   /** MCP servers to register (Phase 9). Connected in the BACKGROUND at startup (ADR-014). */
@@ -183,7 +187,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
   const skillTool = skills.length > 0 ? createSkillTool(skills) : undefined
   // ADR-056: named agents — personas the Subagent tool can spawn ({agent: "planner"}).
   const agentDefs = opts.agentDirs?.length ? loadAgentDefs(opts.agentDirs) : []
-  const fullRegistry = createRegistry(() => [...(hub?.readyTools() ?? []), ...(skillTool ? [skillTool] : [])])
+  const fullRegistry = createRegistry(() => [...(hub?.readyTools() ?? []), ...(skillTool ? [skillTool] : []), ...(opts.extraTools ?? [])])
   // Session-level allowlist (same mechanism the Subagent path applies from AgentDef.tools): a persona run
   // as its own top-level session gets its declared tools and nothing else — and grants may be arg-scoped
   // (`Write(PLAN.md)`), so a planner literally cannot write code (ADR-056 rung 4).

@@ -394,7 +394,13 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     // Run the tools via the scheduler: read-only ones in parallel, writes serial (ADR-008). It yields
     // the toolStart/toolResult activity and returns the tool_result blocks in original order.
     const results = yield* scheduleTools(toolUses, ctx)
-    messages.push({ role: 'user', content: results }) // tool_results become the next turn's input
+    // ADR-060: a tool that captured images for the MODEL (Browser screenshot) rides them on its result;
+    // lift them into image blocks on the same user message — that's the only shape vision wires accept.
+    const toolImages = results.flatMap((r) => (r.type === 'tool_result' && r.images ? r.images : []))
+    messages.push({
+      role: 'user',
+      content: toolImages.length ? [...results, ...toolImages.map((url): ContentBlock => ({ type: 'image', url }))] : results,
+    }) // tool_results become the next turn's input
     editedSinceVerify = foldVerifyState(editedSinceVerify, toolUses, results, deps.check?.command) // ADR-049 gate state
 
     // Todo-gate re-arm state: ANY tool attempt (even a failed one) re-arms — measured (Simmer 128k submit 3):

@@ -55,5 +55,6 @@ export { loadSkills } from './skills/skills'
 export type { Skill } from './skills/skills'
 // Argument-scoped tool grants (ADR-056 rung 4): the generic capability wall behind `Write(PLAN.md)`.
 export { scopeToolsByGrants } from './tools/toolGrants'
+export type { Tool, ToolResult, ToolContext } from './tools/Tool' // ADR-060: server-authored extra tools (Browser)
 export { loadAgentDefs, agentChildInstructions } from './agent/agentDefs'
 export type { AgentDef } from './agent/agentDefs'

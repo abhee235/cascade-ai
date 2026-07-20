@@ -24,7 +24,7 @@ export type ContentBlock =
   | { type: 'thinking'; thinking: string }
   | { type: 'image'; url: string } // a data URI (data:image/png;base64,…) attached to a user turn (M11)
   | { type: 'tool_use'; id: string; name: string; input: unknown }
-  | { type: 'tool_result'; tool_use_id: string; content: string; isError?: boolean; display?: ToolDisplay }
+  | { type: 'tool_result'; tool_use_id: string; content: string; isError?: boolean; display?: ToolDisplay; images?: string[] } // images (ADR-060): data URIs the loop lifts onto the results message for vision
 
 export type Message =
   | { role: 'user'; content: string | ContentBlock[] }
