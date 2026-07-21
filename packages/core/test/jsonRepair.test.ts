@@ -6,7 +6,7 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import { tmpdir } from 'node:os'
 import { RAW_ARGS_KEY, parseToolArgs } from '../src/llm/jsonRepair'
-import { OpenAICompatProvider } from '../src/llm/providers/openaiCompat'
+import { OllamaProvider } from '../src/llm/providers/ollama'
 import { executeTool } from '../src/tools/runTool'
 import type { ToolContext } from '../src/tools/Tool'
 
@@ -82,7 +82,7 @@ describe('the /v1 wire path repairs almost-JSON args end-to-end', () => {
 			'data: [DONE]',
 		].join('\n\n')
 		vi.stubGlobal('fetch', vi.fn(async () => new Response(`${sse}\n\n`, { status: 200 })))
-		const p = new OpenAICompatProvider({ id: 'ollama', baseUrl: 'http://x' })
+		const p = new OllamaProvider({ id: 'ollama', baseUrl: 'http://x' })
 		const events: unknown[] = []
 		for await (const ev of p.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm' })) events.push(ev)
 		const tu = events.find((e) => (e as { type: string }).type === 'tool_use') as { input: unknown }

@@ -323,6 +323,75 @@ describe('watchdog — stall detection', () => {
 		expect(call).toBe(4)
 	})
 
+	it('SLOW PREFILL (ADR-061): pre-first-token silence with a LIVE backend is waited out, not killed', async () => {
+		// Measured: a 65k-token cold prefill takes ~3 min on the CPU-offloaded 36B; the watchdog fired at
+		// stallTimeoutMs, aborted the prefill at the finish line, recycled away the KV it was building, and
+		// looped a one-time 3-minute cost into 10+ minutes of churn (4 recover() events in one live trace).
+		let aliveCalls = 0
+		const make = (): AsyncIterable<StreamEvent> => ({
+			async *[Symbol.asyncIterator]() {
+				await new Promise((r) => setTimeout(r, 130)) // "prefill": ~3 stall windows of silence
+				yield text('first token after a long prefill')
+				yield done()
+			},
+		})
+		const events = await collect(streamWithRecovery(make, { stallTimeoutMs: 50, alive: async () => (aliveCalls++, true), sleep: async () => {}, baseDelayMs: 1 }))
+		expect(events.some((e) => e.type === 'retry')).toBe(false) // the prefill was NEVER killed
+		expect(events.some((e) => e.type === 'slow_prefill')).toBe(true) // and the wait was made visible
+		expect(events.some((e) => e.type === 'text_delta' && e.text.includes('first token'))).toBe(true)
+		expect(aliveCalls).toBeGreaterThanOrEqual(1)
+	})
+
+	it('SLOW PREFILL: a DEAD backend (alive=false) still stalls and retries as before', async () => {
+		let attempt = 0
+		const make = (): AsyncIterable<StreamEvent> => ({
+			async *[Symbol.asyncIterator]() {
+				attempt++
+				if (attempt === 1) await new Promise(() => {}) // hangs forever — and the backend is dead
+				yield text('recovered')
+				yield done()
+			},
+		})
+		const events = await collect(streamWithRecovery(make, { stallTimeoutMs: 50, alive: async () => false, sleep: async () => {}, baseDelayMs: 1 }))
+		expect(attempt).toBe(2)
+		expect(events.some((e) => e.type === 'retry')).toBe(true)
+		expect(events.some((e) => e.type === 'text_delta' && e.text === 'recovered')).toBe(true)
+	})
+
+	it('SLOW PREFILL: firstEventMaxMs caps the patience even with a live backend', async () => {
+		let attempt = 0
+		const make = (): AsyncIterable<StreamEvent> => ({
+			async *[Symbol.asyncIterator]() {
+				attempt++
+				if (attempt === 1) await new Promise(() => {}) // never produces a token
+				yield text('second attempt answers')
+				yield done()
+			},
+		})
+		const events = await collect(
+			streamWithRecovery(make, { stallTimeoutMs: 40, firstEventMaxMs: 150, alive: async () => true, sleep: async () => {}, baseDelayMs: 1 }),
+		)
+		expect(attempt).toBe(2) // patience ran out at the cap → normal stall/retry path took over
+		expect(events.some((e) => e.type === 'text_delta' && e.text.includes('second attempt'))).toBe(true)
+	})
+
+	it('SLOW PREFILL: a MID-STREAM stall is never extended, even with a live backend', async () => {
+		let attempt = 0
+		const make = (): AsyncIterable<StreamEvent> => ({
+			async *[Symbol.asyncIterator]() {
+				attempt++
+				yield text('started…')
+				if (attempt === 1) await new Promise(() => {}) // generation stops mid-stream = the crash case
+				yield text('finished')
+				yield done()
+			},
+		})
+		const events = await collect(streamWithRecovery(make, { stallTimeoutMs: 50, alive: async () => true, sleep: async () => {}, baseDelayMs: 1 }))
+		expect(attempt).toBe(2) // stalled + retried despite alive() — mid-stream semantics unchanged
+		expect(events.some((e) => e.type === 'retry')).toBe(true)
+		expect(events.some((e) => e.type === 'text_delta' && e.text === 'finished')).toBe(true)
+	})
+
 	it('abort during backoff resolves promptly instead of waiting out the delay', async () => {
 		const ctl = new AbortController()
 		let attempt = 0

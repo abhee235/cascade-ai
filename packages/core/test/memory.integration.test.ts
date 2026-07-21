@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { runAgentLoop } from '../src/agent/agentLoop'
 import { createSession } from '../src/session'
 import { createArchival, type Embed } from '../src/memory/archival'
-import { OpenAICompatProvider } from '../src/llm/providers/openaiCompat'
+import { OllamaProvider } from '../src/llm/providers/ollama'
 import { createFakeProvider, textDelta, toolUse, done } from './fakeProvider'
 import type { ActivityEvent, Message } from '../src/protocol'
 
@@ -99,7 +99,7 @@ live('memory — LIVE Ollama embeddings', () => {
   it('embeds real text and semantically ranks the right fact first', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'cascade-live-'))
     try {
-      const provider = new OpenAICompatProvider({ id: 'ollama', baseUrl: 'http://127.0.0.1:11434' })
+      const provider = new OllamaProvider({ id: 'ollama', baseUrl: 'http://127.0.0.1:11434' })
       const model = process.env.CASCADE_EMBED_MODEL || 'nomic-embed-text'
       const archival = createArchival({ cwd: dir, embed: (texts) => provider.embed!(texts, model) })
 

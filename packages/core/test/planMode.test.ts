@@ -93,4 +93,38 @@ describe('Plan mode flow — enter → writes blocked → exit → approve → u
     expect(trOf(t.messages, 'x')?.content).toMatch(/APPROVED/)
     rmSync(t.cwd, { recursive: true, force: true })
   })
+
+  // Regression (builder-graduate on gpt-5.6-luna hung here): a SYNCHRONOUS responder + the SESSION's
+  // register-on-request ask semantics deadlocked ExitPlanMode. The scheduler yielded the `question` BEFORE
+  // ctx.ask.request() registered the resolver, so an answer delivered synchronously (the headless eval's
+  // auto-responder) was dropped, and the later request() awaited forever. The mock ask in the tests above
+  // hid it (pre-created promise, resolver captured up front). This uses the real register-on-request shape.
+  it('a SYNCHRONOUS responder does not deadlock ExitPlanMode (register-on-request ask)', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'plan-'))
+    const state: PermissionState = { mode: 'bypass', allow: new Set(), deny: new Set() }
+    const permission: PermissionController = { state, request: () => new Promise(() => {}) }
+    // The session's ask: the resolver is registered INSIDE request() (not before) — the shape that races.
+    const pending = new Map<string, (a: Answers) => void>()
+    const ask: AskController = { request: (id: string) => new Promise<Answers>((res) => pending.set(id, res)) }
+    const respond = (id: string, a: Answers) => {
+      const r = pending.get(id)
+      if (r) {
+        pending.delete(id)
+        r(a)
+      }
+    }
+    const provider = createFakeProvider([
+      [toolUse('x', 'ExitPlanMode', { plan: '1. do the thing' }), done('tool_use')],
+      [textDelta('done'), done('end_turn')],
+    ])
+    const messages: Message[] = [{ role: 'user', content: 'plan it' }]
+    const drive = (async () => {
+      for await (const ev of runAgentLoop(messages, { provider, model: 'fake', cwd, signal: new AbortController().signal, permission, ask, maxTurns: 8 })) {
+        if (ev.type === 'question') respond(ev.id, { [ev.questions[0].question]: 'Approve' }) // answer IMMEDIATELY
+      }
+    })()
+    await Promise.race([drive, new Promise((_, rej) => setTimeout(() => rej(new Error('DEADLOCK: ExitPlanMode never resolved')), 3000))])
+    expect(trOf(messages, 'x')?.content).toMatch(/APPROVED/) // the round-trip completed instead of hanging
+    rmSync(cwd, { recursive: true, force: true })
+  })
 })

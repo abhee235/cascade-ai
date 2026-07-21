@@ -59,6 +59,7 @@ export type StreamEvent =
   | { type: 'thinking_delta'; thinking: string } // a chunk of reasoning (e.g. Ollama delta.reasoning)
   | { type: 'tool_use'; id: string; name: string; input: unknown; repaired?: boolean } // a COMPLETE tool call; repaired = the args needed the item-4a JSON ladder (traced for measurement)
   | { type: 'retry'; attempt: number; delayMs: number; reason: string } // synthetic: streamWithRecovery is retrying (resets partial output)
+  | { type: 'slow_prefill'; waitedMs: number } // synthetic (ADR-061): pre-first-token silence, backend verified alive — a big cold prefill is cooking; keep waiting
   | { type: 'done'; stopReason: 'end_turn' | 'max_tokens' | 'tool_use'; usage?: TokenUsage } // usage: E1/ADR-040
 
 export interface ModelProvider {
@@ -80,4 +81,8 @@ export interface ModelProvider {
    *  often answers again but DEGRADED (empty replies) until the model is unloaded and freshly loaded
    *  (measured across six live Ollama crashes). Ollama: keep_alive:0 unload; hosted providers: omit. */
   recover?(model: string): Promise<void>
+  /** ADR-061: cheap liveness probe — is the backend PROCESS answering at all (not: is my request making
+   *  progress)? Used by the stall watchdog to tell "busy with a huge cold prefill" from "dead": Ollama's
+   *  /api/tags answers even while a generation runs. Must be fast and never throw (return false). */
+  alive?(signal?: AbortSignal): Promise<boolean>
 }

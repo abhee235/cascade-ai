@@ -116,12 +116,19 @@ export async function* scheduleTools(
       //    channel exists — otherwise fall through and the tool returns its no-channel error (headless). ──
       if (tool?.requiresUserInteraction?.() && ctx.ask) {
         const questions = tool.toQuestions?.(tu.input as never) ?? []
+        // RACE FIX (measured, builder-graduate on gpt-5.6-luna hung on ExitPlanMode): register the answer
+        // resolver BEFORE yielding the question. ctx.ask.request() runs its Promise executor synchronously
+        // (pendingAnswers.set), so calling it first means a consumer that answers SYNCHRONOUSLY on receiving
+        // the `question` event (the headless eval's auto-responder) finds the resolver already there. Yield
+        // then await the SAME promise. (Yielding first, then requesting, dropped the answer → hang forever —
+        // the web UI never hit it because a human answers async, after request() had registered.)
+        const answered = ctx.ask.request(tu.id)
         // FORENSICS: question-path tools were invisible in traces (measured: the Simmer routing question
         // never appeared) — record the call like any other tool before parking on the user.
         tracer.event({ t: 'tool_call', id: tu.id, name: tu.name, input: tu.input })
         yield { type: 'toolStart', id: tu.id, name: tu.name, summary: summary(tu, registry) }
         yield { type: 'question', id: tu.id, questions }
-        const answers = await ctx.ask.request(tu.id) // ← BLOCKS until respondQuestion(tu.id, answers)
+        const answers = await answered // ← BLOCKS until respondQuestion(tu.id, answers)
         const result = tool.applyAnswers ? await tool.applyAnswers(tu.input as never, answers, ctx) : { content: formatAnswers(answers) }
         byId.set(tu.id, { type: 'tool_result', tool_use_id: tu.id, content: result.content, isError: result.isError })
         tracer.event({ t: 'tool_result', id: tu.id, name: tu.name, ok: !result.isError, ms: 0, content: result.content })

@@ -274,6 +274,9 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
       ...deps.recovery,
       signal: deps.signal,
       recover: recycle, // WATCHDOG: recycle a degraded backend
+      // ADR-061: lets the watchdog tell "busy with a huge cold prefill" from "dead" before the first token —
+      // without it, every big-context first turn was killed at stallTimeoutMs and recycled into a churn loop.
+      alive: deps.provider.alive ? () => deps.provider.alive!() : undefined,
       onOverflow: deps.compact
         ? async () => {
             // Reactive overflow: force compaction regardless of the threshold (ADR-039 `force`) — the model just
@@ -296,6 +299,11 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
         usage = undefined
         toolUses.length = 0
         yield { type: 'recovering', attempt: ev.attempt, reason: ev.reason, delayMs: ev.delayMs }
+      } else if (ev.type === 'slow_prefill') {
+        // ADR-061: the backend is alive and still prefilling a big prompt — tell the user the truth
+        // instead of looking dead (and record it: slow turns must be attributable in the trace).
+        tracer.event({ t: 'slow_prefill', turn, waitedMs: ev.waitedMs })
+        yield { type: 'status', text: `Large prompt — the model is still reading it (${Math.round(ev.waitedMs / 1000)}s)…` }
       } else if (ev.type === 'thinking_delta') {
         thinking += ev.thinking
         yield { type: 'thinking_delta', thinking: ev.thinking }

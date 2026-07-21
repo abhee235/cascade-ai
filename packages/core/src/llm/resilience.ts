@@ -56,6 +56,14 @@ export interface RecoveryOptions {
    *  that is open but silent — measured live: an abort went unanswered ~27 min past a run's budget).
    *  Default 180_000; 0 disables. */
   stallTimeoutMs?: number
+  /** ADR-061 SLOW-PREFILL PROBE: when the stall timer fires BEFORE the first event of an attempt, silence
+   *  usually means a big cold prefill (measured: ~3 min at 65k tokens on a CPU-offloaded 36B), not a dead
+   *  backend. If set, it is asked instead of guessing: true = backend up and busy → keep waiting (capped by
+   *  firstEventMaxMs, a `slow_prefill` event is yielded for UI/trace); false = stall as before. Mid-stream
+   *  stalls are NEVER extended — a generation that stops IS the crashed-backend case. Absent ⇒ old behavior. */
+  alive?: () => Promise<boolean>
+  /** Hard cap on the total pre-first-event wait while alive() keeps saying yes (default 600_000). */
+  firstEventMaxMs?: number
 }
 
 /** A mid-stream stall promoted to an error (classified transient → retried, with recycle). */
@@ -79,10 +87,13 @@ function backoff(attempt: number, base: number, max: number): number {
   return d + Math.random() * 0.25 * d // jitter de-synchronizes retries (no thundering herd)
 }
 
-/** Race an iterator's next() against a stall timer. SLEEP-AWARE: on the user's box the OS sleeps at 60min —
- *  a timer that fires GROSSLY late (≫ armed delay) means the machine slept, not that the backend stalled;
- *  re-arm once instead of erroring (the backend was asleep too and deserves a fresh chance). */
-async function nextWithStallGuard<T>(it: AsyncIterator<T>, stallMs: number): Promise<IteratorResult<T>> {
+/** Race an EXISTING pull promise against a stall timer. SLEEP-AWARE: on the user's box the OS sleeps at
+ *  60min — a timer that fires GROSSLY late (≫ armed delay) means the machine slept, not that the backend
+ *  stalled; re-arm once instead of erroring (the backend was asleep too and deserves a fresh chance).
+ *  Takes the PROMISE (not the iterator) so the caller can keep it across 'stall' verdicts — abandoning a
+ *  pull and calling next() again would queue a second pull and silently EAT the event the first resolves
+ *  with (async generators serialize next() calls). */
+async function raceStall<T>(pending: Promise<IteratorResult<T>>, stallMs: number): Promise<IteratorResult<T> | 'stall'> {
   for (let rearm = 0; ; rearm++) {
     const armedAt = Date.now()
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -90,11 +101,11 @@ async function nextWithStallGuard<T>(it: AsyncIterator<T>, stallMs: number): Pro
       timer = setTimeout(() => r('stall'), stallMs)
     })
     try {
-      const winner = await Promise.race([it.next().then((r) => ({ r })), stall])
+      const winner = await Promise.race([pending.then((r) => ({ r })), stall])
       if (winner !== 'stall') return winner.r
       const late = Date.now() - armedAt - stallMs
       if (late > stallMs && rearm === 0) continue // fired way past its slot ⇒ system slept; one fresh chance
-      throw new StallError(stallMs)
+      return 'stall'
     } finally {
       clearTimeout(timer)
     }
@@ -186,9 +197,39 @@ export async function* streamWithRecovery(make: () => AsyncIterable<StreamEvent>
       if (stallMs > 0) {
         // Pull manually so every await between events is stall-guarded.
         const it = make()[Symbol.asyncIterator]()
+        const firstEventMax = opts.firstEventMaxMs ?? 600_000
+        const attemptStart = Date.now()
+        let gotFirst = false
+        // The pull promise SURVIVES stall verdicts (see raceStall): on an alive-extension we keep waiting
+        // on the same next(), so the event it eventually resolves with is never lost.
+        let pending: Promise<IteratorResult<StreamEvent>> | null = null
         while (true) {
-          const r = await nextWithStallGuard(it, stallMs)
+          pending ??= it.next()
+          const r = await raceStall(pending, stallMs)
+          if (r === 'stall') {
+            // ADR-061 SLOW-PREFILL: before the FIRST event, silence usually means a big cold prefill
+            // (measured: ~3 min at 65k tokens on a CPU-offloaded 36B) — the old behavior killed the
+            // prefill at the finish line, recycled away the KV it had built, and looped a one-time
+            // 3-minute cost into 10+ minutes of churn. Ask the backend instead of guessing: alive →
+            // keep waiting (capped); dead/unknown → stall as before. Mid-stream is NEVER extended —
+            // a generation that stops IS the crashed-backend case this watchdog exists for.
+            if (!gotFirst && opts.alive && Date.now() - attemptStart < firstEventMax) {
+              let up = false
+              try {
+                up = await opts.alive()
+              } catch {
+                /* unreachable backend = not alive */
+              }
+              if (up) {
+                yield { type: 'slow_prefill', waitedMs: Date.now() - attemptStart }
+                continue // pending preserved — the prefill keeps cooking
+              }
+            }
+            throw new StallError(stallMs)
+          }
+          pending = null
           if (r.done) return
+          gotFirst = true
           yield r.value
         }
       }

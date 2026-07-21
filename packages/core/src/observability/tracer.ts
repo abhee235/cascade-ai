@@ -28,6 +28,7 @@ export type TraceEvent =
   | { t: 'read_loop'; turn: number; path: string } // ADR-058: same file read N times with no Write/Edit to it — act-now reminder injected
   | { t: 'stalled_verify'; turn: number } // ADR-058: edits pending unverified for N consecutive turns mid-flight — run-the-check reminder injected
   | { t: 'post_edit_check'; turn: number; files: number } // ADR-059: harness type check after a mutating turn found errors — pushed to the model
+  | { t: 'slow_prefill'; turn: number; waitedMs: number } // ADR-061: pre-first-token silence with a LIVE backend — a big cold prefill, waited out instead of killed
   | { t: 'hook'; event: string; id: string; tool: string; decision: string; ms: number } // ADR-036: a project hook decided (allow|deny|ask) for a tool call
   | { t: 'turn_done'; turns: number }
   | { t: 'error'; message: string }

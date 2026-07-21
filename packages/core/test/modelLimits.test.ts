@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseOllamaLimits } from '../src/llm/providers/openaiCompat'
+import { parseOllamaLimits } from '../src/llm/providers/ollama'
 
 describe('parseOllamaLimits — read the ALLOCATED window from /api/show parameters (ADR-038)', () => {
   it('extracts num_ctx (the Modelfile pin) — the coding-qwen36 128k case', () => {

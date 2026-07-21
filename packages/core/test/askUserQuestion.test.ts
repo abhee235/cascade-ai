@@ -30,12 +30,14 @@ describe('AskUserQuestion — the loop parks on a `question` event and resumes w
     let resolveAnswer!: (a: Answers) => void
     const answer = new Promise<Answers>((r) => (resolveAnswer = r))
     let requestedId: string | undefined
-    let resolvedBeforeQuestion = false
+    let requestedBeforeQuestion = false
     let sawQuestion = false
     const ask: AskController = {
       request: (id) => {
         requestedId = id
-        if (!sawQuestion) resolvedBeforeQuestion = true // request must come AFTER the event is yielded
+        // RACE FIX (scheduler): request() must run BEFORE the question is yielded, so the resolver is
+        // registered when a consumer answers synchronously on the event (else the answer is dropped → hang).
+        if (!sawQuestion) requestedBeforeQuestion = true
         return answer
       },
     }
@@ -53,7 +55,7 @@ describe('AskUserQuestion — the loop parks on a `question` event and resumes w
 
     expect(sawQuestion).toBe(true)
     expect(requestedId).toBe('q1') // scheduler awaited ctx.ask.request with the tool-use id
-    expect(resolvedBeforeQuestion).toBe(false) // it parked on request AFTER emitting the event
+    expect(requestedBeforeQuestion).toBe(true) // resolver registered BEFORE the event (closes the sync-answer race)
     // The answer became the tool_result the model saw next turn:
     const toolResult = messages.flatMap((m) => (Array.isArray(m.content) ? m.content : [])).find((b) => b.type === 'tool_result' && b.tool_use_id === 'q1')
     expect((toolResult as any)?.content).toMatch(/Postgres/)

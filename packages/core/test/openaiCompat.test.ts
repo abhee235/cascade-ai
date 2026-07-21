@@ -1,5 +1,7 @@
-import { describe, it, expect } from 'vitest'
-import { toOpenAIMessages } from '../src/llm/providers/openaiCompat'
+import { afterEach, describe, it, expect, vi } from 'vitest'
+import { OpenAIChatProvider, toOpenAIMessages } from '../src/llm/providers/openaiChat'
+import { OpenAIResponsesProvider, toResponsesInput } from '../src/llm/providers/openaiResponses'
+import type { StreamEvent } from '../src/llm/provider'
 import type { Message } from '../src/protocol'
 
 describe('toOpenAIMessages (the bridge)', () => {
@@ -24,5 +26,192 @@ describe('toOpenAIMessages (the bridge)', () => {
     const msgs: Message[] = [{ role: 'user', content: [{ type: 'tool_result', tool_use_id: 'c1', content: 'RESULT' }] }]
     const out = toOpenAIMessages(msgs)
     expect(out[0]).toEqual({ role: 'tool', tool_call_id: 'c1', content: 'RESULT' })
+  })
+
+  it('singleToolCall collapses a parallel-call turn to one call AND drops the orphaned tool_result', () => {
+    // A recorded turn with two parallel tool calls + both results (the shape that 500s NIM llama-3.1-8b).
+    const msgs: Message[] = [
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'c1', name: 'Write', input: { p: 'a' } }, { type: 'tool_use', id: 'c2', name: 'Read', input: { p: 'a' } }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'c1', content: 'wrote' }, { type: 'tool_result', tool_use_id: 'c2', content: 'read' }] },
+    ]
+    const out: any = toOpenAIMessages(msgs, undefined, { singleToolCall: true })
+    expect(out[0].tool_calls).toHaveLength(1) // only the first call survives
+    expect(out[0].tool_calls[0].id).toBe('c1')
+    // exactly one role:tool message — c2's result is dropped so it isn't an orphan tool_call_id
+    const toolMsgs = out.filter((m: any) => m.role === 'tool')
+    expect(toolMsgs).toEqual([{ role: 'tool', tool_call_id: 'c1', content: 'wrote' }])
+  })
+
+  it('singleToolCall is a no-op for single-call turns (does not alter normal history)', () => {
+    const msgs: Message[] = [
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'c1', name: 'Read', input: {} }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'c1', content: 'r' }] },
+    ]
+    expect(toOpenAIMessages(msgs, undefined, { singleToolCall: true })).toEqual(toOpenAIMessages(msgs))
+  })
+})
+
+// ── Hosted-provider wire format (multi-provider) ────────────────────────────────────────────────────────
+// Asserted through a stubbed fetch: what Cascade PUTS ON THE WIRE, per provider id.
+
+const sentBody = (fetchMock: ReturnType<typeof vi.fn>): any => JSON.parse((fetchMock.mock.calls[0] as any)[1].body)
+
+afterEach(() => vi.unstubAllGlobals())
+
+describe('hosted wire format', () => {
+  it('openai gets max_completion_tokens (current models 400 on max_tokens); others keep max_tokens', async () => {
+    for (const [id, field, absent] of [
+      ['openai', 'max_completion_tokens', 'max_tokens'],
+      ['nvidia', 'max_tokens', 'max_completion_tokens'],
+    ] as const) {
+      const fetchMock = vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] })))
+      vi.stubGlobal('fetch', fetchMock)
+      const p = new OpenAIChatProvider({ id, baseUrl: 'http://x' })
+      await p.complete({ messages: [{ role: 'user', content: 'hi' }], model: 'm', maxOutputTokens: 512 })
+      expect(sentBody(fetchMock)[field], id).toBe(512)
+      expect(sentBody(fetchMock)[absent], id).toBeUndefined()
+    }
+  })
+
+  it('streams reasoning_content deltas (NVIDIA/DeepSeek convention) as thinking', async () => {
+    const sse = [
+      'data: {"choices":[{"delta":{"reasoning_content":"THINK"}}]}',
+      'data: {"choices":[{"delta":{"content":"hello"}}]}',
+      'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+      'data: [DONE]',
+      '',
+    ].join('\n\n')
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(sse)))
+    const p = new OpenAIChatProvider({ id: 'nvidia', baseUrl: 'http://x' })
+    const events: StreamEvent[] = []
+    for await (const e of p.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm' })) events.push(e)
+    expect(events).toContainEqual({ type: 'thinking_delta', thinking: 'THINK' })
+    expect(events).toContainEqual({ type: 'text_delta', text: 'hello' })
+    expect(events.at(-1)).toMatchObject({ type: 'done', stopReason: 'end_turn' })
+  })
+
+  it('retries with reasoning_effort:none when a tool request hits the reasoning+tools 400', async () => {
+    // A Response body reads only once — mint a fresh one per call.
+    const err400 = () => new Response(
+      JSON.stringify({ error: { message: "Function tools with reasoning_effort are not supported for gpt-5.6-luna in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'." } }),
+      { status: 400 },
+    )
+    const ok = () => new Response(JSON.stringify({ choices: [{ message: { content: 'done' } }] }))
+    const fetchMock = vi.fn().mockResolvedValueOnce(err400()).mockResolvedValueOnce(ok())
+    vi.stubGlobal('fetch', fetchMock)
+    const p = new OpenAIChatProvider({ id: 'openai', baseUrl: 'http://x' })
+    const tools = [{ name: 'Read', description: 'read', parameters: { type: 'object' } }]
+    const out = await p.complete({ messages: [{ role: 'user', content: 'hi' }], model: 'gpt-5.6-luna', tools })
+    expect(out.text).toBe('done')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    // first attempt has no reasoning_effort; the retry adds 'none'
+    expect(JSON.parse((fetchMock.mock.calls[0] as any)[1].body).reasoning_effort).toBeUndefined()
+    expect(JSON.parse((fetchMock.mock.calls[1] as any)[1].body).reasoning_effort).toBe('none')
+    // a subsequent call for the SAME model skips the doomed first attempt (sends 'none' up front)
+    fetchMock.mockClear().mockResolvedValueOnce(ok())
+    await p.complete({ messages: [{ role: 'user', content: 'again' }], model: 'gpt-5.6-luna', tools })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(JSON.parse((fetchMock.mock.calls[0] as any)[1].body).reasoning_effort).toBe('none')
+  })
+
+  it('learns forceSingleTool on the "single tool-calls" 500 and retries with collapsed history', async () => {
+    const err500 = () => new Response(JSON.stringify({ error: { message: 'Failed to apply prompt template: invalid operation: This model only supports single tool-calls at once!' } }), { status: 500 })
+    const ok = () => new Response(JSON.stringify({ choices: [{ message: { content: 'done' } }] }))
+    const fetchMock = vi.fn().mockResolvedValueOnce(err500()).mockResolvedValueOnce(ok())
+    vi.stubGlobal('fetch', fetchMock)
+    const p = new OpenAIChatProvider({ id: 'nvidia', baseUrl: 'http://x' })
+    // history carrying a parallel-call turn (the poison shape)
+    const messages: Message[] = [
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'c1', name: 'Write', input: {} }, { type: 'tool_use', id: 'c2', name: 'Read', input: {} }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'c1', content: 'w' }, { type: 'tool_result', tool_use_id: 'c2', content: 'r' }] },
+    ]
+    const tools = [{ name: 'Read', description: 'r', parameters: {} }]
+    const out = await p.complete({ messages, model: 'meta/llama-3.1-8b-instruct', tools })
+    expect(out.text).toBe('done')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    // first attempt sends BOTH tool_calls; the retry collapses to one and adds parallel_tool_calls:false
+    expect(JSON.parse((fetchMock.mock.calls[0] as any)[1].body).messages[0].tool_calls).toHaveLength(2)
+    const retryBody = JSON.parse((fetchMock.mock.calls[1] as any)[1].body)
+    expect(retryBody.messages[0].tool_calls).toHaveLength(1)
+    expect(retryBody.parallel_tool_calls).toBe(false)
+  })
+
+  it('does NOT force reasoning_effort:none for models that accept tools (no spurious retry)', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] })))
+    vi.stubGlobal('fetch', fetchMock)
+    const p = new OpenAIChatProvider({ id: 'openai', baseUrl: 'http://x' })
+    await p.complete({ messages: [{ role: 'user', content: 'hi' }], model: 'gpt-5-mini', tools: [{ name: 'Read', description: 'r', parameters: {} }] })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(JSON.parse((fetchMock.mock.calls[0] as any)[1].body).reasoning_effort).toBeUndefined()
+  })
+
+  it('hosted chat providers expose NO detectModelLimits (the /api/show probe is Ollama-only)', () => {
+    // Post-split contract: the optional method is absent on hosted adapters, so session.ts's
+    // `!opts.provider.detectModelLimits` guard skips it and falls back to the model→window map.
+    const p = new OpenAIChatProvider({ id: 'openai', baseUrl: 'https://api.openai.com' })
+    expect((p as { detectModelLimits?: unknown }).detectModelLimits).toBeUndefined()
+  })
+})
+
+// ── OpenAI Responses API (/v1/responses) — the reasoning+tools path ──────────────────────────────────────
+
+describe('toResponsesInput (the Responses bridge)', () => {
+  it('system → instructions; a plain user turn → a string-content input item', () => {
+    const { instructions, input } = toResponsesInput([{ role: 'user', content: 'hi' }], 'SYS')
+    expect(instructions).toBe('SYS')
+    expect(input).toEqual([{ role: 'user', content: 'hi' }])
+  })
+
+  it('assistant tool_use → function_call item (call_id = our id, arguments JSON-stringified)', () => {
+    const msgs: Message[] = [
+      { role: 'assistant', content: [{ type: 'text', text: 'ok' }, { type: 'tool_use', id: 'c1', name: 'Read', input: { file_path: 'a' } }] },
+    ]
+    const { input } = toResponsesInput(msgs)
+    expect(input[0]).toEqual({ role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] })
+    expect(input[1]).toEqual({ type: 'function_call', call_id: 'c1', name: 'Read', arguments: JSON.stringify({ file_path: 'a' }) })
+  })
+
+  it('user tool_result → function_call_output keyed by call_id', () => {
+    const msgs: Message[] = [{ role: 'user', content: [{ type: 'tool_result', tool_use_id: 'c1', content: 'RESULT' }] }]
+    expect(toResponsesInput(msgs).input[0]).toEqual({ type: 'function_call_output', call_id: 'c1', output: 'RESULT' })
+  })
+
+  it('a user image turn → input_text + input_image parts', () => {
+    const msgs: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'look' }, { type: 'image', url: 'data:image/png;base64,AAA' }] }]
+    expect(toResponsesInput(msgs).input[0]).toEqual({ role: 'user', content: [{ type: 'input_text', text: 'look' }, { type: 'input_image', image_url: 'data:image/png;base64,AAA' }] })
+  })
+})
+
+describe('streamResponses (OpenAI routes here)', () => {
+  // Real /v1/responses event shapes (verified live 2026-07-20). One text delta, one reasoning-summary delta,
+  // a whole function_call on output_item.done, and usage on response.completed.
+  const sse = [
+    'data: {"type":"response.reasoning_summary_text.delta","delta":"pondering"}',
+    'data: {"type":"response.output_text.delta","delta":"hello"}',
+    'data: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_9","name":"Write","arguments":"{\\"path\\":\\"a.txt\\"}"}}',
+    'data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":42,"output_tokens":99}}}',
+    'data: [DONE]',
+    '',
+  ].join('\n\n')
+
+  it('emits thinking, text, a tool_use, and done with usage — hitting the responses endpoint', async () => {
+    const fetchMock = vi.fn(async () => new Response(sse))
+    vi.stubGlobal('fetch', fetchMock)
+    const p = new OpenAIResponsesProvider({ id: 'openai', baseUrl: 'https://api.openai.com' })
+    const events: StreamEvent[] = []
+    for await (const e of p.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'gpt-5.6-luna', tools: [{ name: 'Write', description: 'w', parameters: {} }] })) events.push(e)
+    expect((fetchMock.mock.calls[0] as any)[0]).toBe('https://api.openai.com/v1/responses')
+    expect(events).toContainEqual({ type: 'thinking_delta', thinking: 'pondering' })
+    expect(events).toContainEqual({ type: 'text_delta', text: 'hello' })
+    expect(events).toContainEqual({ type: 'tool_use', id: 'call_9', name: 'Write', input: { path: 'a.txt' } })
+    expect(events.at(-1)).toEqual({ type: 'done', stopReason: 'tool_use', usage: { inputTokens: 42, outputTokens: 99 } })
+  })
+
+  it('a non-openai provider does NOT hit the responses endpoint', async () => {
+    const fetchMock = vi.fn(async () => new Response('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'))
+    vi.stubGlobal('fetch', fetchMock)
+    const p = new OpenAIChatProvider({ id: 'nvidia', baseUrl: 'https://integrate.api.nvidia.com' })
+    for await (const _ of p.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm' })) { /* drain */ }
+    expect((fetchMock.mock.calls[0] as any)[0]).toBe('https://integrate.api.nvidia.com/v1/chat/completions')
   })
 })

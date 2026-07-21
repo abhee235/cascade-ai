@@ -8,10 +8,24 @@
 // the generic qwen rule stays 32k). This static map can't see that, so SPECIFIC variants must precede the generic family rule (first match
 // wins). The real fix is /api/show `num_ctx` auto-detection (ADR-038, deferred) — which would retire this map.
 const WINDOWS: [RegExp, number][] = [
-  [/gpt-4o|gpt-4\.1|gpt-4-turbo|o1|o3|o4/i, 128_000],
+  [/gpt-5/i, 400_000], // gpt-5 / 5-mini / 5-nano / 5.x: 400k total (272k input + 128k output)
+  [/gpt-4\.1/i, 1_000_000], // gpt-4.1 family: ~1M context — must precede the generic gpt-4 rules
+  [/\bo[134]\b|\bo[134]-/i, 200_000], // o1/o3/o4(-mini): 200k. \b so "gpt-4o"/"llama3" never match
+  [/gpt-4o|gpt-4-turbo/i, 128_000],
   [/gpt-4/i, 8_192],
   [/gpt-3\.5/i, 16_385],
   [/claude/i, 200_000],
+  // ── Hosted large-context coder models (NVIDIA NIM / OpenRouter / Together). These are NATIVE windows;
+  //    detectModelLimits can't probe a hosted backend (Ollama-only), so without these a NIM model like
+  //    moonshotai/kimi-k2-instruct falls to DEFAULT_WINDOW (8k) and compacts ~16× too early. A specific NIM
+  //    endpoint MAY serve less than native — override with CASCADE_CONTEXT_WINDOW / cascade.contextWindow.
+  //    Each must precede the generic same-family local rule below (first match wins). Verified 2026-07-20. ──
+  [/kimi[ ._-]?k2\.[56]/i, 262_144], // Kimi K2.5 / K2.6: 256k
+  [/kimi.*k2.*(0905|thinking)/i, 262_144], // Kimi K2 Instruct-0905 / K2 Thinking: 256k (marker may follow "instruct")
+  [/kimi[ ._-]?k2/i, 131_072], // Kimi K2 Instruct (base): 128k — must follow the 256k variants above
+  [/qwen ?3-?coder/i, 262_144], // Qwen3-Coder-480B-A35B: 256k native — MUST precede the generic qwen 32k rule
+  [/deepseek[ ._-]?(v3|r1|chat)/i, 131_072], // DeepSeek V3 / V3.1 / R1: 128k — MUST precede the generic deepseek 32k rule
+  [/llama[ ._-]?(3\.[13]|4|nemotron)/i, 131_072], // Llama 3.1 / 3.3 / 4 / Nemotron (common on NIM): 128k
   [/coding-qwen ?3\.?6/i, 131_072], // coding-qwen36: Modelfile num_ctx 131072 (128K) — MUST precede the generic qwen36 rule
   [/qwen ?36-agentic/i, 131_072], // qwen36-agentic: Modelfile num_ctx raised 32k → 131072 (2026-07-19, the Simmer live-lock: 16 compactions in 53 turns at 32k)
   [/qwen ?2\.5|qwen ?3|qwen2|qwen36/i, 32_768],

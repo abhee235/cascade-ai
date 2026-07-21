@@ -3,7 +3,8 @@
 // whether options.num_ctx / num_predict / max_tokens travel.
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { OpenAICompatProvider } from '../src/llm/providers/openaiCompat'
+import { OllamaProvider } from '../src/llm/providers/ollama'
+import { OpenAIChatProvider } from '../src/llm/providers/openaiChat'
 
 /** Capture fetch calls; respond with a minimal valid stream for whichever endpoint was hit. */
 function mockFetch() {
@@ -33,7 +34,7 @@ afterEach(() => vi.unstubAllGlobals())
 describe('ADR-038 enforcement — the window travels on the wire', () => {
 	it('ollama + contextWindow → NATIVE /api/chat with options.num_ctx + num_predict', async () => {
 		const calls = mockFetch()
-		const p = new OpenAICompatProvider({ id: 'ollama', baseUrl: 'http://x' })
+		const p = new OllamaProvider({ id: 'ollama', baseUrl: 'http://x' })
 		await drain(p.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm', contextWindow: 32768, maxOutputTokens: 4096 }))
 		expect(calls[0]!.url).toContain('/api/chat')
 		expect((calls[0]!.body.options as Record<string, unknown>).num_ctx).toBe(32768)
@@ -42,7 +43,7 @@ describe('ADR-038 enforcement — the window travels on the wire', () => {
 
 	it('ollama WITHOUT a confident window → /v1 unchanged (no guessed enforcement)', async () => {
 		const calls = mockFetch()
-		const p = new OpenAICompatProvider({ id: 'ollama', baseUrl: 'http://x' })
+		const p = new OllamaProvider({ id: 'ollama', baseUrl: 'http://x' })
 		await drain(p.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm' }))
 		expect(calls[0]!.url).toContain('/v1/chat/completions')
 		expect(calls[0]!.body.options).toBeUndefined()
@@ -50,7 +51,7 @@ describe('ADR-038 enforcement — the window travels on the wire', () => {
 
 	it('hosted provider (groq) + contextWindow → stays /v1; only max_tokens travels', async () => {
 		const calls = mockFetch()
-		const p = new OpenAICompatProvider({ id: 'groq', baseUrl: 'http://x' })
+		const p = new OpenAIChatProvider({ id: 'groq', baseUrl: 'http://x' })
 		await drain(p.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm', contextWindow: 32768, maxOutputTokens: 2048 }))
 		expect(calls[0]!.url).toContain('/v1/chat/completions')
 		expect(calls[0]!.body.max_tokens).toBe(2048)
@@ -59,7 +60,7 @@ describe('ADR-038 enforcement — the window travels on the wire', () => {
 
 	it('temperature rides the native options too (eval determinism preserved on the new path)', async () => {
 		const calls = mockFetch()
-		const p = new OpenAICompatProvider({ id: 'ollama', baseUrl: 'http://x' })
+		const p = new OllamaProvider({ id: 'ollama', baseUrl: 'http://x' })
 		await drain(p.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm', contextWindow: 8192, temperature: 0 }))
 		expect((calls[0]!.body.options as Record<string, unknown>).temperature).toBe(0)
 	})
