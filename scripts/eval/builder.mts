@@ -19,6 +19,7 @@ import { parseArgs } from 'node:util'
 import { createProvider, createSession, JsonlTracer, type CascadeSession, type ModelProvider } from '@cascade/core'
 import { BUILDER_BEHAVIOR } from '../../packages/server/src/projectManager'
 import { createPlannerSession, ensurePlanPersisted, needsPlanStage } from '../../packages/server/src/planStage'
+import { createPackTool } from '../../packages/server/src/packTool'
 import { keepAwake } from './keepAwake.mts'
 import { fanout, OtelTracer } from './otelTracer.mts'
 
@@ -218,6 +219,10 @@ for (const id of wanted) {
 		skillDirs,
 		agentDirs,
 		contextFiles: [join(work, 'PLAN.md')], // ADR-056 rung 5: pin PLAN.md into the builder prompt (fidelity)
+		// ADR-066 fidelity: the product injects the ApplyPack tool (projectManager). Without it, a graduation
+		// scenario couldn't call it. Self-gates to undefined once applied (createPackTool → filter Boolean).
+		// (The Browser tool is product-only — it needs a Docker sandbox the bench doesn't have.)
+		extraTools: [createPackTool({ projectDir: work, templateId: 'react' })].filter(Boolean) as import('@cascade/core').Tool[],
 	})
 	const t0 = Date.now()
 	let timedOut = false

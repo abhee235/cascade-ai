@@ -1,0 +1,10 @@
+{
+	"id": "builder-graduate",
+	"template": "react",
+	"prompts": [
+		"Build a small notes app called 'Inkwell': a hardcoded seed of at least 4 notes (each with a title, a body, and a color tag from red/amber/green/blue), a responsive grid of note cards showing title/body/color, a form to add a note (title + body + color picker) with the exact 'Add note' button text, and a delete button per note. Notes must PERSIST across a page refresh. Use the project's persistence seam (src/lib/storage.ts createStore) — do NOT read or write localStorage directly in a view. Client-side only for now; keep `npm run build` passing.",
+		"Now graduate Inkwell to a REAL backend so notes persist on a server (a database), not just this browser. Use the project's backend pack — apply it with the ApplyPack tool and follow the backend skill; do NOT hand-write a server, Prisma schema, or migration. Add a Note model to the Prisma schema, expose it through the API, and switch the frontend's persistence seam to the API-backed store WITHOUT changing any view. Keep `npm run build` passing."
+	],
+	"budgets": { "maxTurns": 50, "timeoutMs": 5400000 },
+	"session": { "contextWindow": 32768 }
+}
