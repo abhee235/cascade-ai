@@ -31,14 +31,14 @@ export function ChatHeader() {
   const active = chats.find((c) => c.id === activeChatId)
 
   return (
-    <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
+    <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border px-2">
       <div className="relative min-w-0" ref={ref}>
         <button
           type="button"
           aria-haspopup="menu"
           aria-expanded={open}
           onClick={() => setOpen((o) => !o)}
-          className="flex max-w-[260px] items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-accent"
+          className="flex max-w-[260px] items-center gap-1 rounded-md px-2 py-1 text-[13px] font-medium text-foreground hover:bg-accent"
         >
           <span className="truncate">{active?.title ?? 'Chat'}</span>
           <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />

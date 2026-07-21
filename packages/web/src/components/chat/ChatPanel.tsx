@@ -5,6 +5,7 @@ import { useStore } from '@/lib/store'
 import type { Item } from '@/lib/types'
 import { ActivityCard, ChangeSet } from './ActivityCard'
 import { ChatHeader } from './ChatHeader'
+import { ModelPicker } from './ModelPicker'
 import { QuestionCard } from './QuestionCard'
 import { cn } from '@/lib/utils'
 
@@ -275,6 +276,7 @@ export function ChatPanel() {
             }}
           />
           <div className="flex items-center gap-1">
+            <ModelPicker />
             <button
               type="button"
               title="Attach files or images"

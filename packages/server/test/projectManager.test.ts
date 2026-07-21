@@ -53,6 +53,19 @@ describe('ProjectManager (13.2)', () => {
     expect(a).toBe(b) // same session instance — conversation persists across reconnects
   })
 
+  it('setModelConfig switches provider/model at runtime + invalidates cached sessions (ADR-067)', async () => {
+    const { mgr } = manager()
+    const p = mgr.create('App')
+    const a = mgr.open(p.id)
+    expect(mgr.currentModel).toBe('fake')
+    // Switch to a hosted provider (no network — hasVision uses the family regex for non-ollama).
+    await mgr.setModelConfig({ provider: 'openai', model: 'gpt-5' })
+    expect(mgr.currentModel).toBe('gpt-5')
+    expect(mgr.currentProvider).toBe('openai')
+    const b = mgr.open(p.id)
+    expect(b).not.toBe(a) // the cached session was invalidated → rebuilt under the new provider
+  })
+
   it('open on an unknown id throws', () => {
     const { mgr } = manager()
     expect(() => mgr.open('nope')).toThrow(/No such project/)

@@ -4,9 +4,10 @@
 // creating inside a collapsed folder can auto-expand it. The actual fs ops happen server-side (guarded).
 
 import { createContext, useContext, useEffect, useState } from 'react'
-import { ChevronDown, ChevronRight, File as FileIcon, FilePlus, Folder, FolderOpen, FolderPlus, Pencil, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, CopyMinus, FilePlus, FilePlusCorner, Folder, FolderOpen, FolderPlus, Pencil, RotateCw, Trash2 } from 'lucide-react'
 import type { FileNode } from '@cascade/app-protocol'
 import { cn } from '@/lib/utils'
+import { FileGlyph } from './fileGlyph'
 
 type Edit = { mode: 'rename' | 'newFile' | 'newFolder'; path: string } // path = node (rename) or parent dir (create); '' = root
 type Menu = { x: number; y: number; node: FileNode }
@@ -46,7 +47,7 @@ function EditInput({ initial }: { initial: string }) {
           else if (e.key === 'Escape') ctx.cancelEdit()
         }}
         onBlur={() => ctx.cancelEdit()}
-        className="w-full rounded border border-ring bg-background px-1 py-0.5 text-xs outline-none"
+        className="w-full rounded border border-ring bg-background px-1 py-0.5 text-[13px] outline-none"
         placeholder="name…"
       />
       <div className="mt-0.5 text-[10px] text-muted-foreground/70">Enter to save · Esc to cancel</div>
@@ -71,7 +72,7 @@ function Node({ node, depth }: { node: FileNode; depth: number }) {
         ) : (
           <button
             className={cn(
-              'flex w-full items-center gap-1 py-0.5 text-xs hover:bg-accent/50',
+              'flex w-full items-center gap-1 py-0.5 text-[13px] hover:bg-accent/50',
               ctx.selPath === node.path ? 'bg-accent text-foreground' : 'text-foreground/90',
             )}
             style={pad}
@@ -81,8 +82,8 @@ function Node({ node, depth }: { node: FileNode; depth: number }) {
             }}
             onContextMenu={(e) => ctx.openMenu(e, node)}
           >
-            {open ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
-            {open ? <FolderOpen className="h-3.5 w-3.5 shrink-0 text-blue-500" /> : <Folder className="h-3.5 w-3.5 shrink-0 fill-blue-500/20 text-blue-500" />}
+            {open ? <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
+            {open ? <FolderOpen className="h-4 w-4 shrink-0 text-blue-500" /> : <Folder className="h-4 w-4 shrink-0 fill-blue-500/20 text-blue-500" />}
             <span className="truncate">{node.name}</span>
           </button>
         )}
@@ -109,7 +110,7 @@ function Node({ node, depth }: { node: FileNode; depth: number }) {
   return (
     <button
       className={cn(
-        'flex w-full items-center gap-1 py-0.5 text-xs hover:bg-accent/50',
+        'flex w-full items-center gap-1 py-0.5 text-[13px] hover:bg-accent/50',
         ctx.activePath === node.path ? 'bg-accent text-foreground' : 'text-foreground/90',
       )}
       style={pad}
@@ -119,8 +120,8 @@ function Node({ node, depth }: { node: FileNode; depth: number }) {
       }}
       onContextMenu={(e) => ctx.openMenu(e, node)}
     >
-      <span className="h-3.5 w-3.5 shrink-0" aria-hidden /> {/* aligns the file icon under sibling folder icons (no chevron) */}
-      <FileIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <span className="h-4 w-4 shrink-0" aria-hidden /> {/* aligns the file icon under sibling folder icons (no chevron) */}
+      <FileGlyph path={node.path} className="h-4 w-4" />
       <span className="truncate">{node.name}</span>
     </button>
   )
@@ -129,19 +130,23 @@ function Node({ node, depth }: { node: FileNode; depth: number }) {
 export function FileTree({
   tree,
   activePath,
+  label,
   onSelect,
   onCreateFile,
   onCreateFolder,
   onRename,
   onDelete,
+  onRefresh,
 }: {
   tree: FileNode[]
   activePath?: string
+  label?: string // header title — the project/root folder name (falls back to "Explorer")
   onSelect: (p: string) => void
   onCreateFile: (path: string) => void
   onCreateFolder: (path: string) => void
   onRename: (path: string, to: string) => void
   onDelete: (path: string) => void
+  onRefresh?: () => void // re-request the tree from the server (explorer refresh button)
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(tree.filter((n) => n.type === 'dir').map((n) => n.path)))
   const [edit, setEdit] = useState<Edit | null>(null)
@@ -199,13 +204,21 @@ export function FileTree({
   return (
     <Ctx.Provider value={ctx}>
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex h-7 shrink-0 items-center gap-0.5 border-b border-border px-2">
-          <span className="flex-1 truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Explorer</span>
+        <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border px-2">
+          <span title={label} className="flex-1 truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label || 'Explorer'}</span>
           <button title={`New file${targetDir ? ` in ${targetDir}/` : ''}`} onClick={() => beginCreate(targetDir, 'file')} className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground">
-            <FilePlus className="h-3.5 w-3.5" />
+            <FilePlusCorner className="h-4 w-4" />
           </button>
           <button title={`New folder${targetDir ? ` in ${targetDir}/` : ''}`} onClick={() => beginCreate(targetDir, 'dir')} className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground">
-            <FolderPlus className="h-3.5 w-3.5" />
+            <FolderPlus className="h-4 w-4" />
+          </button>
+          {onRefresh && (
+            <button title="Refresh explorer" onClick={onRefresh} className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground">
+              <RotateCw className="h-4 w-4" />
+            </button>
+          )}
+          <button title="Collapse folders" onClick={() => setExpanded(new Set())} className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground">
+            <CopyMinus className="h-4 w-4" />
           </button>
         </div>
 
@@ -216,7 +229,7 @@ export function FileTree({
             </div>
           )}
           {tree.length === 0 && !edit ? (
-            <div className="p-3 text-xs text-muted-foreground/70">No files. Use the buttons above to add one.</div>
+            <div className="p-3 text-[13px] text-muted-foreground/70">No files. Use the buttons above to add one.</div>
           ) : (
             tree.map((n) => <Node key={n.path} node={n} depth={0} />)
           )}
@@ -227,7 +240,7 @@ export function FileTree({
         <div className="fixed z-50 min-w-[150px] rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
           {menu.node.type === 'dir' && (
             <>
-              <MenuItem icon={FilePlus} label="New file" onClick={() => beginCreate(menu.node.path, 'file')} />
+              <MenuItem icon={FilePlusCorner} label="New file" onClick={() => beginCreate(menu.node.path, 'file')} />
               <MenuItem icon={FolderPlus} label="New folder" onClick={() => beginCreate(menu.node.path, 'dir')} />
               <div className="my-1 h-px bg-border" />
             </>
@@ -248,13 +261,13 @@ export function FileTree({
   )
 }
 
-function MenuItem({ icon: Icon, label, onClick, danger }: { icon: typeof FilePlus; label: string; onClick: () => void; danger?: boolean }) {
+function MenuItem({ icon: Icon, label, onClick, danger }: { icon: typeof FilePlusCorner; label: string; onClick: () => void; danger?: boolean }) {
   return (
     <button
       onClick={onClick}
-      className={cn('flex w-full items-center gap-2 rounded px-2 py-1 text-xs hover:bg-accent', danger ? 'text-destructive hover:text-destructive' : 'text-foreground')}
+      className={cn('flex w-full items-center gap-2 rounded px-2 py-1 text-[13px] hover:bg-accent', danger ? 'text-destructive hover:text-destructive' : 'text-foreground')}
     >
-      <Icon className="h-3.5 w-3.5" /> {label}
+      <Icon className="h-4 w-4" /> {label}
     </button>
   )
 }
