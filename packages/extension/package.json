@@ -42,13 +42,15 @@
           "enum": [
             "ollama",
             "openai",
+            "nvidia",
             "groq",
             "openrouter",
             "llamacpp",
+            "custom",
             "anthropic"
           ],
           "default": "ollama",
-          "description": "Model provider. ollama/openai/groq/openrouter/llamacpp are OpenAI-compatible; anthropic is not yet implemented."
+          "description": "Model provider. ollama/openai/nvidia/groq/openrouter/llamacpp are OpenAI-compatible; 'custom' is any OpenAI-compatible endpoint (set cascade.baseUrl); anthropic is not yet implemented."
         },
         "cascade.model": {
           "type": "string",
@@ -58,12 +60,12 @@
         "cascade.baseUrl": {
           "type": "string",
           "default": "",
-          "description": "Optional base URL override. Leave empty to use the provider's default (e.g. Ollama → http://127.0.0.1:11434)."
+          "description": "Optional base URL override; REQUIRED for provider 'custom'. Leave empty to use the provider's default (Ollama → http://127.0.0.1:11434, OpenAI → https://api.openai.com, NVIDIA → https://integrate.api.nvidia.com)."
         },
         "cascade.apiKey": {
           "type": "string",
           "default": "",
-          "description": "API key for hosted providers (OpenAI, Groq, OpenRouter). Not needed for local Ollama/llama.cpp."
+          "description": "API key for hosted providers. Prefer leaving this EMPTY and exporting the provider's env var instead (OPENAI_API_KEY, NVIDIA_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY, or CASCADE_API_KEY) — settings sync can upload this value in plain text."
         },
         "cascade.permissionMode": {
           "type": "string",
