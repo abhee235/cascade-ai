@@ -80,6 +80,17 @@ export function ChatPanel() {
   const { items, streaming, status, recovering, busy, stepStartedAt, sawTokens, connected, activeId, submit, stop, composerDraft, setComposerDraft } = useStore()
   useTick(busy) // re-render ~1×/s while a turn runs so the elapsed timer ticks even with no tokens
   const elapsed = stepStartedAt ? Math.max(0, Math.floor((Date.now() - stepStartedAt) / 1000)) : 0
+  // The working-indicator message must reflect the ACTUAL current phase, not one catch-all fallback.
+  // (1) While a tool runs, the tool CARD is the activity indicator (its own spinner + "Writing X" /
+  //     streaming output) — the generic row is suppressed so it can't contradict it with a stale message
+  //     (the reported bug: "Reading your message…" showing under a running Bash/Write/Edit).
+  // (2) "Reading your message and the project context…" is only truthful for the FIRST prompt-eval of a
+  //     submit; once any tool/assistant step has happened it's continuation work, not first read.
+  const lastItem = items[items.length - 1]
+  const toolRunning = lastItem?.kind === 'tool' && lastItem.status === 'running'
+  const lastUserIdx = items.map((i) => i.kind).lastIndexOf('user')
+  const workedSinceSubmit = lastUserIdx >= 0 && items.slice(lastUserIdx + 1).some((i) => i.kind === 'tool' || i.kind === 'assistant')
+  const workingMessage = sawTokens || workedSinceSubmit ? status || 'Working — running the next step…' : 'Reading your message and the project context…'
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [dragging, setDragging] = useState(false)
@@ -176,11 +187,12 @@ export function ChatPanel() {
             Before a step's first token the model is INGESTING the prompt (a local model re-reads the
             whole conversation — 10-30s of true silence); the ticking per-step seconds prove it's alive.
             Rendered as a real card (not a whisper) so it can't be missed or mistaken for "finished". */}
-        {busy && !streaming && !recovering && (
-          // A naked row (matches the flattened tool rows) — still ever-present until turnDone.
+        {busy && !streaming && !recovering && !toolRunning && (
+          // A naked row (matches the flattened tool rows). Suppressed while a tool runs — the
+          // tool card carries the activity then (so the row never shows a message that fights the card).
           <div className="my-1.5 flex items-center gap-2 py-1 text-[13px] text-muted-foreground">
             <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
-            <span>{sawTokens ? status || 'Working — running the next step…' : 'Reading your message and the project context…'}</span>
+            <span>{workingMessage}</span>
             <span className="ml-auto tabular-nums text-xs text-muted-foreground/60">{elapsed}s</span>
           </div>
         )}

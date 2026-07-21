@@ -54,6 +54,7 @@ interface UiState {
   activeChatId: string | null
   // code pane (M4) + diff view (M2)
   fileTree: FileNode[]
+  openTabs: string[] // M12: VS Code-style editor tabs — the paths of open files, in tab order. openFile is the active one.
   openFile: { path: string; content: string } | null
   fileDiff: { path: string; original: string; modified: string } | null
   codeView: 'code' | 'diff'
@@ -114,7 +115,9 @@ interface UiState {
   setAccent: (hex: string | null) => void // M11: apply + persist a brand accent
   setCustomizeOpen: (open: boolean) => void // M11: open/close the theme dialog
   requestFile: (path: string) => void
+  refreshFiles: () => void // M12: re-request the active project's file tree (explorer refresh button)
   openFileInCode: (path: string, view?: 'code' | 'diff') => void
+  closeTab: (path: string) => void // M12: close an editor tab; if it was active, fall to a neighbor
   setCodeView: (v: 'code' | 'diff') => void
   saveFile: (path: string, content: string) => void // M9: persist a Code-pane edit (→ file:write → HMR)
   createFile: (path: string) => void // M9 file tree: new empty file (and open it)
@@ -235,6 +238,7 @@ export const useStore = create<UiState>((set, get) => {
     chats: [],
     activeChatId: null,
     fileTree: [],
+    openTabs: [],
     openFile: null,
     fileError: null,
     fileDiff: null,
@@ -246,7 +250,7 @@ export const useStore = create<UiState>((set, get) => {
     runtimeErrors: [],
     versions: [],
     bottomTab: 'terminal',
-    bottomOpen: true,
+    bottomOpen: false, // M12: terminal/bottom panel starts CLOSED (VS Code-like); opens on demand (Terminal button / Ctrl+`)
     bottomMaximized: false,
     terminals: [],
     activeTerminalId: null,
@@ -398,7 +402,9 @@ export const useStore = create<UiState>((set, get) => {
           set({ fileTree: e.tree })
           break
         case 'fileContent':
-          set({ openFile: { path: e.path, content: e.content } })
+          // Set the active file AND ensure it has a tab (covers created files, which the server opens by
+          // pushing fileContent without a prior openFileInCode call).
+          set((s) => ({ openFile: { path: e.path, content: e.content }, openTabs: s.openTabs.includes(e.path) ? s.openTabs : [...s.openTabs, e.path] }))
           break
         case 'fileEdited':
           // M9: a visual edit landed. ok:false ⇒ the element wasn't a plain-text container (nested
@@ -509,7 +515,7 @@ export const useStore = create<UiState>((set, get) => {
       if (id === get().activeId) return
       // Set activeId optimistically so submit() works before the server's `projects` snapshot round-trips.
       terminalSinks.clear() // the server kills the old project's shells on switch; drop their writers
-      set({ activeId: id, items: [], streaming: null, status: null, busy: false, stepStartedAt: null, sawTokens: false, chats: [], activeChatId: null, fileTree: [], openFile: null, fileError: null, fileDiff: null, codeView: 'code', preview: null, logs: [], problems: [], checking: false, runtimeErrors: [], versions: [], terminals: [], activeTerminalId: null, selectMode: false })
+      set({ activeId: id, items: [], streaming: null, status: null, busy: false, stepStartedAt: null, sawTokens: false, chats: [], activeChatId: null, fileTree: [], openTabs: [], openFile: null, fileError: null, fileDiff: null, codeView: 'code', preview: null, logs: [], problems: [], checking: false, runtimeErrors: [], versions: [], terminals: [], activeTerminalId: null, selectMode: false })
       get().send({ type: 'project', action: 'open', id })
     },
     deleteProject: (id) => {
@@ -555,10 +561,24 @@ export const useStore = create<UiState>((set, get) => {
     toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
     setRightTab: (rightTab) => set({ rightTab }),
     requestFile: (path) => get().send({ type: 'file', action: 'read', path }),
+    refreshFiles: () => get().send({ type: 'files', action: 'list' }),
     openFileInCode: (path, view = 'code') => {
-      set({ rightTab: 'code', codeView: view })
+      // M12: add to the tab strip (dedup, preserve order) and make it active. openFile is set when the
+      // server's fileContent arrives; openTabs holds every open path so the strip survives tab switches.
+      set((s) => ({ rightTab: 'code', codeView: view, openTabs: s.openTabs.includes(path) ? s.openTabs : [...s.openTabs, path] }))
       get().requestFile(path)
       if (view === 'diff') get().send({ type: 'file', action: 'diff', path })
+    },
+    closeTab: (path) => {
+      const { openTabs, openFile } = get()
+      const idx = openTabs.indexOf(path)
+      const next = openTabs.filter((p) => p !== path)
+      set({ openTabs: next })
+      if (openFile?.path !== path) return // closed a background tab — active file unchanged
+      // Closed the active tab: fall to the neighbor (prefer the one to the left, else the new head).
+      const fallback = next[idx - 1] ?? next[0]
+      if (fallback) get().openFileInCode(fallback, get().codeView)
+      else set({ openFile: null, fileDiff: null }) // last tab closed — empty editor
     },
     setCodeView: (codeView) => {
       set({ codeView })
@@ -573,12 +593,20 @@ export const useStore = create<UiState>((set, get) => {
     createFolder: (path) => get().send({ type: 'file', action: 'mkdir', path }),
     renameEntry: (path, to) => {
       get().send({ type: 'file', action: 'rename', path, to })
+      // Follow the renamed path in the tab strip (the file itself, or any tab under a renamed dir).
+      set((s) => ({ openTabs: s.openTabs.map((p) => (p === path ? to : p.startsWith(`${path}/`) ? to + p.slice(path.length) : p)) }))
       if (get().openFile?.path === path) get().openFileInCode(to) // follow the open file to its new path
     },
     deleteEntry: (path) => {
       get().send({ type: 'file', action: 'delete', path })
+      // Drop the deleted path (or any tab under a deleted dir) from the strip.
+      set((s) => ({ openTabs: s.openTabs.filter((p) => p !== path && !p.startsWith(`${path}/`)) }))
       const open = get().openFile?.path
-      if (open && (open === path || open.startsWith(`${path}/`))) set({ openFile: null }) // it (or its dir) is gone
+      if (open && (open === path || open.startsWith(`${path}/`))) {
+        const remaining = get().openTabs
+        if (remaining.length) get().openFileInCode(remaining[remaining.length - 1], get().codeView)
+        else set({ openFile: null, fileDiff: null }) // it (or its dir) is gone, nothing left to show
+      }
     },
     startPreview: () => {
       set({ preview: { status: 'installing' } }) // optimistic; server confirms via `preview` events
