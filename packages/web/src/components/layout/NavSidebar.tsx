@@ -28,7 +28,7 @@ const NAV: { page: Page; label: string; icon: LucideIcon }[] = [
 ]
 
 export function NavSidebar() {
-  const { page, navigate, projects, activeId, openProjectPage, deleteProject, connected, theme, toggleTheme } = useStore()
+  const { page, navigate, projects, activeId, openProjectPage, deleteProject, connected, theme, toggleTheme, turnActivity } = useStore()
 
   return (
     <Sidebar>
@@ -66,17 +66,28 @@ export function NavSidebar() {
             <SidebarMenu>
               {/* Distinguish "still connecting" from "truly none" — a slow connect must not read as data loss. */}
               {projects.length === 0 && <div className="px-2 py-1 text-xs text-muted-foreground/60">{connected ? 'No projects yet.' : 'Connecting…'}</div>}
-              {projects.slice(0, 12).map((p) => (
-                <SidebarMenuItem key={p.id}>
-                  <SidebarMenuButton isActive={page === 'project' && activeId === p.id} onClick={() => openProjectPage(p.id)}>
-                    <Folder />
-                    <span className="truncate">{p.name}</span>
-                  </SidebarMenuButton>
-                  <SidebarMenuAction showOnHover title="Delete project" onClick={() => deleteProject(p.id)}>
-                    <X />
-                  </SidebarMenuAction>
-                </SidebarMenuItem>
-              ))}
+              {projects.slice(0, 12).map((p) => {
+                // ADR-068: the single active turn's project gets a dot — amber (needs your approval) or a
+                // pulsing blue (building) — so you can return to it from anywhere. Sits left of the ×.
+                const act = turnActivity?.projectId === p.id ? turnActivity.phase : undefined
+                return (
+                  <SidebarMenuItem key={p.id}>
+                    <SidebarMenuButton isActive={page === 'project' && activeId === p.id} onClick={() => openProjectPage(p.id)}>
+                      <Folder />
+                      <span className="truncate">{p.name}</span>
+                      {act && (
+                        <span
+                          className={cn('ml-auto mr-1 h-2 w-2 shrink-0 rounded-full', act === 'awaiting' ? 'bg-amber-500' : 'animate-pulse bg-blue-500')}
+                          title={act === 'awaiting' ? 'Waiting for your approval' : 'Building…'}
+                        />
+                      )}
+                    </SidebarMenuButton>
+                    <SidebarMenuAction showOnHover title="Delete project" onClick={() => deleteProject(p.id)}>
+                      <X />
+                    </SidebarMenuAction>
+                  </SidebarMenuItem>
+                )
+              })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

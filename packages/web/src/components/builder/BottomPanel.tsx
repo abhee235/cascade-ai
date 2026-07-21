@@ -34,7 +34,7 @@ function IconBtn({ title, onClick, icon: Icon }: { title: string; onClick: () =>
 
 // The Terminal tab: a session sub-strip + all sessions mounted (only the active one visible).
 function TerminalSessions() {
-  const { terminals, activeTerminalId, activeId, bottomTab, newTerminal, closeTerminal, setActiveTerminal, serverInfo } = useStore()
+  const { terminals, activeTerminalId, activeId, bottomTab, bottomOpen, newTerminal, closeTerminal, setActiveTerminal, serverInfo } = useStore()
   const noSandbox = serverInfo !== null && !serverInfo.sandbox
 
   // Ensure there's always a session while the Terminal tab is open (a fresh one per project). The ref guard
@@ -42,13 +42,16 @@ function TerminalSessions() {
   // without a sandbox — there is no shell to attach (the terminal execs into the Docker container).
   const creating = useRef(false)
   useEffect(() => {
-    if (bottomTab === 'terminal' && activeId && terminals.length === 0 && !creating.current && !noSandbox) {
+    // Only spawn a session once the panel is actually OPEN — the panel stays mounted (just hidden) when
+    // closed, so gating on `bottomOpen` keeps the terminal (and thus the panel) HIDDEN by default instead of
+    // auto-opening on project load. Opening the Terminal tab flips bottomOpen → this creates the session.
+    if (bottomOpen && bottomTab === 'terminal' && activeId && terminals.length === 0 && !creating.current && !noSandbox) {
       creating.current = true
       newTerminal()
     } else if (terminals.length > 0) {
       creating.current = false
     }
-  }, [bottomTab, activeId, terminals.length, newTerminal, noSandbox])
+  }, [bottomOpen, bottomTab, activeId, terminals.length, newTerminal, noSandbox])
 
   // No Docker ⇒ no terminal. Say it plainly instead of showing a dead, blank xterm.
   if (noSandbox) {

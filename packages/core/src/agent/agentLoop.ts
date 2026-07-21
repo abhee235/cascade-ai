@@ -64,6 +64,8 @@ export interface LoopDeps {
   /** ADR-038 enforcement: CONFIDENT allocated limits (user-pinned or /api/show-detected — never the static-map
    *  guess). Sent on every model request so the wire window equals the planned window. */
   modelLimits?: { contextWindow?: number; maxOutputTokens?: number }
+  /** ADR-067: per-model sampling — passed on every stream request (each provider applies what it supports). */
+  sampling?: { temperature?: number; topP?: number; topK?: number }
   /** ADR-037: window tier sizing the system prompt + tool descriptions. Defaults to the compaction plan's tier
    *  (one source of truth); set explicitly for loops without compaction (e.g. subagents inherit the parent's). */
   tier?: import('../llm/contextWindows').WindowTier
@@ -269,7 +271,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     // a (reactive) compaction then retries; abort/fatal surface. `make` re-reads `messages` each attempt, so
     // an overflow-compaction is reflected on the retry. System is rebuilt too (memory may have changed).
     const makeStream = () =>
-      deps.provider.stream({ messages, model: deps.model, ...deps.modelLimits, system: buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext, skillsSection: deps.skillsSection, contextFiles: deps.contextFiles }), tools: registry.schemas(tier) }, deps.signal)
+      deps.provider.stream({ messages, model: deps.model, ...deps.modelLimits, ...deps.sampling, system: buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext, skillsSection: deps.skillsSection, contextFiles: deps.contextFiles }), tools: registry.schemas(tier) }, deps.signal)
     for await (const ev of streamWithRecovery(makeStream, {
       ...deps.recovery,
       signal: deps.signal,

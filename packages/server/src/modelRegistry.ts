@@ -1,0 +1,122 @@
+// modelRegistry.ts — the ENABLED models (ADR-067). The dropdown shows ONLY these — a small curated list,
+// not a provider's entire /v1/models catalog. The manager browses the full catalog (listModels) and ADDS
+// models here. Persisted to a gitignored JSON file so a user's picks survive restarts; per-model context
+// window override rides along and is applied on switch.
+
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+
+export interface EnabledModel {
+  provider: string
+  model: string
+  /** Optional context-window override (tokens) applied when this model is activated. */
+  contextWindow?: number
+  /** Cap on generated tokens per turn (Ollama num_predict / OpenAI max_tokens). */
+  maxOutputTokens?: number
+  /** Sampling temperature (0–2). Omit ⇒ backend default. */
+  temperature?: number
+  /** Nucleus sampling (0–1). Omit ⇒ backend default. */
+  topP?: number
+  /** Top-K sampling (Ollama-native). Omit ⇒ backend default. */
+  topK?: number
+}
+
+/** The editable per-model params (everything on EnabledModel except its identity). */
+export type ModelParams = Omit<EnabledModel, 'provider' | 'model'>
+
+/** Seed set — a few sane defaults across the configured providers. The user curates from here. */
+const DEFAULTS: EnabledModel[] = [
+  { provider: 'openai', model: 'gpt-5.6-luna' },
+  { provider: 'openai', model: 'gpt-4.1' },
+  { provider: 'ollama', model: 'qwen36-agentic' },
+]
+
+let filePath = ''
+let cache: EnabledModel[] | null = null
+
+/** Point the registry at a project-root-adjacent file (called once at server startup). */
+export function initModelRegistry(rootDir: string): void {
+  filePath = join(rootDir, '.cascade', 'models.json')
+  cache = null
+}
+
+function load(): EnabledModel[] {
+  if (cache) return cache
+  try {
+    cache = JSON.parse(readFileSync(filePath, 'utf8')) as EnabledModel[]
+  } catch {
+    cache = [...DEFAULTS]
+  }
+  return cache
+}
+function save(): void {
+  try {
+    mkdirSync(dirname(filePath), { recursive: true })
+    writeFileSync(filePath, JSON.stringify(cache ?? DEFAULTS, null, 2))
+  } catch {
+    /* best-effort — a read-only fs just loses persistence, not the session */
+  }
+}
+
+const same = (a: EnabledModel, provider: string, model: string) => a.provider === provider && a.model === model
+
+/** The enabled models, optionally ensuring `ensure` (the active model) is present so the picker never hides
+ *  what's actually running. */
+export function enabledModels(ensure?: { provider: string; model: string }): EnabledModel[] {
+  const list = load()
+  if (ensure && !list.some((m) => same(m, ensure.provider, ensure.model))) return [...list, { provider: ensure.provider, model: ensure.model }]
+  return list
+}
+
+export function addEnabledModel(provider: string, model: string, contextWindow?: number): void {
+  const list = load()
+  const existing = list.find((m) => same(m, provider, model))
+  if (existing) existing.contextWindow = contextWindow ?? existing.contextWindow
+  else list.push({ provider, model, contextWindow })
+  save()
+}
+
+export function removeEnabledModel(provider: string, model: string): void {
+  cache = load().filter((m) => !same(m, provider, model))
+  save()
+}
+
+export function setModelContext(provider: string, model: string, contextWindow?: number): void {
+  const m = load().find((x) => same(x, provider, model))
+  if (m) {
+    m.contextWindow = contextWindow
+    save()
+  } else {
+    addEnabledModel(provider, model, contextWindow)
+  }
+}
+
+/** The context-window override for a model, if the user set one (applied on activation). */
+export function modelContextFor(provider: string, model: string): number | undefined {
+  return load().find((m) => same(m, provider, model))?.contextWindow
+}
+
+/** Merge editable params onto a model (adding it to the enabled set if absent). `undefined` fields clear
+ *  the corresponding override; fields simply omitted from `params` are left untouched. */
+export function setModelParams(provider: string, model: string, params: ModelParams): void {
+  const list = load()
+  let m = list.find((x) => same(x, provider, model))
+  if (!m) {
+    m = { provider, model }
+    list.push(m)
+  }
+  for (const k of ['contextWindow', 'maxOutputTokens', 'temperature', 'topP', 'topK'] as const) {
+    if (k in params) m[k] = params[k]
+  }
+  save()
+}
+
+/** The full param set for a model (applied on activation). Empty object when the model isn't curated. */
+export function modelParamsFor(provider: string, model: string): ModelParams {
+  const m = load().find((x) => same(x, provider, model))
+  if (!m) return {}
+  const { provider: _p, model: _m, ...params } = m
+  return params
+}
+
+export const _existsForTest = (p: string) => existsSync(p)

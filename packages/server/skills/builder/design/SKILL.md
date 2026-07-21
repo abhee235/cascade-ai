@@ -73,15 +73,25 @@ use `flex flex-col gap-*`, never margin stacks.
 
 ## 6. Imagery — never an emoji, never a gray box
 
-- Real-world subjects (hero shots, lifestyle, journal cards): the bundled photo pack —
-  `import { photo, photoFor } from '@/lib/photos'`; `photo('nature-mountain')` or
-  `photoFor(seed, 'food')` (categories: food, product, workspace, nature, interior, people, texture).
-- Products without a matching photo, avatars, abstract covers: `<ArtImage seed={name} kind="product" />`
-  — same seed always renders the same token-colored art, in every preset and dark mode.
+Choose by what the subject needs — don't default to abstract art when a real photo would sell it:
+
+- **Bundled photos** (fast, offline, curated) — hero shots, lifestyle, journal cards:
+  `import { photo, photoFor } from '@/lib/photos'`; `photo('nature-mountain')` or `photoFor(seed, 'food')`
+  (categories: food, product, workspace, nature, interior, people, texture).
+- **Real web photos** — when the subject genuinely needs REAL photography the small bundled pack can't
+  cover (an **e-commerce catalog of real products**, travel/real-estate/recipe listings): use the
+  `<Photo>` block — `import { Photo } from '@/components/blocks/Photo'` →
+  `<Photo web="leather watch minimal" seed={p.name} kind="product" />`. `web` = space-separated keywords
+  for the subject; it pulls a real, deterministic photo from an **allowlisted, hotlink-safe source** and
+  **auto-falls back to `<ArtImage>`** if the image is blocked or slow — so never a broken box. Only the
+  allowlisted hosts are reachable (enforced in `photos.ts` — do NOT hand-write external image URLs).
+  Prefer this over `<ArtImage>` for product grids/detail pages; it makes a store look real, not abstract.
+- **Generated art** (no real subject fits — abstract covers, avatars, decorative): `<ArtImage seed={name}
+  kind="product" />` — same seed always renders the same token-colored art, in every preset and dark mode.
 - An emoji is never an image. An empty `bg-muted` box is never an image.
-- Storing a photo name on your data? The type ALREADY EXISTS: `import type { PhotoName } from
-  '@/lib/photos'`. Never re-declare it or invent keys from memory — hand-typed name unions drift from
-  the real assets and break the build. Read `photos.ts` (or the reference) for the actual names.
+- Storing a bundled photo name on your data? The type ALREADY EXISTS: `import type { PhotoName } from
+  '@/lib/photos'`. Never re-declare it or invent keys from memory — hand-typed name unions drift from the
+  real assets and break the build. (For `<Photo web>` you pass free-text keywords, not a PhotoName.)
 
 ## 7. Dark mode
 
@@ -98,6 +108,6 @@ popups after the click).
 
 - [ ] Page assembled from blocks (NavBar + Hero/PageHeader + Sections + Footer where it's a landing)
 - [ ] Zero raw colors in your diff (no bg-white/black, -500/-600 shades, hex — stars/stock/success = text-primary)
-- [ ] Every image is photo()/photoFor()/<ArtImage> — zero emoji-as-image
+- [ ] Every image is photo()/photoFor()/<Photo>/<ArtImage> — zero emoji-as-image; real-product catalogs use <Photo web="…">, not abstract art
 - [ ] Exactly one bg-primary CTA per screenful; empty lists show <EmptyState>
 - [ ] Checked once in light AND dark mode before done

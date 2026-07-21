@@ -109,10 +109,16 @@ export class ProjectManager {
    *  default; the next session will). */
   private visionOk = false
 
+  /** ADR-067: the RUNTIME provider/model config. Starts from opts (env), mutated by setModelConfig so the
+   *  UI can switch provider+model WITHOUT restarting the server. New sessions read this; switching
+   *  invalidates cached sessions (history lives in chatStore and reloads on re-open). */
+  private active!: { provider: string; model: string; baseUrl?: string; apiKey?: string; contextWindow?: number; maxOutputTokens?: number; temperature?: number; topP?: number; topK?: number }
+
   constructor(private readonly opts: ProjectManagerOptions) {
     mkdirSync(opts.root, { recursive: true })
     this.metaFile = join(opts.root, 'projects.json')
-    void hasVision(opts.model, opts.baseUrl, opts.provider ?? 'ollama').then((v) => {
+    this.active = { provider: opts.provider ?? 'ollama', model: opts.model, baseUrl: opts.baseUrl, apiKey: opts.apiKey, contextWindow: opts.contextWindow }
+    void hasVision(this.active.model, this.active.baseUrl, this.active.provider).then((v) => {
       this.visionOk = v
     })
     this.createSessionFor =
@@ -120,11 +126,16 @@ export class ProjectManager {
       ((dir, sandbox, extraInstructions) =>
         createSession({
           cwd: dir,
-          provider: createProvider({ provider: opts.provider ?? 'ollama', model: opts.model, baseUrl: opts.baseUrl, apiKey: opts.apiKey }),
-          model: opts.model,
+          provider: createProvider({ provider: this.active.provider, model: this.active.model, baseUrl: this.active.baseUrl, apiKey: this.active.apiKey }),
+          model: this.active.model,
           // Hosted providers have no live window probe — honor an explicit override so the compactor sizes
           // against the NIM endpoint's real window instead of the model→map guess (or the 8k default).
-          contextWindow: opts.contextWindow,
+          contextWindow: this.active.contextWindow,
+          // ADR-067: per-model output cap + sampling, applied on every turn (providers ignore what they can't use).
+          maxOutputTokens: this.active.maxOutputTokens,
+          temperature: this.active.temperature,
+          topP: this.active.topP,
+          topK: this.active.topK,
           tracer: tracerFor(dir, 'builder'), // product forensics (walkthrough lesson: no trace = no diagnosis)
           // LATENCY (walkthrough forensics): curation adds hidden model calls (dead air) AND its memory
           // writes mutate the system prompt mid-session — a prefix-cache breaker. A builder project gains
@@ -230,6 +241,45 @@ export class ProjectManager {
     this.projects.set(id, project)
     this.save()
     return { id: project.id, name: project.name, createdAt: project.createdAt }
+  }
+
+  /** The active provider/model (for the serverInfo greeting + the UI's picker). */
+  get currentProvider(): string {
+    return this.active.provider
+  }
+  get currentModel(): string {
+    return this.active.model
+  }
+
+  /** ADR-067: switch the active provider/model at RUNTIME (no server restart). Invalidates every cached
+   *  session so the next open() rebuilds with the new provider; conversation history lives in chatStore and
+   *  reloads on re-open. The API key is resolved from the ENVIRONMENT for the chosen provider (the client
+   *  never sends keys). On a provider change, the old baseUrl/contextWindow/apiKey are dropped (they were
+   *  provider-specific) unless explicitly supplied. */
+  async setModelConfig(cfg: { provider?: string; model?: string; baseUrl?: string; contextWindow?: number; maxOutputTokens?: number; temperature?: number; topP?: number; topK?: number }): Promise<void> {
+    const providerChanged = !!cfg.provider && cfg.provider !== this.active.provider
+    const modelChanged = !!cfg.model && cfg.model !== this.active.model
+    // Per-model params (window/output/sampling) are dropped when the TARGET model changes — the caller
+    // (wsServer.setModel) re-supplies the new model's saved params from the registry. A same-model tweak
+    // (setModelParams) keeps whatever it doesn't override.
+    const dropModelParams = providerChanged || modelChanged
+    this.active = {
+      provider: cfg.provider ?? this.active.provider,
+      model: cfg.model ?? this.active.model,
+      baseUrl: cfg.baseUrl ?? (providerChanged ? undefined : this.active.baseUrl),
+      apiKey: providerChanged ? undefined : this.active.apiKey,
+      contextWindow: cfg.contextWindow ?? (dropModelParams ? undefined : this.active.contextWindow),
+      maxOutputTokens: cfg.maxOutputTokens ?? (dropModelParams ? undefined : this.active.maxOutputTokens),
+      temperature: cfg.temperature ?? (dropModelParams ? undefined : this.active.temperature),
+      topP: cfg.topP ?? (dropModelParams ? undefined : this.active.topP),
+      topK: cfg.topK ?? (dropModelParams ? undefined : this.active.topK),
+    }
+    this.visionOk = await hasVision(this.active.model, this.active.baseUrl, this.active.provider).catch(() => false)
+    // Drop cached sessions so the next open() recreates them against the new provider (history reloads).
+    for (const p of this.projects.values()) {
+      await p.session?.dispose().catch(() => {})
+      p.session = undefined
+    }
   }
 
   /** Attach to a project: lazily build (and cache) its sandbox + session on first open. Throws if unknown. */

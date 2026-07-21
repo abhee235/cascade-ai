@@ -139,6 +139,7 @@ export class OpenAIChatProvider implements ModelProvider {
     // Backends that don't know the field ignore it — usage just stays undefined.
     if (stream) body.stream_options = { include_usage: true }
     if (req.temperature !== undefined) body.temperature = req.temperature // eval determinism (temperature 0)
+    if (req.topP !== undefined) body.top_p = req.topP // ADR-067 per-model sampling (top_k has no OpenAI-chat equivalent)
     if (req.maxOutputTokens !== undefined) {
       // ADR-038: output cap on the wire. OpenAI RENAMED the field: current models (gpt-5.x, o-series)
       // reject `max_tokens` with HTTP 400 and require `max_completion_tokens` (older gpt-4o accepts both).

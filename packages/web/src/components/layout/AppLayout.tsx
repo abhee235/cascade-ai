@@ -4,6 +4,7 @@ import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { useStore } from '@/lib/store'
 import { CommandPalette } from '@/components/CommandPalette'
 import { ThemeDialog } from '@/components/ThemeDialog'
+import { ModelManagerDialog } from '@/components/ModelManagerDialog'
 import { NavSidebar } from './NavSidebar'
 import { HomePage } from '@/pages/HomePage'
 import { ProjectPage } from '@/pages/ProjectPage'
@@ -19,6 +20,7 @@ export function AppLayout() {
     <SidebarProvider className="h-svh overflow-hidden">
       <CommandPalette />
       <ThemeDialog />
+      <ModelManagerDialog />
       <NavSidebar />
       <SidebarInset className="min-h-0 overflow-hidden">
         {page === 'home' ? (

@@ -2,7 +2,7 @@
 // icon+label map keyed by tool name. As we add richer cards (file-edit diffs, AddDependency, MCP), they
 // slot in here.
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Streamdown } from 'streamdown'
 import {
   Terminal,
@@ -74,8 +74,8 @@ function FileEditCard({ display }: { display: Extract<ToolDisplay, { kind: 'file
   const name = display.path.split('/').pop()
   const dir = display.path.includes('/') ? display.path.slice(0, display.path.lastIndexOf('/')) : ''
   return (
-    <div className="my-1.5 overflow-hidden rounded-md border border-border bg-card/60">
-      <div className="flex items-center gap-2 px-3 py-1.5 text-xs">
+    <div className="my-2 overflow-hidden rounded-md border border-border bg-card/60">
+      <div className="flex items-center gap-2 px-3 py-2 text-xs">
         <button type="button" onClick={() => setOpen((o) => !o)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
           <ChevronRight className={cn('h-3 w-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
           <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -102,20 +102,52 @@ function FileEditCard({ display }: { display: Extract<ToolDisplay, { kind: 'file
   )
 }
 
-/** Bash/command card (terminal-style): the command on a dark header, live stdout streaming below, exit status. */
+/** A human label for a shell command, so the card header reads "Building" not "npm run build". */
+function commandLabel(cmd: string): string {
+  const c = cmd.toLowerCase()
+  const has = (...xs: string[]) => xs.some((x) => c.includes(x))
+  if (has('npm install', 'npm ci', 'pnpm install', 'yarn install', 'bun install')) return 'Installing dependencies'
+  if (has('prisma migrate', 'db:migrate')) return 'Running migration'
+  if (has('db:seed', 'prisma db seed', 'seed.ts', 'seed.js')) return 'Seeding database'
+  if (has('prisma generate', 'db:generate')) return 'Generating Prisma client'
+  if (has('run dev', 'concurrently', 'vite --host', 'tsx watch', 'next dev')) return 'Starting dev server'
+  if (has('run build', 'vite build', 'tsc -b', 'tsc --build', 'next build')) return 'Building'
+  if (has('vitest', 'jest', 'npm test', 'run test', 'playwright test')) return 'Running tests'
+  if (has('biome', 'eslint', 'run lint', 'prettier', 'run format')) return 'Linting / formatting'
+  if (has('curl', 'fetch(', '/health', 'wget')) return 'Checking endpoint'
+  if (has('pkill', 'kill -', 'kill ')) return 'Stopping process'
+  if (has('git ')) return 'Git'
+  if (has('mkdir', 'rm -', 'cp ', 'mv ', 'touch ')) return 'File operation'
+  if (has('prisma')) return 'Prisma'
+  const first = (cmd.trim().split(/\s+/)[0] || 'command').split('/').pop() || 'command'
+  return first.charAt(0).toUpperCase() + first.slice(1)
+}
+
+/** Bash/command card — collapsible (like the file-edit card): a meaningful label + the raw command on a
+ *  themed header; the stdout is tucked behind a click. Errors auto-expand so the failure is visible. */
 function CommandCard({ item }: { item: Extract<Item, { kind: 'tool' }> }) {
   const command = item.summary.replace(/^Running:\s*/, '')
-  const StatusIcon = item.status === 'running' ? Loader2 : item.status === 'ok' ? CheckCircle2 : XCircle
+  const running = item.status === 'running'
+  const [open, setOpen] = useState(false)
+  // Surface a failure without a click.
+  useEffect(() => {
+    if (item.status === 'error') setOpen(true)
+  }, [item.status])
+  const StatusIcon = running ? Loader2 : item.status === 'ok' ? CheckCircle2 : XCircle
   return (
-    <div className="my-1.5 overflow-hidden rounded-md border border-border">
-      <div className="flex items-center gap-2 bg-neutral-900 px-3 py-1.5 font-mono text-[11px] text-neutral-100">
-        <Terminal className="h-3.5 w-3.5 shrink-0 text-neutral-400" />
-        <span className="shrink-0 text-green-400">$</span>
-        <span className="min-w-0 flex-1 truncate">{command}</span>
-        <StatusIcon className={cn('h-3.5 w-3.5 shrink-0', item.status === 'running' && 'animate-spin text-neutral-400', item.status === 'ok' && 'text-green-500', item.status === 'error' && 'text-red-500')} />
-      </div>
-      {item.preview && (
-        <pre className="max-h-56 overflow-auto whitespace-pre-wrap bg-neutral-950 px-3 py-1.5 font-mono text-[11px] text-neutral-300">{item.preview}</pre>
+    <div className="my-1.5 overflow-hidden rounded-md border border-border bg-card/60">
+      <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs">
+        <ChevronRight className={cn('h-3 w-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
+        <Terminal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="shrink-0 font-medium">
+          {commandLabel(command)}
+          {running && '…'}
+        </span>
+        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground/70">{command}</span>
+        <StatusIcon className={cn('h-3.5 w-3.5 shrink-0', running && 'animate-spin text-muted-foreground', item.status === 'ok' && 'text-green-500', item.status === 'error' && 'text-red-500')} />
+      </button>
+      {open && item.preview && (
+        <pre className="max-h-56 overflow-auto whitespace-pre-wrap border-t border-border bg-muted/50 px-3 py-1.5 font-mono text-[11px] text-foreground/80">{item.preview}</pre>
       )}
     </div>
   )
@@ -168,7 +200,7 @@ function ToolCard({ item }: { item: Extract<Item, { kind: 'tool' }> }) {
         type="button"
         disabled={!hasOutput}
         onClick={() => setOpen((o) => !o)}
-        className={cn('group flex w-full items-center gap-2 py-[3px] text-[13px] text-muted-foreground', hasOutput && 'hover:text-foreground')}
+        className={cn('group flex w-full items-center gap-2 py-1 text-[13px] text-muted-foreground', hasOutput && 'hover:text-foreground')}
       >
         <StatusIcon
           className={cn(
@@ -199,7 +231,7 @@ function ToolCard({ item }: { item: Extract<Item, { kind: 'tool' }> }) {
 function TodoCard({ items }: { items: TodoItem[] }) {
   const done = items.filter((t) => t.status === 'completed').length
   return (
-    <div className="my-1.5 rounded-md border border-border bg-card/80 p-2.5 text-[13px] text--muted-foreground">
+    <div className="my-4 rounded-md border border-border bg-card/80 p-2.5 text-[13px] text--muted-foreground">
       <div className="mb-1.5 flex items-center gap-2 font-medium text-muted-foreground">
         <ListTodo className="h-3.5 w-3.5" /> Tasks
         <span className="ml-auto font-mono text-[10px]">

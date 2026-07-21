@@ -58,6 +58,11 @@ export interface SessionOptions {
   contextWindow?: number
   /** Model max output tokens (ADR-039): caps the compaction summary reserve; helps small windows size correctly. */
   maxOutputTokens?: number
+  /** ADR-067 per-model sampling. Passed to the provider on every turn (each applies what it supports;
+   *  hosted reasoning models ignore them). Omit ⇒ backend defaults. */
+  temperature?: number
+  topP?: number
+  topK?: number
   /** Compaction tuning: `compactRatio` is the proportional trigger `pct` in the ADR-039 ladder (default 0.7);
    *  `keepRecentRatio` is the fraction of the effective window kept verbatim (default 0.25). */
   compactRatio?: number
@@ -330,6 +335,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
           delegateNudge: opts.delegateNudge, // ADR-050 (default on in the loop)
           hooks: hooksConfig, // ADR-036
           modelLimits: confidentLimits.contextWindow || confidentLimits.maxOutputTokens ? confidentLimits : undefined, // ADR-038 enforcement
+          sampling: opts.temperature !== undefined || opts.topP !== undefined || opts.topK !== undefined ? { temperature: opts.temperature, topP: opts.topP, topK: opts.topK } : undefined, // ADR-067
         })
       } catch (err) {
         const e = err as { name?: string; message?: string; cause?: { message?: string } }

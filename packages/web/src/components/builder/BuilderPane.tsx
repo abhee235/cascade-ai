@@ -37,14 +37,16 @@ export function BuilderPane() {
             </TabsTrigger>
           ))}
         </TabsList>
-        {/* Toggle the bottom panel (Terminal/Problems/Output/Ports) from the top — the way to reopen it. */}
+        {/* Toggle the bottom panel (Terminal/Problems/Output/Ports). Sits right after the tabs (not far right)
+            with a divider so it reads as the obvious way to open the terminal. */}
+        <div className="mx-2 h-5 w-px shrink-0 bg-border" />
         <button
           type="button"
           onClick={() => (bottomOpen ? toggleBottom() : setBottomTab('terminal'))}
           title="Toggle panel (Ctrl+`)"
           className={cn(
-            'ml-auto flex items-center gap-1.5 rounded px-2 py-1 text-sm transition-colors',
-            bottomOpen ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+            'flex items-center gap-1.5 rounded px-2 py-1 text-sm transition-colors',
+            bottomOpen ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground',
           )}
         >
           <SquareTerminal className="h-4 w-4" /> Terminal

@@ -49,3 +49,37 @@ export function photoFor(seed: string, category: PhotoCategory = 'texture'): str
 	const pool = CATEGORIES[category]
 	return photo(pool[(h >>> 0) % pool.length])
 }
+
+// ── Real WEB photos (opt-in) ──────────────────────────────────────────────────────────────────────
+// The bundled pack + <ArtImage> are the ROBUST default (offline, deterministic, on-theme). But some
+// apps genuinely need real, subject-accurate photography that the small pack can't cover — an e-commerce
+// catalog of real products, a travel/real-estate/recipe listing. For those, pull from an ALLOWLIST of
+// keyless, hotlink-safe sources ONLY — never arbitrary URLs (security: two known hosts, nothing else):
+//   • loremflickr.com  — keyword-relevant, CC-licensed Flickr photos (best for products)
+//   • picsum.photos    — seeded realistic stock (subject is random)
+// Prefer the <Photo> block over these raw URLs: it renders the photo with an automatic <ArtImage>
+// fallback, so a blocked/slow/failed load is NEVER a broken box.
+
+const seedNum = (s: string | number): number => {
+	if (typeof s === 'number') return Math.abs(Math.trunc(s)) % 100000
+	let h = 0x811c9dc5
+	for (let i = 0; i < s.length; i++) {
+		h ^= s.charCodeAt(i)
+		h = Math.imul(h, 0x01000193)
+	}
+	return (h >>> 0) % 100000
+}
+
+/** A REAL, subject-relevant photo from loremflickr (allowlisted, keyless). Deterministic per seed —
+ *  `webPhoto('leather watch minimal', product.name)`. Use when generated ArtImage looks too abstract
+ *  for the subject (real products, real-world listings). Space-separated keywords narrow the subject. */
+export function webPhoto(keywords: string, seed: string | number, size = 600): string {
+	const kw = keywords.trim().replace(/\s+/g, ',')
+	return `https://loremflickr.com/${size}/${size}/${encodeURIComponent(kw)}/${seedNum(seed)}`
+}
+
+/** A seeded realistic stock photo (random subject) from picsum.photos (allowlisted, keyless). For
+ *  heroes/banners/covers where you want a real photo but the exact subject doesn't matter. */
+export function seedPhoto(seed: string | number, w = 1200, h = 600): string {
+	return `https://picsum.photos/seed/${encodeURIComponent(String(seed))}/${w}/${h}`
+}

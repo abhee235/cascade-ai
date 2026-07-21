@@ -27,6 +27,10 @@ export interface CompletionRequest {
   tools?: ToolSchema[]
   /** Sampling temperature (E1/eval: 0 for determinism). Omit ⇒ backend default. */
   temperature?: number
+  /** Nucleus sampling (0–1). Omit ⇒ backend default. Applied where supported (Ollama, OpenAI chat). */
+  topP?: number
+  /** Top-K sampling. Omit ⇒ backend default. Ollama-native (OpenAI chat ignores it). */
+  topK?: number
   /** ADR-038 ENFORCEMENT: the ALLOCATED context window the caller is planning against. The provider must
    *  put it on the wire (Ollama: options.num_ctx via the native path) — otherwise the compactor protects a
    *  window the model may not actually have, and Ollama silently front-truncates the prompt (system prompt

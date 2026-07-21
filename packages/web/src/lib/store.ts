@@ -8,7 +8,12 @@ import type { WireEvent, WireMessage } from './wsClient'
 import { extractMessage, type BottomTab, type Item, type Page, type PreviewState, type Recovering, type RightTab, type RuntimeError, type Streaming } from './types'
 import { StreamingOptimizer } from './streamingOptimizer'
 import { applyAccent, applyTheme, getInitialAccent, getInitialTheme, type Theme } from './theme'
-import type { ChatMeta, FileNode, Problem, ProjectInfo, TemplateInfo, Version } from '@cascade/app-protocol'
+import type { ChatMeta, EnabledModelInfo, FileNode, ModelLimits, Problem, ProjectInfo, TemplateInfo, Version } from '@cascade/app-protocol'
+
+// ADR-068: events that mutate the active-chat transcript/streaming. Gated to the viewed project so a
+// background turn (another project) can't bleed into this one. Everything else (projects, files, preview,
+// turnActivity, chatHistory, …) is view-agnostic and always applied.
+const TURN_EVENTS = new Set(['step', 'status', 'recovering', 'thinking_delta', 'text_delta', 'toolStart', 'toolProgress', 'toolResult', 'message', 'memory', 'question', 'compacted', 'turnDone', 'error'])
 
 // Label for the `compacted` event's layer kind (ADR-039). Mirrors core's compactionKindLabel; inlined so the
 // browser bundle doesn't pull in the node-side @cascade/core runtime just for a string.
@@ -31,7 +36,11 @@ interface UiState {
   slugNotFound: string | null // a /project/<slug> URL that failed to resolve (deleted/mistyped) → not-found view
   // connection + projects
   connected: boolean
-  serverInfo: { sandbox: boolean; model: string } | null // server capabilities greeting (Terminal gate, Settings)
+  serverInfo: { sandbox: boolean; model: string; provider?: string; providers?: { id: string; configured: boolean }[] } | null // server greeting: Docker, active provider/model, provider menu (ADR-067)
+  models: Record<string, string[]> // ADR-067: cached model lists per provider (filled by `models` events, for the picker)
+  modelInfo: Record<string, { capabilities: string[]; contextWindow?: number; limits?: ModelLimits }> // ADR-067: per "provider/model" capabilities+context+slider limits (manager)
+  modelManagerOpen: boolean // ADR-067: the model-management dialog is open
+  enabledModels: EnabledModelInfo[] // ADR-067: the CURATED models shown in the picker (with per-model params)
   projects: ProjectInfo[]
   templates: TemplateInfo[]
   activeId: string | null
@@ -43,6 +52,9 @@ interface UiState {
   status: string | null
   recovering: Recovering | null
   busy: boolean
+  // ADR-068: the single active turn (server-tracked). Drives the sidebar dot + composer lock; a turn whose
+  // projectId ≠ the viewed project keeps running in the background (its events are gated out of this view).
+  turnActivity: { projectId?: string; chatId?: string; phase: 'running' | 'awaiting' } | null
   // Liveness: when the current model STEP began (reset at each step boundary), so the UI can tick an elapsed
   // timer — motion the user can see even when the model emits no tokens (prompt eval / a stall). `sawTokens`
   // flips true on the first thinking/text delta of the step, so we can say "Processing input…" (still ingesting
@@ -93,6 +105,15 @@ interface UiState {
   setConnected: (b: boolean) => void
   handleEvent: (e: WireEvent) => void
   submit: (text: string, images?: string[]) => void
+  listModels: (provider: string) => void // ADR-067: ask the server for a provider's models (→ cached in `models`)
+  setModel: (provider: string, model: string) => void // ADR-067: switch the active provider/model (no restart)
+  fetchModelInfo: (provider: string, model: string) => void // ADR-067: ask for a model's capabilities+context (→ `modelInfo`)
+  setApiKey: (provider: string, key: string) => void // ADR-067: set a provider's key on the running server
+  setModelManagerOpen: (open: boolean) => void // ADR-067: open/close the model-management dialog
+  addModel: (provider: string, model: string, contextWindow?: number) => void // ADR-067: add a model to the curated list
+  removeModel: (provider: string, model: string) => void // ADR-067: remove a model from the curated list
+  setModelContext: (provider: string, model: string, contextWindow?: number) => void // ADR-067: set a model's context override
+  setModelParams: (provider: string, model: string, params: Omit<EnabledModelInfo, 'provider' | 'model'>) => void // ADR-067: merge editable per-model params
   answerQuestion: (id: string, answers: import('@cascade/core').Answers) => void // ADR-043
   stop: () => void
   newChat: () => void // M11: start a fresh chat in the active project
@@ -224,6 +245,10 @@ export const useStore = create<UiState>((set, get) => {
     slugNotFound: null,
     connected: false,
     serverInfo: null,
+    models: {},
+    modelInfo: {},
+    modelManagerOpen: false,
+    enabledModels: [],
     projects: [],
     templates: [],
     activeId: null,
@@ -233,6 +258,7 @@ export const useStore = create<UiState>((set, get) => {
     status: null,
     recovering: null,
     busy: false,
+    turnActivity: null,
     stepStartedAt: null,
     sawTokens: false,
     chats: [],
@@ -275,7 +301,21 @@ export const useStore = create<UiState>((set, get) => {
     },
 
     handleEvent: (e) => {
+      // ADR-068: a turn belonging to a DIFFERENT project than the one on screen keeps running in the
+      // background — its transcript events must not leak into this view. They're logged server-side and
+      // re-attached (replay + live snapshot) when the user returns to that project. Non-turn events
+      // (projects/turnActivity/files/preview/…) are never gated.
+      const ta = get().turnActivity
+      if (ta && ta.projectId && ta.projectId !== get().activeId && TURN_EVENTS.has(e.type)) return
+
       switch (e.type) {
+        case 'turnActivity': // ADR-068: the single active turn changed (running / awaiting / done)
+          set({
+            turnActivity: e.phase ? { projectId: e.projectId, chatId: e.chatId, phase: e.phase } : null,
+            busy: !!e.phase, // block-until-free: any active turn locks the composer everywhere
+            ...(e.phase ? {} : { streaming: null, status: null, stepStartedAt: null, sawTokens: false }),
+          })
+          break
         case 'step':
           // Core's explicit step-start (the dead-air contract): prefill begins NOW — restart the
           // per-step timer and drop back to "reading input" until the first delta. NEVER touches
@@ -364,7 +404,16 @@ export const useStore = create<UiState>((set, get) => {
           break
         // ── app/builder events (BuilderEvent) ──
         case 'serverInfo':
-          set({ serverInfo: { sandbox: e.sandbox, model: e.model } })
+          set({ serverInfo: { sandbox: e.sandbox, model: e.model, provider: e.provider, providers: e.providers } })
+          break
+        case 'models': // ADR-067: a provider's model list arrived → cache it for the picker
+          set((s) => ({ models: { ...s.models, [e.provider]: e.models } }))
+          break
+        case 'modelInfo': // ADR-067: one model's capabilities+context → cache for the manager
+          set((s) => ({ modelInfo: { ...s.modelInfo, [`${e.provider}/${e.model}`]: { capabilities: e.capabilities, contextWindow: e.contextWindow, limits: e.limits } } }))
+          break
+        case 'enabledModels': // ADR-067: the curated picker list
+          set({ enabledModels: e.models })
           break
         case 'allChats':
           set({ allChats: e.groups })
@@ -425,8 +474,9 @@ export const useStore = create<UiState>((set, get) => {
           // GUARD (measured in the first live walkthrough): the Home flow sends `open` + `submit`
           // back-to-back, and the open's chatHistory reply (an EMPTY saved chat) landed AFTER the
           // optimistic user message — wiping the pane while the plan stage ran, so the app looked
-          // stuck for minutes. A history load must never clobber an in-flight turn.
-          if (get().busy) break
+          // stuck for minutes. Skip only an EMPTY history while busy; a NON-empty history is a real
+          // restore (ADR-068: returning to a running chat) and must load, then re-attach live.
+          if (get().busy && !e.events?.length) break
           if (e.events?.length) {
             // High-fidelity path: RE-DISPATCH the logged live events through this very reducer — the
             // reloaded transcript is the live transcript by construction (tool cards with status/diffs/
@@ -491,6 +541,22 @@ export const useStore = create<UiState>((set, get) => {
       send({ type: 'submit', text: t, images })
     },
 
+    // ADR-067: the runtime model picker + manager.
+    listModels: (provider) => get().send({ type: 'listModels', provider }),
+    setModel: (provider, model) =>
+      set((s) => {
+        s.send({ type: 'setModel', provider, model })
+        // optimistic: reflect the choice immediately (the server confirms with a fresh serverInfo)
+        return { serverInfo: s.serverInfo ? { ...s.serverInfo, provider, model } : s.serverInfo }
+      }),
+    fetchModelInfo: (provider, model) => get().send({ type: 'modelInfo', provider, model }),
+    setApiKey: (provider, key) => get().send({ type: 'setApiKey', provider, key }),
+    setModelManagerOpen: (open) => set({ modelManagerOpen: open }),
+    addModel: (provider, model, contextWindow) => get().send({ type: 'addModel', provider, model, contextWindow }),
+    removeModel: (provider, model) => get().send({ type: 'removeModel', provider, model }),
+    setModelContext: (provider, model, contextWindow) => get().send({ type: 'setModelContext', provider, model, contextWindow }),
+    setModelParams: (provider, model, params) => get().send({ type: 'setModelParams', provider, model, params }),
+
     // ADR-043: deliver the user's answer to a `question` event → wakes the parked agent loop; mark the card done.
     answerQuestion: (id, answers) => {
       get().send({ type: 'answer', id, answers })
@@ -515,7 +581,9 @@ export const useStore = create<UiState>((set, get) => {
       if (id === get().activeId) return
       // Set activeId optimistically so submit() works before the server's `projects` snapshot round-trips.
       terminalSinks.clear() // the server kills the old project's shells on switch; drop their writers
-      set({ activeId: id, items: [], streaming: null, status: null, busy: false, stepStartedAt: null, sawTokens: false, chats: [], activeChatId: null, fileTree: [], openTabs: [], openFile: null, fileError: null, fileDiff: null, codeView: 'code', preview: null, logs: [], problems: [], checking: false, runtimeErrors: [], versions: [], terminals: [], activeTerminalId: null, selectMode: false })
+      // ADR-068: keep the composer locked if a turn is still running elsewhere (block-until-free); its view
+      // restores when we open it, or when the server re-attaches this project's own live turn.
+      set({ activeId: id, items: [], streaming: null, status: null, busy: !!get().turnActivity, stepStartedAt: null, sawTokens: false, chats: [], activeChatId: null, fileTree: [], openTabs: [], openFile: null, fileError: null, fileDiff: null, codeView: 'code', preview: null, logs: [], problems: [], checking: false, runtimeErrors: [], versions: [], terminals: [], activeTerminalId: null, selectMode: false })
       get().send({ type: 'project', action: 'open', id })
     },
     deleteProject: (id) => {

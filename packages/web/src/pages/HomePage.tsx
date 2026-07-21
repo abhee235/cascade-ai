@@ -7,6 +7,7 @@ import { useStore } from '@/lib/store'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { ModelPicker } from '@/components/chat/ModelPicker'
 
 export function HomePage() {
   const { templates, startBuild, connected } = useStore()
@@ -56,6 +57,8 @@ export function HomePage() {
               ))}
             </SelectContent>
           </Select>
+          {/* choose the model to build with before starting (switches the active model, like the composer) */}
+          <ModelPicker />
           <Button size="icon" className="ml-auto rounded-full" disabled={!connected || !prompt.trim()} onClick={go} title="Build">
             <ArrowUp className="h-4 w-4" />
           </Button>

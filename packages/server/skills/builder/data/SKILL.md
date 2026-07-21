@@ -9,12 +9,20 @@ whenToUse: Load when the task mentions ANY of: products, items, catalog, list of
 
 ```ts
 // types.ts
-export interface Product { id: number; name: string; price: number; category: string; emoji: string }
+export interface Product { id: number; name: string; price: number; category: string; image: string }
 // data.ts
-export const PRODUCTS: Product[] = [ { id: 1, name: 'Trail Backpack', price: 89, category: 'Gear', emoji: '🎒' }, /* 6+ realistic entries */ ]
+export const PRODUCTS: Product[] = [ { id: 1, name: 'Trail Backpack', price: 89, category: 'Gear', image: 'hiking backpack outdoor' }, /* 6+ realistic entries */ ]
 ```
 
 Make seed data REALISTIC (varied names/prices/categories) — it is the demo the user sees.
+
+**Images are DATA too.** An image/photo/cover/avatar field is NOT an emoji and NOT a bundled `PhotoName` you
+invent (only ~2 product photos exist — inventing names silently yields empty boxes). Store SHORT descriptive
+**keywords** (`image: 'leather watch minimal'`, `'linen shirt fashion'`) and render with the `<Photo>` block —
+`<Photo web={p.image} seed={p.name} kind="product" />` (design skill §6). It pulls a real, subject-relevant
+photo from an allowlisted source with an automatic `<ArtImage>` fallback. For a real catalog (store, listings,
+recipes) prefer this over abstract art — it makes the demo look real. Reserve emoji for labels/tags, never as
+an image.
 
 ## Collections keyed by id; derived values computed, never stored
 

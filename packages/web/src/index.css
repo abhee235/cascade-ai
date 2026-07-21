@@ -146,6 +146,35 @@ body {
   font-family: var(--font-sans);
 }
 
+/* ── Global scrollbars — match the shadcn ScrollArea look (thin, rounded, subtle) instead of the browser
+   default (too wide, too dark). Applied to every native overflow container at once; Monaco/xterm draw their
+   own overlay scrollbars and are unaffected. Firefox uses the two-keyword `scrollbar-*`; WebKit/Chromium use
+   the pseudo-elements. The transparent border + padding-box clip insets the thumb so the visible bar is ~4px. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* ── Chat transcript (scoped to the chat panel ONLY).
    Design language: hierarchy from TYPE, not boxes. Muted prose, dark tracking-tight headings,
    markerless custom-dot lists, 12px block rhythm, hairline everything. ── */
@@ -224,4 +253,83 @@ body {
 .chat-transcript .prose :not(pre) > code::before,
 .chat-transcript .prose :not(pre) > code::after {
   content: none; /* strip the prose plugin's backticks */
+}
+
+/* ── Streamdown fenced code blocks in chat — tame the vendor defaults to our scale. Streamdown ships inline
+   Tailwind (p-3 header, text-sm/p-4 body); its styles.css isn't imported, so we override by data-hook,
+   scoped under .prose (specificity beats the single utility classes). Header → py-2; code → 13px. ── */
+.prose [data-streamdown='code-block-header'] {
+  padding: 0.25rem 0.75rem; /* py-2 px-3 — kill the oversized header gap */
+}
+.prose [data-streamdown='code-block'] pre {
+  padding: 0.75rem 1rem; /* py-3 px-4 — balanced for the smaller font */
+  font-size: 13px;
+  line-height: 1.5;
+}
+.prose [data-streamdown='code-block'] pre code {
+  font-size: 13px;
+}
+
+.prose [data-streamdown='list-item'] {
+  padding : 0;
+}
+
+.prose [data-streamdown='list-item'] code {
+  font-size: 13px !important;
+  line-height: 1.5;
+}
+
+
+/* ── Model-parameter sliders (ADR-067) — thin rounded track + circular brand thumb, theme-aware.
+   `accent-color` can't restyle the native track, so we own the whole control. The FILLED (visited) portion is
+   the brand colour at full strength; the UNFILLED remainder is the same hue at 0.1. The component sets `--pct`
+   (thumb position 0–100%) inline so a gradient can split the track there — cross-browser (WebKit gradient +
+   Firefox ::-moz-range-progress). ── */
+.param-slider {
+  --pct: 50%;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 9999px;
+  background: linear-gradient(
+    to right,
+    var(--primary) 0 var(--pct),
+    color-mix(in srgb, var(--primary) 10%, transparent) var(--pct) 100%
+  );
+  cursor: pointer;
+}
+.param-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -2px; /* centre the 16px thumb on the 6px track */
+  border-radius: 9999px;
+  background: var(--primary);
+  border: 2px solid var(--background);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+}
+/* Firefox: a real progress element fills the visited side; the track holds the 0.1 remainder. */
+.param-slider::-moz-range-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+.param-slider::-moz-range-progress {
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--primary);
+}
+.param-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--background);
+  border-radius: 9999px;
+  background: var(--primary);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+}
+.param-slider:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }

@@ -21,6 +21,8 @@ import { ensurePlanPersisted } from './planStage.js'
 import { DockerSandbox, dockerAvailable, sweepSandboxContainers } from './dockerSandbox.js'
 import { ensureVisualEditConfig, listTemplates } from './templates.js'
 import { ChatStore } from './chatStore.js'
+import { listModels, modelInfo, providerCatalog, setProviderKey } from './modelCaps.js'
+import { addEnabledModel, enabledModels, initModelRegistry, modelContextFor, modelParamsFor, removeEnabledModel, setModelContext, setModelParams } from './modelRegistry.js'
 import type { ChatHistoryItem } from '@cascade/app-protocol'
 import type { Message } from '@cascade/core'
 import { createFile, deletePath, editJsxTextAtLoc, makeDir, readDiff, readFile, readTree, renamePath, setClassAtLoc, writeFile } from './fileService.js'
@@ -133,6 +135,22 @@ export function handleConnection(
   // responses (answer/permission/abort) must reach IT, not the builder, for the stage's duration.
   let stageAborted = false // abort during the stage cancels the WHOLE submit, not just the planner
   let activeChatId: string | undefined // M11: which chat (conversation) the active session is currently on
+  // ADR-068: the SINGLE active turn (block-until-free). Holds a live snapshot so navigating away and back
+  // restores the exact panel — committed items come from the replay log, the in-flight streaming + a parked
+  // approval card come from here (kept in memory, re-sent on re-attach). `phase` drives the sidebar dot.
+  let activeTurn:
+    | { projectId: string; chatId: string; phase: 'running' | 'awaiting'; streamText: string; streamThinking: string; status?: string; pendingQuestion?: unknown }
+    | null = null
+  const sendTurnActivity = () => send({ type: 'turnActivity', projectId: activeTurn?.projectId, chatId: activeTurn?.chatId, phase: activeTurn?.phase ?? null })
+  // On opening the project whose turn is live, replay the in-flight state that the persisted log doesn't hold.
+  const reattachTurn = () => {
+    if (!activeTurn || activeTurn.projectId !== activeId) return
+    if (activeTurn.status) send({ type: 'status', text: activeTurn.status })
+    if (activeTurn.streamThinking) send({ type: 'thinking_delta', thinking: activeTurn.streamThinking })
+    if (activeTurn.streamText) send({ type: 'text_delta', text: activeTurn.streamText })
+    if (activeTurn.pendingQuestion) send(activeTurn.pendingQuestion) // the parked card — still answerable (loop alive)
+    sendTurnActivity()
+  }
   let stopTail: (() => void) | undefined // M5: stops the Console log stream (tail) for this connection
   const terms = new Map<string, TerminalHandle>() // M7: the connection's terminal sessions, keyed by id
   const killAllTerms = () => {
@@ -161,10 +179,14 @@ export function handleConnection(
   }
 
   // Greet the new connection with capabilities + the project list + available templates so the UI can render
-  // immediately (serverInfo drives the Terminal's Docker gate and the Settings page).
-  if (serverInfo) send({ type: 'serverInfo', ...serverInfo })
+  // immediately (serverInfo drives the Terminal's Docker gate and the Settings page). ADR-067: model +
+  // provider come from the manager (runtime-mutable), and the provider menu rides along for the picker.
+  if (serverInfo) send({ type: 'serverInfo', sandbox: serverInfo.sandbox, model: manager.currentModel, provider: manager.currentProvider, providers: providerCatalog() })
   send({ type: 'projects', projects: manager.list(), activeId })
   send({ type: 'templates', templates: listTemplates() })
+  // ADR-067: the curated model list for the picker (always includes the running model).
+  const sendEnabledModels = () => send({ type: 'enabledModels', models: enabledModels({ provider: manager.currentProvider, model: manager.currentModel }) })
+  sendEnabledModels()
 
   // Send the active project's file tree (M4) — on open and after each turn (the agent may have edited files).
   const sendTree = () => {
@@ -259,50 +281,141 @@ export function handleConnection(
               emitPreview(pv)
               if (pv.status === 'running' && activeId) startTail(activeId) // resume its Console logs
             }
+            reattachTurn() // ADR-068: if this project's turn is live, replay its in-flight stream + parked card
           }
+          break
+        }
+        // ADR-067: runtime provider/model switching — no server restart.
+        case 'listModels': {
+          send({ type: 'models', provider: msg.provider, models: await listModels(msg.provider, msg.baseUrl) })
+          break
+        }
+        case 'modelInfo': {
+          const info = await modelInfo(msg.provider, msg.model, msg.baseUrl)
+          send({ type: 'modelInfo', provider: msg.provider, model: msg.model, capabilities: info.capabilities, contextWindow: info.contextWindow, limits: info.limits })
+          break
+        }
+        case 'setApiKey': {
+          setProviderKey(msg.provider, msg.key)
+          // re-announce providers (configured status may have flipped)
+          send({ type: 'serverInfo', sandbox: serverInfo?.sandbox ?? false, model: manager.currentModel, provider: manager.currentProvider, providers: providerCatalog() })
+          break
+        }
+        case 'addModel': {
+          addEnabledModel(msg.provider, msg.model, msg.contextWindow)
+          sendEnabledModels()
+          break
+        }
+        case 'removeModel': {
+          removeEnabledModel(msg.provider, msg.model)
+          sendEnabledModels()
+          break
+        }
+        case 'setModelContext': {
+          setModelContext(msg.provider, msg.model, msg.contextWindow)
+          sendEnabledModels()
+          // if it's the active model, re-apply so the new window takes effect now
+          if (manager.currentProvider === msg.provider && manager.currentModel === msg.model) {
+            await manager.setModelConfig({ provider: msg.provider, model: msg.model, contextWindow: msg.contextWindow })
+          }
+          break
+        }
+        case 'setModelParams': {
+          // ADR-067: merge the full editable param set (context/output/sampling) and persist it.
+          setModelParams(msg.provider, msg.model, msg.params)
+          sendEnabledModels()
+          // Live-apply to the active model so tweaks take effect on the next turn without a re-switch.
+          if (manager.currentProvider === msg.provider && manager.currentModel === msg.model) {
+            await manager.setModelConfig({ provider: msg.provider, model: msg.model, ...modelParamsFor(msg.provider, msg.model) })
+          }
+          break
+        }
+        case 'setModel': {
+          // ADR-067: apply the target model's saved params (window/output/sampling) on activation.
+          await manager.setModelConfig({ provider: msg.provider, model: msg.model, baseUrl: msg.baseUrl, ...modelParamsFor(msg.provider, msg.model) })
+          // The switch dropped every cached session; rebuild the active one and reload its history so the
+          // conversation continues under the new provider. Then re-announce the active model.
+          if (activeId) {
+            active = manager.open(activeId)
+            if (activeChatId) loadChat(activeChatId)
+          }
+          send({ type: 'serverInfo', sandbox: serverInfo?.sandbox ?? false, model: manager.currentModel, provider: manager.currentProvider, providers: providerCatalog() })
           break
         }
         case 'submit': {
           const s = requireActive()
           if (!s) break
-          // ADR-056 rung 3: first message of a fresh, unplanned project → run the planner as its own
-          // top-level session FIRST (deterministic — planner-1 measured that asking the model doesn't
-          // work). Its events (incl. AskUserQuestion) stream to the client on the same pipe; its
-          // turnDone is swallowed so the UI sees ONE turn. Plan failure never blocks the build — the
-          // builder proceeds and the core nudge remains as the in-session safety net.
-          logReplay({ user: msg.text }) // the user row of the replay, FIRST — matching the live optimistic render
-          const planner = activeId ? manager.planSessionFor(activeId) : undefined
-          if (planner) {
-            staging = planner
-            send({ type: 'status', text: 'Planning first — writing PLAN.md…' })
-            try {
-              for await (const ev of planner.submit(msg.text)) {
-                if (ev.type === 'turnDone') continue
-                send(ev)
-                logEvent(ev)
-              }
-            } finally {
-              staging = undefined
-              const dir = activeId && manager.dirOf(activeId)
-              if (dir) ensurePlanPersisted(dir, planner) // guarantee PLAN.md (from the write, or the final message)
-              await planner.dispose().catch(() => {})
-            }
-            sendTree() // PLAN.md (and nothing else) appeared
-            if (stageAborted) {
-              stageAborted = false
-              send({ type: 'turnDone', steps: 0 }) // close the turn — the user cancelled; don't build
-              break
-            }
+          // ADR-068: pin this turn's project/chat so its logging + save can't be misrouted if the user browses
+          // to another project mid-build. Also seed the live snapshot for re-attach.
+          const turnProjectId = activeId!
+          const turnChatId = activeChatId ?? ''
+          const turnDir = manager.dirOf(turnProjectId)
+          const pinnedLog = (entry: import('@cascade/app-protocol').ChatReplayEntry) => {
+            if (turnDir && chatStore && turnChatId) chatStore.appendEvent(turnDir, turnChatId, entry)
           }
-          for await (const ev of s.submit(msg.text, msg.images)) {
-            send(ev) // M11: images = attached data-URIs
-            logEvent(ev)
+          activeTurn = { projectId: turnProjectId, chatId: turnChatId, phase: 'running', streamText: '', streamThinking: '' }
+          sendTurnActivity()
+          // relay: update the live snapshot (for perfect re-attach) + flip phase on approval + send + log.
+          const relay = (ev: { type: string; [k: string]: unknown }) => {
+            if (activeTurn) {
+              if (ev.type === 'text_delta') activeTurn.streamText += String(ev.text ?? '')
+              else if (ev.type === 'thinking_delta') activeTurn.streamThinking += String(ev.thinking ?? '')
+              else if (ev.type === 'status') activeTurn.status = String(ev.text ?? '')
+              else if (ev.type === 'message' || ev.type === 'toolStart' || ev.type === 'toolResult' || ev.type === 'memory' || ev.type === 'compacted') {
+                activeTurn.streamText = ''
+                activeTurn.streamThinking = ''
+                activeTurn.status = undefined
+              }
+              if (ev.type === 'question') {
+                activeTurn.phase = 'awaiting'
+                activeTurn.pendingQuestion = ev
+                sendTurnActivity() // → amber dot
+              } else if (activeTurn.phase === 'awaiting') {
+                activeTurn.phase = 'running'
+                activeTurn.pendingQuestion = undefined
+                sendTurnActivity()
+              }
+            }
+            send(ev)
+            if (REPLAY_TYPES.has(ev.type)) pinnedLog({ event: ev })
+          }
+
+          // ADR-056 rung 3: first message of a fresh, unplanned project → run the planner as its own
+          // top-level session FIRST (deterministic). Its events (incl. AskUserQuestion) stream on the same
+          // pipe; its turnDone is swallowed so the UI sees ONE turn.
+          pinnedLog({ user: msg.text }) // the user row of the replay, FIRST — matching the live optimistic render
+          const planner = activeId ? manager.planSessionFor(activeId) : undefined
+          try {
+            if (planner) {
+              staging = planner
+              relay({ type: 'status', text: 'Planning first — writing PLAN.md…' })
+              try {
+                for await (const ev of planner.submit(msg.text)) {
+                  if (ev.type === 'turnDone') continue
+                  relay(ev)
+                }
+              } finally {
+                staging = undefined
+                if (turnDir) ensurePlanPersisted(turnDir, planner) // guarantee PLAN.md
+                await planner.dispose().catch(() => {})
+              }
+              sendTree() // PLAN.md (and nothing else) appeared
+              if (stageAborted) {
+                stageAborted = false
+                send({ type: 'turnDone', steps: 0 }) // close the turn — the user cancelled; don't build
+                break
+              }
+            }
+            for await (const ev of s.submit(msg.text, msg.images)) relay(ev) // M11: images = attached data-URIs
+          } finally {
+            activeTurn = null // turn over (or aborted) — clear the dot + composer lock
+            sendTurnActivity()
           }
           sendTree() // the agent may have created/edited files — refresh the tree
-          saveChat(msg.text) // M11: persist the turn to the active chat (+ title it from the first message)
+          if (turnDir && chatStore) chatStore.save(turnDir, turnChatId, s.getHistory(), msg.text) // pinned save
           sendChats() // the title may have changed
           // M6: checkpoint the turn's file changes (no-op if nothing changed), then refresh the history.
-          const dir = activeId && manager.dirOf(activeId)
+          const dir = turnDir
           if (dir && versions?.checkpoint(dir, msg.text)) sendVersions()
           break
         }
@@ -567,6 +680,7 @@ async function start() {
   }
   const sandboxFor = hasDocker ? (dir: string) => new DockerSandbox(dir) : undefined
 
+  initModelRegistry(PROJECTS_ROOT) // ADR-067: curated model list persisted under PROJECTS_ROOT/.cascade/
   const manager = new ProjectManager({ root: PROJECTS_ROOT, provider: PROVIDER, model: MODEL, baseUrl: BASE_URL, contextWindow: CONTEXT_WINDOW, sandboxFor })
   // M5.2: a stable preview origin. The proxy forwards http://localhost:PREVIEW_PORT → the active container,
   // and the dev server's HMR connects on PREVIEW_PORT too (same origin as the iframe).

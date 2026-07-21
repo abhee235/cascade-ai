@@ -48,8 +48,33 @@ export type ChatReplayEntry = { user: string } | { event: unknown }
  *    | { type: 'versions'; projectId: string; versions: { id: string; summary: string; createdAt: string }[] }
  *    | { type: 'files';    projectId: string; tree: ... }
  */
+/** ADR-067: the OFFICIAL ceilings that bound a model's config sliders (from the server's model-spec table:
+ *  max context window / output tokens / temperature, and whether the model exposes top_k at all). */
+export interface ModelLimits {
+	contextMax: number
+	outputMax: number
+	tempMax: number
+	topK: boolean
+}
+
+/** ADR-067: a curated model plus its editable per-model params (context window, output cap, sampling).
+ *  Shared by the `enabledModels` event and the `setModelParams` command. */
+export interface EnabledModelInfo {
+  provider: string
+  model: string
+  contextWindow?: number
+  maxOutputTokens?: number
+  temperature?: number
+  topP?: number
+  topK?: number
+}
+
 export type BuilderEvent =
-  | { type: 'serverInfo'; sandbox: boolean; model: string } // capabilities greeting: is Docker up, which model (drives the Terminal gate + Settings)
+  | { type: 'serverInfo'; sandbox: boolean; model: string; provider?: string; providers?: { id: string; configured: boolean }[] } // greeting: Docker up, active provider/model, and the provider menu (ADR-067)
+  | { type: 'models'; provider: string; models: string[] } // ADR-067: models a provider offers (for the picker)
+  | { type: 'modelInfo'; provider: string; model: string; capabilities: string[]; contextWindow?: number; limits?: ModelLimits } // ADR-067: one model's capabilities + context + slider limits (manager)
+  | { type: 'enabledModels'; models: EnabledModelInfo[] } // ADR-067: the CURATED models shown in the picker (with per-model params)
+  | { type: 'turnActivity'; projectId?: string; chatId?: string; phase: 'running' | 'awaiting' | null } // ADR-068: the single active turn — drives the sidebar dot + composer lock + re-attach on return
   | { type: 'projects'; projects: ProjectInfo[]; activeId?: string } // project sidebar snapshot
   | { type: 'projectCreated'; project: ProjectInfo } // a project was just created (so the Home flow can open it)
   | { type: 'templates'; templates: TemplateInfo[] } // available scaffolds for the create flow (Phase 15)
@@ -73,6 +98,14 @@ export type BuilderEvent =
  *  version restore/checkout, file read/write, etc. */
 export type BuilderCommand =
   | { type: 'project'; action: 'list' | 'create' | 'open' | 'delete'; name?: string; id?: string; templateId?: string }
+  | { type: 'setModel'; provider: string; model: string; baseUrl?: string } // ADR-067: switch provider/model at runtime (no restart)
+  | { type: 'listModels'; provider: string; baseUrl?: string } // ADR-067: ask for a provider's model list (→ `models`)
+  | { type: 'modelInfo'; provider: string; model: string; baseUrl?: string } // ADR-067: ask for one model's capabilities+context (→ `modelInfo`)
+  | { type: 'setApiKey'; provider: string; key: string } // ADR-067: set a provider's API key for the running server (→ fresh serverInfo)
+  | { type: 'addModel'; provider: string; model: string; contextWindow?: number } // ADR-067: add a model to the curated picker list
+  | { type: 'removeModel'; provider: string; model: string } // ADR-067: remove a model from the curated list
+  | { type: 'setModelContext'; provider: string; model: string; contextWindow?: number } // ADR-067: set a model's context-window override
+  | { type: 'setModelParams'; provider: string; model: string; params: Omit<EnabledModelInfo, 'provider' | 'model'> } // ADR-067: merge editable per-model params (context/output/sampling)
   | { type: 'files'; action: 'list' } // request the active project's file tree (M4)
   | { type: 'file'; action: 'read' | 'diff'; path: string } // read a file (M4) or get its diff vs last commit (M2)
   | { type: 'file'; action: 'write'; path: string; content: string } // overwrite a file (M9 visual editing / Code-pane save)
