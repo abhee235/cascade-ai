@@ -74,6 +74,10 @@ export class PreviewManager {
       const hostPort = await sandbox.getHostPort()
       // HMR connects on the proxy port (stable origin) when a proxy is in use, else the direct host port.
       const hmrPort = this.hmrClientPort ?? hostPort
+      // ADR-066: reap any dev/API processes a PRIOR submit's Bash left running before starting a fresh one.
+      // Measured (luna full-stack run): orphaned vite + a stale API server accumulated across submits,
+      // causing port conflicts and smoke tests that hit the wrong process. Best-effort; harmless if none.
+      await sandbox.exec('pkill -f "vite" ; pkill -f "tsx.*server" ; true').catch(() => {})
       // Redirect output to DEV_LOG so the Console pane can tail it (detached exec discards stdout otherwise).
       await sandbox.execDetached(`CHOKIDAR_USEPOLLING=true VITE_HMR_CLIENT_PORT=${hmrPort} npm run dev > ${DEV_LOG} 2>&1`)
       const url = `http://localhost:${hostPort}` // direct url; wsServer rewrites it to the proxy origin

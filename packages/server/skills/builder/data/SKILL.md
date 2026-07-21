@@ -36,7 +36,32 @@ const shown = useMemo(() => ITEMS.filter(i =>
   i.name.toLowerCase().includes(query.toLowerCase())), [cat, query])
 ```
 
-## Persistence = one localStorage hook, reused
+## Persistence — TWO tools, use the right one
+
+**Collections of entities (recipes, products, tasks) → `createStore` from `@/lib/storage`.** This is
+THE seam: it starts localStorage-backed, and if the app later grows a backend it swaps to an API with
+zero changes to your views. NEVER read/write `localStorage` for a collection directly in a view.
+
+```ts
+// src/lib/storage.ts already exists (the seam). Create ONE store per collection, at module scope:
+import { createStore } from '@/lib/storage'
+import { SEED_RECIPES } from '@/lib/data'
+export const recipeStore = createStore<Recipe>('recipes', SEED_RECIPES)
+
+// Wrap it in a hook so components get reactive state + actions:
+export function useRecipes() {
+  const [recipes, setRecipes] = useState(() => recipeStore.list())
+  const add = (r: Recipe) => { recipeStore.create(r); setRecipes(recipeStore.list()) }
+  const edit = (id: Recipe['id'], patch: Partial<Recipe>) => { recipeStore.update(id, patch); setRecipes(recipeStore.list()) }
+  const remove = (id: Recipe['id']) => { recipeStore.remove(id); setRecipes(recipeStore.list()) }
+  return { recipes, add, edit, remove }
+}
+```
+
+Store API: `list() · get(id) · create(item) · update(id, patch) · remove(id) · replaceAll(items)`.
+Entities need a stable `id`.
+
+**Scalar preferences (theme, an open flag) → a tiny `useLocalStorage` hook.** Not a collection, no seam:
 
 ```ts
 function useLocalStorage<T>(key: string, initial: T) {
@@ -45,5 +70,3 @@ function useLocalStorage<T>(key: string, initial: T) {
   return [v, setV] as const
 }
 ```
-
-Use it for carts, theme, saved records — anything that should survive a refresh.

@@ -8,6 +8,7 @@
 //
 // Shape: a web server + a session relay decoupled from the transport.
 
+import './loadDotEnv.js' // FIRST import: .env → process.env before the CASCADE_* consts below read it
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
@@ -34,8 +35,29 @@ type Inbound = InboundMessage | BuilderCommand
 
 const PORT = Number(process.env.CASCADE_PORT ?? 4319)
 const PREVIEW_PORT = Number(process.env.CASCADE_PREVIEW_PORT ?? 4320) // M5.2: stable preview-proxy origin
-const MODEL = process.env.CASCADE_MODEL ?? 'qwen2.5-coder:latest'
+// Multi-provider (ADR-020 finally reaching the server): ollama stays the default; any OpenAI-compatible
+// hosted backend works via CASCADE_PROVIDER (+ key in .env). Unknown ids need CASCADE_BASE_URL too.
+const PROVIDER = (process.env.CASCADE_PROVIDER ?? 'ollama').toLowerCase()
+// Per-provider default model: only where a safe universal default EXISTS. Hosted catalogs vary too much
+// to guess (openrouter/nvidia ids are vendor-prefixed) — for those, requireModel() below fails fast.
+const DEFAULT_MODELS: Record<string, string> = { ollama: 'qwen2.5-coder:latest', openai: 'gpt-5-mini' }
+const MODEL = process.env.CASCADE_MODEL ?? DEFAULT_MODELS[PROVIDER] ?? ''
 const BASE_URL = process.env.CASCADE_BASE_URL || undefined
+// Compaction window override — mainly for hosted providers (no live probe): set this if your NIM/OpenRouter
+// endpoint serves a different window than the model's native max in the model→window map. 0/unset ⇒ the map.
+const CONTEXT_WINDOW = Number(process.env.CASCADE_CONTEXT_WINDOW) || undefined
+
+// Fail fast at BOOT on obvious misconfiguration — a clear message here beats a cryptic HTTP 401/404
+// twenty turns into a build. Key names mirror the factory's resolution (OPENAI_API_KEY etc. > CASCADE_API_KEY).
+const KEY_VARS: Record<string, string> = { openai: 'OPENAI_API_KEY', groq: 'GROQ_API_KEY', openrouter: 'OPENROUTER_API_KEY', nvidia: 'NVIDIA_API_KEY' }
+if (!MODEL) {
+  console.error(`CASCADE_PROVIDER=${PROVIDER} has no default model — set CASCADE_MODEL (e.g. in .env). Example for nvidia: CASCADE_MODEL=moonshotai/kimi-k2-instruct`)
+  process.exit(1)
+}
+if (KEY_VARS[PROVIDER] && !process.env[KEY_VARS[PROVIDER]] && !process.env.CASCADE_API_KEY) {
+  console.error(`Provider "${PROVIDER}" needs an API key: set ${KEY_VARS[PROVIDER]} (or CASCADE_API_KEY) in .env at the repo root.`)
+  process.exit(1)
+}
 const PROJECTS_ROOT = process.env.CASCADE_PROJECTS_ROOT || join(process.cwd(), 'cascade-projects')
 
 // ── Security (M7) ──────────────────────────────────────────────────────────────────────────────────────
@@ -545,7 +567,7 @@ async function start() {
   }
   const sandboxFor = hasDocker ? (dir: string) => new DockerSandbox(dir) : undefined
 
-  const manager = new ProjectManager({ root: PROJECTS_ROOT, model: MODEL, baseUrl: BASE_URL, sandboxFor })
+  const manager = new ProjectManager({ root: PROJECTS_ROOT, provider: PROVIDER, model: MODEL, baseUrl: BASE_URL, contextWindow: CONTEXT_WINDOW, sandboxFor })
   // M5.2: a stable preview origin. The proxy forwards http://localhost:PREVIEW_PORT → the active container,
   // and the dev server's HMR connects on PREVIEW_PORT too (same origin as the iframe).
   const previewProxy = hasDocker ? new PreviewProxy(PREVIEW_PORT) : undefined
@@ -565,7 +587,7 @@ async function start() {
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
   console.log(
-    `Cascade server listening on ws://${HOST}:${PORT}  (model: ${MODEL}, projects: ${PROJECTS_ROOT}, sandbox: ${hasDocker ? 'docker' : 'host'})`,
+    `Cascade server listening on ws://${HOST}:${PORT}  (provider: ${PROVIDER}, model: ${MODEL}, projects: ${PROJECTS_ROOT}, sandbox: ${hasDocker ? 'docker' : 'host'})`,
   )
   if (sandboxEnabled && !hasDocker)
     console.warn('⚠️  Docker not available — agent commands run on the HOST (no isolation). Install/start Docker Desktop for per-project sandboxing.')

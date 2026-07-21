@@ -1,0 +1,26 @@
+// Prisma schema — the app's database (SQLite, file-backed at prisma/dev.db).
+// Add one `model` per collection, then run:  npm run db:migrate  (creates the table + client).
+//
+// Rules that keep this weak-model-safe and local-first:
+//  - datasource stays sqlite (no server to run; the file IS the database).
+//  - every model needs an `id`. Use autoincrement Int for simple local data, or String @default(cuid())
+//    if the frontend generates ids.
+//  - field names should match your src/lib/types.ts interface so seed + API pass objects straight through.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// EXAMPLE — replace with your real model(s), matching src/lib/types.ts, then migrate.
+// model Recipe {
+//   id       Int      @id @default(autoincrement())
+//   name     String
+//   cuisine  String
+//   cookTime Int
+//   favorite Boolean  @default(false)
+// }

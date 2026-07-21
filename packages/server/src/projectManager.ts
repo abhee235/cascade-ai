@@ -15,6 +15,7 @@ import type { ProjectInfo } from '@cascade/app-protocol'
 import { applyTemplate, readAiRules } from './templates.js'
 import { createPlannerSession, needsPlanStage } from './planStage.js'
 import { createBrowserTool } from './browserTool.js'
+import { createPackTool } from './packTool.js'
 import { hasVision } from './modelCaps.js'
 
 /** Initialize a git repo in `dir` with one commit — the baseline for checkpoints (Phase 18). Best-effort. */
@@ -34,8 +35,16 @@ type Project = ProjectInfo & { dir: string; session?: CascadeSession; sandbox?: 
 export interface ProjectManagerOptions {
   /** Host dir under which each project gets its own subdir. */
   root: string
+  /** Provider id for createProvider ("ollama" | "openai" | "nvidia" | any OpenAI-compat id). Default "ollama". */
+  provider?: string
   model: string
   baseUrl?: string
+  /** Explicit API key; usually omitted — the factory resolves OPENAI_API_KEY/NVIDIA_API_KEY/… from env. */
+  apiKey?: string
+  /** Override the context window (tokens) for compaction sizing. For hosted providers there's no live probe
+   *  (detectModelLimits is Ollama-only), so this is how a user corrects the model→window map when their NIM
+   *  endpoint serves a different window than the model's native max. Omit ⇒ the map, then DEFAULT_WINDOW. */
+  contextWindow?: number
   /** Build a per-project execution sandbox (13.3). The default wiring passes a DockerSandbox when Docker is
    *  available; tests pass none (host exec). The manager owns the sandbox lifecycle (disposed with the project). */
   sandboxFor?: (dir: string) => Sandbox | undefined
@@ -71,6 +80,8 @@ export const BUILDER_BEHAVIOR = [
   // Design-system v2: the aesthetic bar, one line (the mechanics live in the design skill
   // + the blocks; this makes "looks designed" part of the definition of done).
   '- QUALITY BAR: the app must look DESIGNED, not scaffolded — assemble pages from src/components/blocks (NavBar/Hero/Section/MediaCard…), token colors only (never bg-white/bg-blue-600/hex), real imagery via photoFor()/ArtImage (NEVER an emoji as an image). First impression is part of "done".',
+  // ADR-066: backend graduation is MECHANICAL via the ApplyPack tool + the backend skill — never hand-rolled.
+  '- BACKEND: apps persist in the browser (the src/lib/storage.ts seam) by default. If the user asks for a database, a server, or persistence across devices/users, load Skill {name: "backend"} and use the ApplyPack tool — do NOT hand-write a server, Prisma schema, or migration.',
 ].join('\n')
 
 /** name → a filesystem-safe slug (so dirs are readable); id keeps them unique. */
@@ -101,7 +112,7 @@ export class ProjectManager {
   constructor(private readonly opts: ProjectManagerOptions) {
     mkdirSync(opts.root, { recursive: true })
     this.metaFile = join(opts.root, 'projects.json')
-    void hasVision(opts.model, opts.baseUrl).then((v) => {
+    void hasVision(opts.model, opts.baseUrl, opts.provider ?? 'ollama').then((v) => {
       this.visionOk = v
     })
     this.createSessionFor =
@@ -109,8 +120,11 @@ export class ProjectManager {
       ((dir, sandbox, extraInstructions) =>
         createSession({
           cwd: dir,
-          provider: createProvider({ provider: 'ollama', model: opts.model, baseUrl: opts.baseUrl }),
+          provider: createProvider({ provider: opts.provider ?? 'ollama', model: opts.model, baseUrl: opts.baseUrl, apiKey: opts.apiKey }),
           model: opts.model,
+          // Hosted providers have no live window probe — honor an explicit override so the compactor sizes
+          // against the NIM endpoint's real window instead of the model→map guess (or the 8k default).
+          contextWindow: opts.contextWindow,
           tracer: tracerFor(dir, 'builder'), // product forensics (walkthrough lesson: no trace = no diagnosis)
           // LATENCY (walkthrough forensics): curation adds hidden model calls (dead air) AND its memory
           // writes mutate the system prompt mid-session — a prefix-cache breaker. A builder project gains
@@ -122,7 +136,7 @@ export class ProjectManager {
           mode: sandbox ? 'bypass' : 'default',
           // Prepend builder behavior to the template's AI rules. The core base prompt is tuned for concise
           // chat ("short, direct responses"), which makes the model stop after exploring; the builder must
-          // instead keep using tools until the whole app is built. This OVERRIDES the concise default.
+          // instead keep using tools u ntil the whole app is built. This OVERRIDES the concise default.
           extraInstructions: [BUILDER_BEHAVIOR, extraInstructions].filter(Boolean).join('\n\n'),
           // A full build is many model round-trips (one per file batch); the chat default of 10 is far too low.
           // 80 → 500 (2026-07-20): run 4 hit the 80 cap mid-fix-loop with ~30 turns lost to friction the
@@ -146,13 +160,18 @@ export class ProjectManager {
           // contract is ALWAYS in context (measured: the builder read it 0 times when only on disk), and
           // survives compaction across iterate rounds (the whole reason a durable plan exists).
           contextFiles: [join(dir, 'PLAN.md')],
-          // ADR-060: the Browser tool — the agent LOOKS at the app it built (a11y snapshots + vision
-          // screenshots). Gated on the model reporting `vision` AND a Docker sandbox (the tool resolves
-          // the preview port from it); absent either, the tool is never advertised.
-          extraTools:
-            this.visionOk && sandbox && 'getHostPort' in sandbox
+          // Server-owned EXTRA tools, each self-gating:
+          // - Browser (ADR-060): the agent LOOKS at the app — needs model `vision` + a Docker sandbox.
+          // - ApplyPack (ADR-066): graduate the prototype to a backend — offered only while the template
+          //   has an UN-applied pack (createPackTool returns undefined otherwise, e.g. after graduation).
+          //   templateId is 'react' — every Cascade project uses the one React template (cf.
+          //   ensureVisualEditConfig).
+          extraTools: [
+            ...(this.visionOk && sandbox && 'getHostPort' in sandbox
               ? [createBrowserTool({ sandbox: sandbox as import('./dockerSandbox.js').DockerSandbox })]
-              : undefined,
+              : []),
+            ...([createPackTool({ projectDir: dir, templateId: 'react' })].filter(Boolean) as import('@cascade/core').Tool[]),
+          ],
         }))
     this.load()
   }
@@ -171,7 +190,7 @@ export class ProjectManager {
       ((dir: string, d: AgentDef, sandbox?: Sandbox) =>
         createPlannerSession(d, {
           dir,
-          provider: createProvider({ provider: 'ollama', model: this.opts.model, baseUrl: this.opts.baseUrl }),
+          provider: createProvider({ provider: this.opts.provider ?? 'ollama', model: this.opts.model, baseUrl: this.opts.baseUrl, apiKey: this.opts.apiKey }),
           model: this.opts.model,
           skillDirs: skillDirsFor(dir),
           sandbox,

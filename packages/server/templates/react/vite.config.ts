@@ -33,6 +33,11 @@ export default defineConfig(({ command }) => ({
   resolve: { alias: { '@': resolve(root, 'src') } }, // shadcn/ui convention (ADR-054)
   server: {
     host: true,
+    // The persistence seam's other half (see src/lib/storage.ts): when the backend pack is applied, the
+    // API server listens on 8787 in the same container and the frontend calls relative `/api/...` URLs —
+    // this proxy makes them reach it through the ONE published dev port. Inert while no backend exists
+    // (nothing calls /api in a prototype), so it ships in the base template.
+    proxy: { '/api': 'http://localhost:8787' },
     // The project dir is a host bind-mount; native fs events don't cross it, so poll for edits.
     // `ignored`: server bookkeeping lives INSIDE the workspace (.cascade/ traces/todos/chats append every
     // few seconds during a build) and `tsc -b` drops tsconfig.tsbuildinfo — none of it is app code, but any

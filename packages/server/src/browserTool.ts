@@ -96,6 +96,8 @@ export function createBrowserTool(deps: BrowserToolDeps): Tool {
 					// same way PreviewManager does — detached, logged — and wait for the port. Idempotent: if
 					// it's already up, the port answers before the exec matters.
 					if (!(await waitForHttp(origin, 3_000))) {
+						// ADR-066: reap any stale dev/API process from a prior submit before starting a fresh one.
+						await deps.sandbox.exec('pkill -f "vite" ; pkill -f "tsx.*server" ; true').catch(() => {})
 						await deps.sandbox.execDetached(`CHOKIDAR_USEPOLLING=true npm run dev > ${DEV_LOG} 2>&1`)
 						if (!(await waitForHttp(origin, 30_000))) {
 							return { content: `The dev server did not answer on ${origin} within 30s. Run \`npm run dev\` with Bash, check its output for errors, then try Browser open again.`, isError: true }

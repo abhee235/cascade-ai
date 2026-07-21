@@ -15,7 +15,9 @@ src/
   components/           ← YOUR view-level components, one per file: CatalogView.tsx, CartView.tsx, CheckoutForm.tsx…
                           NEVER re-implement a block here: page header → <NavBar>, product/listing card →
                           <MediaCard>, empty message → <EmptyState> (import from @/components/blocks)
-  lib/                  ← pure logic: types.ts, data.ts (seed data), photos.ts (bundled imagery)
+  lib/                  ← pure logic: types.ts, data.ts (seed data), photos.ts (bundled imagery),
+                          storage.ts (the PERSISTENCE SEAM — ALL collection data goes through
+                          createStore; never touch localStorage for a collection directly in a view)
   hooks/                ← custom hooks when state logic repeats (useCart.ts, useLocalStorage.ts)
   demo/                 ← the starter showcase — DELETE this dir (and rewrite App.tsx) when building the real app
 ```
