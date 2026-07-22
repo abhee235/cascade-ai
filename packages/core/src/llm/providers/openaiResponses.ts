@@ -23,12 +23,18 @@ type ResponsesItem = Record<string, unknown>
  *  tool_result → function_call_output (both keyed by our internal id as call_id). Exported for unit testing. */
 export function toResponsesInput(messages: Message[], system?: string): { instructions?: string; input: ResponsesItem[] } {
   const input: ResponsesItem[] = []
+  // A function_call_output whose function_call isn't in this input is a HARD 400 ("No tool call found for
+  // function call output with call_id …") — and because the bad pair lives in the saved history, it replays
+  // on EVERY later turn, bricking the chat for good. Histories legitimately lose their head: compaction drops
+  // old turns, and an interrupted turn is persisted mid-pair. So pair them up here instead of trusting the
+  // history to be well-formed — an unanswerable result is dropped, never sent.
+  const emitted = new Set<string>()
   for (const m of messages) {
     const blocks = asBlocks(m.content)
     if (m.role === 'user') {
       // tool results first (a function_call_output must follow its function_call, which the prior
       // assistant turn already emitted), then the user's own text/images.
-      for (const b of blocks) if (b.type === 'tool_result') input.push({ type: 'function_call_output', call_id: b.tool_use_id, output: b.content ?? '' })
+      for (const b of blocks) if (b.type === 'tool_result' && emitted.has(b.tool_use_id)) input.push({ type: 'function_call_output', call_id: b.tool_use_id, output: b.content ?? '' })
       const text = textOf(blocks)
       const images = blocks.filter((b): b is Extract<ContentBlock, { type: 'image' }> => b.type === 'image')
       if (images.length) {
@@ -42,7 +48,11 @@ export function toResponsesInput(messages: Message[], system?: string): { instru
     } else {
       const text = textOf(blocks)
       if (text) input.push({ role: 'assistant', content: [{ type: 'output_text', text }] }) // assistant replay uses output_text
-      for (const b of blocks) if (b.type === 'tool_use') input.push({ type: 'function_call', call_id: b.id, name: b.name, arguments: JSON.stringify(b.input ?? {}) })
+      for (const b of blocks)
+        if (b.type === 'tool_use') {
+          input.push({ type: 'function_call', call_id: b.id, name: b.name, arguments: JSON.stringify(b.input ?? {}) })
+          emitted.add(b.id) // this call is now on the wire — its result may follow
+        }
     }
   }
   return { instructions: system, input }

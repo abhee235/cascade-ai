@@ -172,8 +172,24 @@ describe('toResponsesInput (the Responses bridge)', () => {
   })
 
   it('user tool_result → function_call_output keyed by call_id', () => {
-    const msgs: Message[] = [{ role: 'user', content: [{ type: 'tool_result', tool_use_id: 'c1', content: 'RESULT' }] }]
-    expect(toResponsesInput(msgs).input[0]).toEqual({ type: 'function_call_output', call_id: 'c1', output: 'RESULT' })
+    const msgs: Message[] = [
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'c1', name: 'Read', input: {} }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'c1', content: 'RESULT' }] },
+    ]
+    expect(toResponsesInput(msgs).input[1]).toEqual({ type: 'function_call_output', call_id: 'c1', output: 'RESULT' })
+  })
+
+  // Measured: one orphaned output → HTTP 400 "No tool call found for function call output with call_id …",
+  // and since it lives in the SAVED history it replays every turn — the chat never runs again. Histories lose
+  // their head legitimately (compaction drops old turns; an interrupted turn is saved mid-pair).
+  it('drops a tool_result whose function_call is no longer in the history (compaction / interrupted turn)', () => {
+    const msgs: Message[] = [{ role: 'user', content: [{ type: 'tool_result', tool_use_id: 'gone', content: 'RESULT' }] }]
+    expect(toResponsesInput(msgs).input).toEqual([])
+  })
+
+  it('keeps the user text when only the orphaned result is dropped', () => {
+    const msgs: Message[] = [{ role: 'user', content: [{ type: 'tool_result', tool_use_id: 'gone', content: 'R' }, { type: 'text', text: 'carry on' }] }]
+    expect(toResponsesInput(msgs).input).toEqual([{ role: 'user', content: 'carry on' }])
   })
 
   it('a user image turn → input_text + input_image parts', () => {
