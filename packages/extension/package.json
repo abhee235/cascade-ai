@@ -145,7 +145,8 @@
   },
   "scripts": {
     "build": "node esbuild.mjs && tailwindcss -i ui/styles.css -o dist/webview.css --minify",
-    "watch": "node esbuild.mjs --watch"
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@cascade/core": "*",

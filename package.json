@@ -10,7 +10,7 @@
     "build": "npm run build --workspaces --if-present",
     "build:core": "npm run build -w @cascade/core",
     "build:extension": "npm run build -w @cascade/extension",
-    "typecheck": "tsc -b",
+    "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run",
     "test:watch": "vitest",
     "eval": "tsx scripts/eval/run.mts",
@@ -23,10 +23,6 @@
     "node": ">=18"
   },
   "devDependencies": {
-    "@opentelemetry/api": "^1.9.1",
-    "@opentelemetry/exporter-trace-otlp-proto": "^0.220.0",
-    "@opentelemetry/resources": "^2.9.0",
-    "@opentelemetry/sdk-trace-base": "^2.9.0",
     "vitest": "^4.1.9"
   }
 }
