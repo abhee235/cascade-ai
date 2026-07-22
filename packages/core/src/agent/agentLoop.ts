@@ -266,7 +266,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     const sentEstimate = estimateTokens(messages) // for wire-overhead calibration once real usage arrives
     // FORENSICS: record the FULL request we're about to send — the #1 thing you need when an answer
     // is wrong ("did the model even see the tool_result / the right system prompt?"). — ADR-023.
-    tracer.event({ t: 'model_request', turn, system: systemNow, tools: registry.list().map((t) => t.name), messages })
+    tracer.event({ t: 'model_request', turn, provider: deps.provider.id, model: deps.model, contextWindow: deps.modelLimits?.contextWindow, system: systemNow, tools: registry.list().map((t) => t.name), messages })
     // Wrap the stream in recovery (ADR-016): transient failures retry with backoff; context overflow triggers
     // a (reactive) compaction then retries; abort/fatal surface. `make` re-reads `messages` each attempt, so
     // an overflow-compaction is reflected on the retry. System is rebuilt too (memory may have changed).
@@ -324,6 +324,14 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     if (usage?.inputTokens) wireOverhead = measureWireOverhead(wireOverhead, usage.inputTokens, sentEstimate)
 
     tracer.event({ t: 'model_response', turn, text, thinking, toolUses, usage })
+
+    // ADR-039: report OCCUPANCY to the UI — the prompt we just sent, against the window it must fit in.
+    // Prefer the backend's own count; fall back to the same estimate the compactor gates on, so the meter
+    // never goes blank on a backend that doesn't report usage. Main agent only: a subagent runs its own
+    // window and its events are consumed internally, so surfacing them would just make the meter jump.
+    if (deps.compact && depth === 0) {
+      yield { type: 'context', used: usage?.inputTokens ?? sentEstimate + overheadTokens, window: deps.compact.plan.window, auto: deps.compact.plan.auto }
+    }
 
     // Record the assistant turn in history: thinking, text, then tool_use blocks.
     const assistant: ContentBlock[] = []

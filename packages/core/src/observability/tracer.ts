@@ -14,7 +14,11 @@ import type { Message } from '../protocol'
 /** One forensic event. Serializable (plain JSON) like ActivityEvent — but richer and untruncated. */
 export type TraceEvent =
   | { t: 'submit'; text: string }
-  | { t: 'model_request'; turn: number; system: string; tools: string[]; messages: Message[] }
+  // provider/model: WHO answered this turn. Without them a trace can't settle "was my selected model
+  // actually used?" — the question that otherwise costs an `ollama ps` + `nvidia-smi` + event-count audit.
+  // contextWindow: what the prompt is being sized AGAINST. Without it a viewer can only sum tokens across
+  // calls (throughput), which looks alarming — 344k across 12 calls — while actual occupancy never left 34%.
+  | { t: 'model_request'; turn: number; provider: string; model: string; contextWindow?: number; system: string; tools: string[]; messages: Message[] }
   | { t: 'model_response'; turn: number; text: string; thinking: string; toolUses: { id: string; name: string; input: unknown }[]; usage?: { inputTokens?: number; outputTokens?: number } } // usage: E1/ADR-040 — backend-reported token counts for this call
   | { t: 'permission'; id: string; tool: string; decision: string; asked: boolean } // asked=true ⇒ a prompt was shown
   | { t: 'tool_call'; id: string; name: string; input: unknown; repaired?: boolean }

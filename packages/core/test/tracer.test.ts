@@ -58,6 +58,9 @@ describe('tracer — forensic event stream', () => {
       const req0 = events.find((e) => e.t === 'model_request') as Extract<TraceEvent, { t: 'model_request' }>
       expect(req0.tools).toContain('Write')
       expect(req0.messages[0]).toMatchObject({ role: 'user' })
+      // …and WHO answered. Without this, "was my selected model actually used?" is unanswerable from the
+      // trace alone, and a mid-session model switch leaves no evidence at all.
+      expect(req0).toMatchObject({ provider: 'fake', model: expect.any(String) })
 
       const perm = events.find((e) => e.t === 'permission') as Extract<TraceEvent, { t: 'permission' }>
       expect(perm).toMatchObject({ tool: 'Write', decision: 'allow' })
@@ -65,6 +68,42 @@ describe('tracer — forensic event stream', () => {
       const result = events.find((e) => e.t === 'tool_result') as Extract<TraceEvent, { t: 'tool_result' }>
       expect(result.ok).toBe(true)
       expect(typeof result.ms).toBe('number')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  // A turn MUST be terminated on every path. `turn_done` is emitted where the loop returns normally, but an
+  // abort unwinds straight past that — leaving the JSONL with no terminator (forensics can't tell "finished"
+  // from "died": measured on a killed build) and any span-based exporter with an open root, which is never
+  // exported at all. The session guarantees exactly one terminator.
+  it('a turn that DIES mid-flight still emits exactly one turn_done, last', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'cascade-trace-died-'))
+    try {
+      const events: TraceEvent[] = []
+      const tracer: Tracer = { event: (e) => void events.push(e) }
+      // The backend blows up rather than answering — the loop unwinds by THROWING, so it never reaches the
+      // `turn_done` on its normal return path. Only the session's finally can terminate this turn.
+      const provider = {
+        id: 'fake',
+        async complete() {
+          return { text: '' }
+        },
+        // eslint-disable-next-line require-yield
+        async *stream(): AsyncIterable<never> {
+          throw new Error('backend exploded')
+        },
+      } as unknown as Parameters<typeof createSession>[0]['provider']
+      const session = createSession({ cwd: dir, provider, model: 'fake', tracer })
+
+      for await (const _ of session.submit('go')) {
+        /* drain — the session converts the throw into an error message + turnDone */
+      }
+
+      const terminators = events.filter((e) => e.t === 'turn_done')
+      expect(terminators).toHaveLength(1) // was ZERO before: the trace just stopped, indistinguishable from a hang
+      expect(events.some((e) => e.t === 'error')).toBe(true) // …and it followed the failure, not replaced it
+      expect(events[events.length - 1]!.t).toBe('turn_done') // a terminator must actually terminate the file
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

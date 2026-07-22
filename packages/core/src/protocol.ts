@@ -62,6 +62,10 @@ export type ActivityEvent =
   | { type: 'step'; n: number } // a model step is STARTING (prefill begins — the dead-air phase). UIs use it to show "reading input…" until the first delta; it must never clear the working state (only turnDone does)
   | { type: 'memory'; scope: string; text: string } // Phase 10: a fact auto-saved by self-curation (UI marker)
   | { type: 'compacted'; kind: string } // Phase 11: context was compacted ('masked' | 'summarized')
+  // ADR-039: live context OCCUPANCY after a model call — how full the window actually is right now, and the
+  // threshold compaction fires at. Distinct from cumulative token spend, which grows every turn because a
+  // stateless API re-sends the whole conversation; only this number decides whether history gets rewritten.
+  | { type: 'context'; used: number; window: number; auto: number }
   | { type: 'recovering'; attempt: number; reason: string; delayMs: number } // Phase 12: retrying a failed model call (UI card)
   | { type: 'mcpStatus'; servers: { name: string; status: string; error?: string; toolNames: string[] }[] } // Phase 9: /mcp panel
   | { type: 'memoryData'; core: string; archival: { id: string; text: string; ts: string }[]; hits?: { text: string; score: number }[] } // Phase 10: /memory panel
