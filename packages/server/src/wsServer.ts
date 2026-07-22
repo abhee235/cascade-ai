@@ -9,7 +9,8 @@
 // Shape: a web server + a session relay decoupled from the transport.
 
 import './loadDotEnv.js' // FIRST import: .env → process.env before the CASCADE_* consts below read it
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { appendFileSync, mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomBytes } from 'node:crypto'
@@ -712,6 +713,28 @@ async function start() {
   const shutdown = () => void flushTracers().finally(() => Promise.allSettled([manager.dispose(), sweepSandboxContainers()]).finally(() => process.exit(0)))
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
+  // A CRASH must leave evidence. Measured 2026-07-23: a build stopped dead mid-turn, and the cause was
+  // unknowable afterwards — the trace ends at the last event the loop managed to write, the viewer shows a
+  // turn that simply stops, and the stack went to a console window that scrolls away and is never kept. We
+  // instrumented the agent thoroughly and left the process that runs it completely unobservable. Node exits
+  // on an unhandled rejection by default, so both hooks below are real exit paths, not hypotheticals.
+  const crashLog = join(PROJECTS_ROOT, '.cascade', 'server-crash.log')
+  const recordCrash = (kind: string, err: unknown) => {
+    const detail = err instanceof Error ? (err.stack ?? err.message) : String(err)
+    const entry = `\n[${new Date().toISOString()}] ${kind}\n${detail}\n`
+    try {
+      mkdirSync(dirname(crashLog), { recursive: true })
+      appendFileSync(crashLog, entry)
+    } catch {
+      /* best-effort: if we can't write, the console line below is still better than silence */
+    }
+    console.error(`💥 ${kind} — recorded to ${crashLog}\n${detail}`)
+    // Flush whatever spans are buffered, and close the open turn so the viewer shows it as interrupted
+    // rather than losing it, then exit non-zero so the watcher/supervisor treats it as a failure.
+    void flushTracers(1_000).finally(() => process.exit(1))
+  }
+  process.on('uncaughtException', (err) => recordCrash('uncaughtException', err))
+  process.on('unhandledRejection', (reason) => recordCrash('unhandledRejection', reason))
   console.log(
     // Report the ACTIVE model (restored selection, or the env default) — not the env vars, which are only
     // the first-run seed. A boot line that names a model you aren't running is worse than none.

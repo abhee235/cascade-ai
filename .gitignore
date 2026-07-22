@@ -24,3 +24,6 @@ eval/external/
 
 # Eval/builder working copies (ADR-053 forensics: repo-local so OS temp-cleanup can never sweep a live run)
 eval/.work/
+
+# Server console logs (crash forensics; see start-cascade.cmd)
+logs/

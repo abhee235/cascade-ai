@@ -40,8 +40,11 @@ ollama ps >nul 2>&1 || echo [note] Ollama not responding - open the Ollama app i
 echo.
 
 REM --- 3) Server window: ws://localhost:4319  (+ preview proxy 4320) ---
-echo [..]  Starting server...
-start "Cascade Server" cmd /k "cd /d %REPO%\packages\server && npm run dev"
+REM Output is TEE'd to logs\server.log: a console window scrolls away and is gone, which is exactly what
+REM happened when a build died mid-turn and the stack trace went with it. Tee-Object keeps the live view.
+if not exist "%REPO%\logs" mkdir "%REPO%\logs"
+echo [..]  Starting server...  (log: %REPO%\logs\server.log)
+start "Cascade Server" cmd /k "cd /d %REPO%\packages\server && powershell -NoProfile -Command "npm run dev 2>&1 ^| Tee-Object -FilePath '%REPO%\logs\server.log' -Append""
 
 REM --- 4) Web UI window: http://localhost:5319 ---
 echo [..]  Starting web UI...
