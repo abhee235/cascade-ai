@@ -86,6 +86,24 @@ export class OtelTracer implements Tracer {
 		return this.session ? { [SC.SESSION_ID]: this.session } : {}
 	}
 
+	/** The assistant's reply as a STRUCTURED output message, so REASONING survives as reasoning rather than
+	 *  being flattened away. `output.value` alone cannot carry it: on a tool-only turn it degrades to
+	 *  "(tools: Read,Write)" and the thinking that chose those tools is discarded — precisely the turn you
+	 *  need to understand when a local model goes somewhere strange. `message_content.type` of "reasoning" is
+	 *  the OpenInference-defined kind, which viewers render as its own block. */
+	private outputMessage(thinking: string, text: string): Record<string, string> {
+		const attrs: Record<string, string> = { [`${SC.LLM_OUTPUT_MESSAGES}.0.${SC.MESSAGE_ROLE}`]: 'assistant' }
+		let i = 0
+		const part = (type: string, value: string) => {
+			const base = `${SC.LLM_OUTPUT_MESSAGES}.0.${SC.MESSAGE_CONTENTS}.${i++}.`
+			attrs[base + SC.MESSAGE_CONTENT_TYPE] = type
+			attrs[base + SC.MESSAGE_CONTENT_TEXT] = cut(value)
+		}
+		if (thinking.trim()) part('reasoning', thinking)
+		if (text.trim()) part('text', text)
+		return attrs
+	}
+
 	/** A notable MOMENT (a nudge fired, a compaction ran, a prefill stalled) as a zero-length span, hung off
 	 *  whatever is currently innermost. These used to be `root.addEvent(...)` — which only surfaces when the
 	 *  ROOT closes, i.e. at the very end of the build, i.e. never while you are actually watching it. As a
@@ -174,6 +192,7 @@ export class OtelTracer implements Tracer {
 				const span = this.llm
 				if (!span) break
 				span.setAttributes({
+					...this.outputMessage(e.thinking ?? '', e.text ?? ''),
 					'gen_ai.usage.input_tokens': e.usage?.inputTokens ?? 0,
 					'gen_ai.usage.output_tokens': e.usage?.outputTokens ?? 0,
 					// Phoenix reads token counts from llm.token_count.* — with only the gen_ai.* pair set, its

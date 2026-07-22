@@ -52,6 +52,37 @@ describe('OtelTracer — span tree from the forensic event stream', () => {
 		expect(tool.parentSpanContext?.spanId).toBe(root.spanContext().spanId)
 	})
 
+	// Reasoning was captured in the JSONL and then dropped on the floor by the exporter, so the viewer showed
+	// WHAT the model answered and WHICH tools it called, but never why. Worst on a tool-only turn, where
+	// `output.value` degrades to "(tools: …)" and the thinking that chose those tools vanished entirely.
+	it('exports the model\'s reasoning as reasoning, including on a tool-only turn', () => {
+		const { tracer, exporter } = memoryTracer()
+		const ev = (e: object) => tracer.event(e as never)
+		ev({ t: 'submit', text: 'go' })
+		ev({ t: 'model_request', turn: 0, provider: 'ollama', model: 'q', system: '', tools: [], messages: [] })
+		// No text at all — the model reasoned, then went straight to tools.
+		ev({ t: 'model_response', turn: 0, text: '', thinking: 'The cart total is wrong, so check useCart first.', toolUses: [{ id: 'a', name: 'Read', input: {} }] })
+
+		const llm = exporter.getFinishedSpans().find((s) => s.name === 'llm turn 0')!
+		expect(llm.attributes['llm.output_messages.0.message.role']).toBe('assistant')
+		expect(llm.attributes['llm.output_messages.0.message.contents.0.message_content.type']).toBe('reasoning')
+		expect(llm.attributes['llm.output_messages.0.message.contents.0.message_content.text']).toContain('useCart')
+	})
+
+	it('reasoning and answer are separate content parts, in order', () => {
+		const { tracer, exporter } = memoryTracer()
+		const ev = (e: object) => tracer.event(e as never)
+		ev({ t: 'submit', text: 'go' })
+		ev({ t: 'model_request', turn: 0, provider: 'ollama', model: 'q', system: '', tools: [], messages: [] })
+		ev({ t: 'model_response', turn: 0, text: 'Fixed the total.', thinking: 'Rounding happens twice.', toolUses: [] })
+
+		const a = exporter.getFinishedSpans().find((s) => s.name === 'llm turn 0')!.attributes
+		expect(a['llm.output_messages.0.message.contents.0.message_content.type']).toBe('reasoning')
+		expect(a['llm.output_messages.0.message.contents.1.message_content.type']).toBe('text')
+		expect(a['llm.output_messages.0.message.contents.1.message_content.text']).toBe('Fixed the total.')
+		expect(a['output.value']).toBe('Fixed the total.') // the flat view still works for viewers that only read it
+	})
+
 	// Phoenix Sessions (OpenInference `session.id`): each submit is its OWN trace, so a build and its
 	// follow-ups arrive as unrelated traces unless they carry the chat they belong to.
 	it('stamps session.id on EVERY span, so a live turn is grouped before its root has ended', () => {
