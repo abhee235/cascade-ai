@@ -6,13 +6,19 @@
   "main": "./src/wsServer.ts",
   "scripts": {
     "dev": "tsx watch src/wsServer.ts",
-    "start": "tsx src/wsServer.ts"
+    "start": "tsx src/wsServer.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@arizeai/openinference-semantic-conventions": "^2.5.0",
     "@babel/parser": "^7.25.0",
     "@babel/traverse": "^7.25.0",
     "@cascade/app-protocol": "*",
     "@cascade/core": "*",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/exporter-trace-otlp-proto": "^0.220.0",
+    "@opentelemetry/resources": "^2.9.0",
+    "@opentelemetry/sdk-trace-base": "^2.9.0",
     "dockerode": "^5.0.1",
     "playwright-core": "^1.61.1",
     "ws": "^8.18.0"
