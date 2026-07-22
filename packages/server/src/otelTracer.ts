@@ -51,6 +51,8 @@ export class OtelTracer implements Tracer {
 	private readonly tools = new Map<string, { span: Span }>()
 	private session?: string
 	private window?: number // the context window this turn's prompts are sized against (from model_request)
+	private turnStart = 0 // wall clock of the submit — the summary span is backdated to it
+	private turns = 0 // model turns so far, reported on the summary
 	/** permission decisions keyed by tool-call id — they arrive BEFORE the tool span exists, so they wait here. */
 	private readonly pendingPermission = new Map<string, Record<string, string | boolean>>()
 
@@ -95,9 +97,10 @@ export class OtelTracer implements Tracer {
 		span.end(at)
 	}
 
-	/** End every span still open, innermost first. An unended span is NEVER exported — so leaving one open
-	 *  doesn't truncate a trace, it deletes it. `reason` marks turns that ended without a terminator. */
-	private closeOpenSpans(at: number, reason?: string): void {
+	/** Close out a turn: end the step spans still open, then record how the turn ACTUALLY went as a summary
+	 *  span carrying the real start→end times. The root can't carry that itself — it was ended at submit so
+	 *  the trace would ship immediately — so duration lives here instead, backdated to the submit. */
+	private closeTurn(at: number, reason?: string): void {
 		for (const [, t] of this.tools) {
 			if (reason) t.span.setAttribute('cascade.interrupted', reason)
 			t.span.end(at)
@@ -106,12 +109,19 @@ export class OtelTracer implements Tracer {
 		if (this.llm && reason) this.llm.setAttribute('cascade.interrupted', reason)
 		this.llm?.end(at)
 		this.llm = undefined
-		if (this.root && reason) {
-			this.root.setAttribute('cascade.interrupted', reason)
-			this.root.setStatus({ code: SpanStatusCode.ERROR, message: `turn ${reason}` })
-		}
-		this.root?.end(at)
+		if (!this.root) return
+		const secs = Math.max(0, Math.round((at - this.turnStart) / 1000))
+		const summary = this.otel.startSpan(
+			// One prefix for every cut-short turn, whatever cut it short — so "which turns died?" is a search,
+			// not an inspection of each one.
+			reason ? `turn interrupted (${reason}) — ${secs}s` : `turn complete — ${secs}s`,
+			{ startTime: this.turnStart, attributes: { ...this.common(), [SC.OPENINFERENCE_SPAN_KIND]: 'CHAIN', 'cascade.duration_s': secs, ...(this.turns ? { 'cascade.model_turns': this.turns } : {}) } },
+			trace.setSpan(context.active(), this.root),
+		)
+		if (reason) summary.setStatus({ code: SpanStatusCode.ERROR, message: `turn ${reason}` })
+		summary.end(at)
 		this.root = undefined
+		this.turns = 0
 	}
 
 	event(e: TraceEvent & { ts?: string }): void {
@@ -121,15 +131,17 @@ export class OtelTracer implements Tracer {
 				// Belt-and-braces: if the previous turn never terminated (a crash between its last event and
 				// `turn_done`), overwriting `this.root` would strand it OPEN forever — and an unended span is
 				// never exported, so that whole trace would be lost rather than merely truncated. Close it.
-				this.closeOpenSpans(at, 'interrupted')
-				// One AGENT span wrapping the whole run, per the OpenInference convention ("a span that
-				// encompasses calls to LLMs and Tools"). It ends at turn_done — which is also when the turn
-				// becomes visible, because a viewer's per-turn view is built on a TERMINATED root span. An
-				// earlier attempt to make in-flight turns findable (a zero-length marker child) backfired: the
-				// viewer promoted the orphan to a phantom 0ms root, so the trace list gained an entry that
-				// opened onto nothing. Live activity is still visible span-by-span in the Spans view; the
-				// turn itself appears once it ends — and `endOpenSpans` guarantees it always does.
+				this.closeTurn(at, 'interrupted') // a previous turn that never terminated
+				this.turnStart = at
+				// The AGENT root, per the OpenInference convention — but ENDED IMMEDIATELY, which is the whole
+				// trick. A span ships only when it ends, so a root held open for the length of the build means
+				// nothing under it can be read until the build is over: every step sits referencing a parent the
+				// viewer has never seen. Ending it now ships the trace at once, and each step then streams in
+				// underneath as it completes — the point of the exercise is watching a build while it runs.
+				// Children legitimately outlive their parent here; the true wall-clock span of the turn is
+				// recorded by the summary span in closeTurn(), backdated to this instant.
 				this.root = this.otel.startSpan('agent', { startTime: at, attributes: { ...this.common(), [SC.OPENINFERENCE_SPAN_KIND]: 'AGENT', [SC.INPUT_VALUE]: cut(e.text) } })
+				this.root.end(at)
 				break
 			}
 			case 'model_request': {
@@ -264,8 +276,8 @@ export class OtelTracer implements Tracer {
 				this.root?.setStatus({ code: SpanStatusCode.ERROR, message: cut(e.message).slice(0, 200) })
 				break
 			case 'turn_done': {
-				this.root?.setAttribute('cascade.model_turns', e.turns)
-				this.closeOpenSpans(at) // stragglers first (an aborted turn leaves tool/llm spans open), then the root
+				this.turns = e.turns
+				this.closeTurn(at) // stragglers, then the summary span carrying the real duration
 				break
 			}
 			default:
@@ -278,7 +290,7 @@ export class OtelTracer implements Tracer {
 	 *  Measured: six of seven turns in one session vanished from the viewer this way, killed by dev-server
 	 *  restarts. Closing them here turns "gone" into "interrupted", which is a fact you can actually see. */
 	endOpenSpans(reason: string): void {
-		this.closeOpenSpans(this.now(), reason)
+		this.closeTurn(this.now(), reason)
 	}
 
 	forceFlush(): Promise<void> {

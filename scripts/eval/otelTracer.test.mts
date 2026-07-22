@@ -26,7 +26,7 @@ describe('OtelTracer — span tree from the forensic event stream', () => {
 
 		const spans = exporter.getFinishedSpans()
 		const byName = (n: string) => spans.find((s) => s.name.startsWith(n))
-		expect(spans.length).toBe(4) // agent + llm + tool + the compaction mark
+		expect(spans.length).toBe(5) // agent + llm + tool + the compaction mark + the turn summary
 
 		const root = byName('agent')!
 		expect(root.attributes['openinference.span.kind']).toBe('AGENT')
@@ -104,24 +104,22 @@ describe('OtelTracer — span tree from the forensic event stream', () => {
 	// span is never exported — so the turn does not arrive truncated, it does not arrive at all, and the
 	// viewer's per-turn view (which is built on a terminated root) has nothing to show. Six of seven turns
 	// vanished this way. Shutdown must CLOSE before it flushes.
-	it('endOpenSpans rescues an in-flight turn on shutdown (flushing alone would export nothing)', () => {
+	it('endOpenSpans records an interrupted turn on shutdown, stragglers and all', () => {
 		const { tracer, exporter } = memoryTracer()
 		const ev = (e: object) => tracer.event(e as never)
 		tracer.setSession('chat-abc')
 		ev({ t: 'submit', text: 'a long build' })
 		ev({ t: 'model_request', turn: 0, provider: 'ollama', model: 'q', system: '', tools: [], messages: [] })
 		ev({ t: 'tool_call', id: 't1', name: 'Write', input: {} })
-		expect(exporter.getFinishedSpans().some((s) => s.name === 'agent')).toBe(false) // nothing to flush yet
 
-		tracer.endOpenSpans('server shutdown') // what the shutdown handler now does BEFORE forceFlush
+		tracer.endOpenSpans('server shutdown') // what the shutdown handler does BEFORE forceFlush
 
 		const spans = exporter.getFinishedSpans()
-		const root = spans.find((s) => s.name === 'agent')!
-		expect(root).toBeDefined() // the turn survives the restart instead of disappearing
-		expect(root.attributes['cascade.interrupted']).toBe('server shutdown')
-		expect(root.status.code).toBe(2) // ERROR — a turn cut short must not read as a clean finish
-		expect(spans.find((s) => s.name === 'tool Write')!.endTime).toBeTruthy() // stragglers closed too
-		expect(root.attributes['session.id']).toBe('chat-abc') // still lands in the right conversation
+		expect(spans.find((s) => s.name === 'tool Write')!.endTime).toBeTruthy() // stragglers closed
+		const summary = spans.find((s) => s.name.startsWith('turn interrupted'))!
+		expect(summary).toBeDefined() // the turn is recorded as cut short, not silently abandoned
+		expect(summary.status.code).toBe(2) // ERROR — it must not read as a clean finish
+		expect(summary.attributes['session.id']).toBe('chat-abc') // still in the right conversation
 	})
 
 	it('a synthetic turn_done (backfill safety) closes the llm straggler and the root', () => {
@@ -130,7 +128,7 @@ describe('OtelTracer — span tree from the forensic event stream', () => {
 		ev({ t: 'submit', text: 'one' })
 		ev({ t: 'model_request', turn: 0, system: '', tools: [], messages: [] })
 		ev({ t: 'turn_done', turns: 0 }) // the backfill script injects this synthetically
-		expect(exporter.getFinishedSpans().length).toBe(2) // llm straggler + root both exported
+		expect(exporter.getFinishedSpans().length).toBe(3) // root (shipped at submit) + llm straggler + summary
 	})
 
 	// Measured gap: of 19 forensic event types, 6 became spans, 5 became span-EVENTS on the root (which only
@@ -189,19 +187,46 @@ describe('OtelTracer — span tree from the forensic event stream', () => {
 	// The case the test above only LOOKED like it covered. A turn that dies with no terminator at all used to
 	// strand its root span open — and an unended span is never exported, so the entire trace was lost, not
 	// merely truncated. (Two of these are sitting in the user's Phoenix right now, permanently headless.)
-	it('a turn that never terminates is closed by the NEXT submit, marked interrupted', () => {
+	// THE POINT OF THE WHOLE EXPORTER. Observability exists to debug a build WHILE it runs; a trace you can
+	// only read once the build is over is not much use. A span ships only when it ENDS, so holding the AGENT
+	// root open for the length of a turn meant every step referenced a parent the viewer had never seen and
+	// nothing was readable until the end. The root is ended at submit so the trace ships immediately and each
+	// step streams in underneath it as it completes.
+	it('every step is readable WHILE the turn is still running', () => {
+		const { tracer, exporter } = memoryTracer()
+		const ev = (e: object) => tracer.event(e as never)
+		ev({ t: 'submit', text: 'build the shop' })
+
+		const root = exporter.getFinishedSpans().find((s) => s.name === 'agent')!
+		expect(root).toBeDefined() // the trace exists from the first instant, not at the end
+
+		ev({ t: 'model_request', turn: 0, provider: 'ollama', model: 'q', system: '', tools: [], messages: [] })
+		ev({ t: 'model_response', turn: 0, text: 'ok', thinking: '', toolUses: [], usage: { inputTokens: 10, outputTokens: 2 } })
+		ev({ t: 'tool_call', id: 'a', name: 'Write', input: {} })
+		ev({ t: 'tool_result', id: 'a', name: 'Write', ok: true, ms: 5, content: 'done' })
+
+		// Mid-turn — no turn_done yet — the finished work is already exported AND attached to the root, which
+		// is what makes it render as a tree rather than a pile of orphans.
+		const live = exporter.getFinishedSpans()
+		const llm = live.find((s) => s.name === 'llm turn 0')!
+		const tool = live.find((s) => s.name === 'tool Write')!
+		expect(llm).toBeDefined()
+		expect(tool).toBeDefined()
+		expect(llm.parentSpanContext?.spanId).toBe(root.spanContext().spanId)
+		expect(tool.parentSpanContext?.spanId).toBe(root.spanContext().spanId)
+	})
+
+	it('an abandoned turn is summarised as interrupted when the next submit arrives', () => {
 		const { tracer, exporter } = memoryTracer()
 		const ev = (e: object) => tracer.event(e as never)
 		ev({ t: 'submit', text: 'died halfway' })
 		ev({ t: 'model_request', turn: 0, provider: 'ollama', model: 'q', system: '', tools: [], messages: [] })
 		ev({ t: 'tool_call', id: 'a', name: 'Write', input: {} })
-		expect(exporter.getFinishedSpans().some((s) => s.name === 'agent')).toBe(false) // nothing closed it yet
 
 		ev({ t: 'submit', text: 'next one' }) // a new turn arrives on the same (cached) tracer
-		const dead = exporter.getFinishedSpans().find((s) => s.name === 'agent')!
-		expect(dead).toBeDefined() // …the abandoned trace is now exported instead of lost
-		expect(dead.attributes['cascade.interrupted']).toBe('interrupted')
-		expect(dead.status.code).toBe(2) // ERROR — a turn that never finished must not read as success
+		const summary = exporter.getFinishedSpans().find((s) => s.name.startsWith('turn interrupted'))!
+		expect(summary).toBeDefined() // the abandoned turn is recorded, not silently dropped
+		expect(summary.status.code).toBe(2) // ERROR — it must not read as success
 		expect(exporter.getFinishedSpans().filter((s) => s.name.startsWith('tool ')).every((s) => s.endTime)).toBe(true)
 	})
 })
