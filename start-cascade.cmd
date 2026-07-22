@@ -44,7 +44,9 @@ REM Output is TEE'd to logs\server.log: a console window scrolls away and is gon
 REM happened when a build died mid-turn and the stack trace went with it. Tee-Object keeps the live view.
 if not exist "%REPO%\logs" mkdir "%REPO%\logs"
 echo [..]  Starting server...  (log: %REPO%\logs\server.log)
-start "Cascade Server" cmd /k "cd /d %REPO%\packages\server && powershell -NoProfile -Command "npm run dev 2>&1 ^| Tee-Object -FilePath '%REPO%\logs\server.log' -Append""
+REM Tee-Object on Windows PowerShell 5.1 has no -Encoding and writes UTF-16, which makes the log awkward to
+REM grep; Out-File -Encoding utf8 per line keeps it plain text while still echoing to the window.
+start "Cascade Server" cmd /k "cd /d %REPO%\packages\server && powershell -NoProfile -Command "npm run dev 2>&1 ^| ForEach-Object { $_; $_ ^| Out-File -FilePath '%REPO%\logs\server.log' -Append -Encoding utf8 }""
 
 REM --- 4) Web UI window: http://localhost:5319 ---
 echo [..]  Starting web UI...
