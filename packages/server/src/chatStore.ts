@@ -3,7 +3,7 @@
 // conversation lives in chat-<id>.json. The wsServer swaps a session's history (getHistory/loadHistory) when
 // switching chats, so each chat has its own agent context. Server-only; the web app sees only chat metadata.
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import type { Message } from '@cascade/core'
@@ -56,10 +56,24 @@ export class ChatStore {
     return this.readIndex(projectDir)
   }
 
-  /** Drop chats that are still untitled AND have no persisted messages (except `keepId`). */
+  /** Does this chat have a replay log with content? A chat whose turn is STILL RUNNING has events but no
+   *  persisted messages and no title yet (save() only runs when the turn ends) — so message-emptiness alone
+   *  would classify a live, actively-building chat as abandoned and delete it (measured: opening a project
+   *  mid-build pruned the running chat and orphaned its 499-event log, wiping the in-progress transcript). */
+  private hasEvents(projectDir: string, id: string): boolean {
+    try {
+      return statSync(eventsPath(projectDir, id)).size > 0
+    } catch {
+      return false
+    }
+  }
+
+  /** Drop chats that are still untitled AND have no persisted messages AND no replay log (except `keepId`). */
   prune(projectDir: string, keepId?: string): void {
     const chats = this.readIndex(projectDir)
-    const empty = chats.filter((c) => c.id !== keepId && c.title === 'New chat' && this.messages(projectDir, c.id).length === 0)
+    const empty = chats.filter(
+      (c) => c.id !== keepId && c.title === 'New chat' && this.messages(projectDir, c.id).length === 0 && !this.hasEvents(projectDir, c.id),
+    )
     if (!empty.length) return
     this.writeIndex(projectDir, chats.filter((c) => !empty.includes(c)))
     for (const c of empty) if (existsSync(chatPath(projectDir, c.id))) rmSync(chatPath(projectDir, c.id))
