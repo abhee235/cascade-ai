@@ -3,8 +3,12 @@
 // whether options.num_ctx / num_predict / max_tokens travel.
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { OllamaProvider } from '../src/llm/providers/ollama'
 import { OpenAIChatProvider } from '../src/llm/providers/openaiChat'
+import { createSession } from '../src/session'
 
 /** Capture fetch calls; respond with a minimal valid stream for whichever endpoint was hit. */
 function mockFetch() {
@@ -63,5 +67,39 @@ describe('ADR-038 enforcement — the window travels on the wire', () => {
 		const p = new OllamaProvider({ id: 'ollama', baseUrl: 'http://x' })
 		await drain(p.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm', contextWindow: 8192, temperature: 0 }))
 		expect((calls[0]!.body.options as Record<string, unknown>).temperature).toBe(0)
+	})
+
+	// The DEFAULT path — no pinned window, so the session probes /api/show. Detection sized the compaction
+	// plan but never wrote back to the "confident" limits, so nothing reached the wire: the compactor planned
+	// against 131k while the request carried no num_ctx at all. That is correct ONLY while the Modelfile
+	// happens to declare the same window; where it doesn't, Ollama uses its small default and front-truncates
+	// the prompt in silence — precisely the failure this ADR exists to prevent.
+	it('a DETECTED window reaches the wire, not just the compaction plan', async () => {
+		const seen: { contextWindow?: number; maxOutputTokens?: number }[] = []
+		const provider = {
+			id: 'ollama',
+			async complete() {
+				return { text: '' }
+			},
+			async *stream(req: { contextWindow?: number; maxOutputTokens?: number }) {
+				seen.push({ contextWindow: req.contextWindow, maxOutputTokens: req.maxOutputTokens })
+				yield { type: 'done', stopReason: 'end_turn' }
+			},
+			async detectModelLimits() {
+				return { contextWindow: 131072, maxOutputTokens: 8192 } // what /api/show reports
+			},
+		} as unknown as Parameters<typeof createSession>[0]['provider']
+
+		const dir = await mkdtemp(join(tmpdir(), 'cascade-window-'))
+		try {
+			const session = createSession({ cwd: dir, provider, model: 'qwen36-agentic' }) // NOTE: no contextWindow pinned
+			for await (const _ of session.submit('hi')) {
+				/* drain */
+			}
+			expect(seen[0]!.contextWindow).toBe(131072) // was undefined — detection never left the compactor
+			expect(seen[0]!.maxOutputTokens).toBe(8192)
+		} finally {
+			await rm(dir, { recursive: true, force: true })
+		}
 	})
 })

@@ -226,6 +226,13 @@ export function createSession(opts: SessionOptions): CascadeSession {
     try {
       const limits = await opts.provider.detectModelLimits(opts.model, signal)
       if (limits.contextWindow) {
+        // A DETECTED window is confident by definition (it IS the backend's own num_ctx) — so it must also
+        // go on the wire, not just into the compaction plan. Without this write-back the default path (no
+        // pinned window) planned against the detected window while sending NO num_ctx at all: correct only
+        // as long as the Modelfile happens to declare the same value. Where it doesn't, Ollama falls back to
+        // its small default and silently front-truncates the prompt — the exact failure ADR-038 exists to
+        // prevent — and the trace couldn't show it, because contextWindow was recorded as undefined.
+        confidentLimits = { contextWindow: limits.contextWindow, maxOutputTokens: limits.maxOutputTokens ?? opts.maxOutputTokens }
         compactPlan = resolveCompactionPlan({
           model: opts.model,
           contextWindow: limits.contextWindow,
@@ -288,6 +295,21 @@ export function createSession(opts: SessionOptions): CascadeSession {
         /* retrieval is best-effort */
       }
 
+      // A turn must be TERMINATED on every exit path. The loop emits `turn_done` where it returns normally
+      // (terminal answer / max turns), but an ABORT or a thrown error unwinds straight past those — and an
+      // unterminated turn is expensive twice over: the JSONL trace just stops mid-tool-call, so forensics
+      // can't tell "finished" from "died" (measured: a killed build looked identical to a hung one), and the
+      // OTel root span is never ended, so the viewer never receives that trace AT ALL — only a headless pile
+      // of children. Watch the stream so `finally` below can guarantee exactly one terminator.
+      let turnClosed = false
+      let turnsSeen = 0
+      const turnTracer: Tracer = {
+        event: (e) => {
+          if (e.t === 'model_request') turnsSeen = e.turn + 1 // so an aborted turn still reports how far it got
+          else if (e.t === 'turn_done') turnClosed = true
+          tracer.event(e)
+        },
+      }
       try {
         // Delegate to the agentic loop. It streams, runs tools, appends results, and loops until
         // the model stops asking for tools — yielding ActivityEvents the whole way (Phase 4).
@@ -297,7 +319,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
           cwd: opts.cwd,
           signal: controller.signal,
           permission,
-          tracer,
+          tracer: turnTracer,
           registry,
           archival,
           recalled,
@@ -350,6 +372,8 @@ export function createSession(opts: SessionOptions): CascadeSession {
         yield { type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: msg }] } }
         yield { type: 'turnDone', steps: 0 }
       } finally {
+        // The abort/throw path — the only way to get here without the loop having closed the turn.
+        if (!turnClosed) tracer.event({ t: 'turn_done', turns: turnsSeen })
         inFlight = undefined
       }
     },
