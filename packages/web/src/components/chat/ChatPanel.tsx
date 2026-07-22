@@ -5,6 +5,7 @@ import { useStore } from '@/lib/store'
 import type { Item } from '@/lib/types'
 import { ActivityCard, ChangeSet } from './ActivityCard'
 import { ChatHeader } from './ChatHeader'
+import { ContextMeter } from './ContextMeter'
 import { ModelPicker } from './ModelPicker'
 import { QuestionCard } from './QuestionCard'
 import { cn } from '@/lib/utils'
@@ -85,13 +86,21 @@ export function ChatPanel() {
   // (1) While a tool runs, the tool CARD is the activity indicator (its own spinner + "Writing X" /
   //     streaming output) — the generic row is suppressed so it can't contradict it with a stale message
   //     (the reported bug: "Reading your message…" showing under a running Bash/Write/Edit).
-  // (2) "Reading your message and the project context…" is only truthful for the FIRST prompt-eval of a
-  //     submit; once any tool/assistant step has happened it's continuation work, not first read.
+  // (2) PREFILL happens before EVERY model call, not just the first — core emits `step` each time, which
+  //     resets `sawTokens`, and until the first delta the model is re-reading the entire conversation
+  //     (measured: 44K tokens on a local 36B ⇒ many seconds of pure silence). Labelling that "Thinking…"
+  //     is a lie the user can feel: nothing is being thought, the prompt is being re-read. So `sawTokens`
+  //     alone decides prefill-vs-generating; `workedSinceSubmit` only picks WHICH read it is, because
+  //     "reading your message" is only true for the first prompt-eval of a submit.
   const lastItem = items[items.length - 1]
   const toolRunning = lastItem?.kind === 'tool' && lastItem.status === 'running'
   const lastUserIdx = items.map((i) => i.kind).lastIndexOf('user')
   const workedSinceSubmit = lastUserIdx >= 0 && items.slice(lastUserIdx + 1).some((i) => i.kind === 'tool' || i.kind === 'assistant')
-  const workingMessage = sawTokens || workedSinceSubmit ? status || 'Working — running the next step…' : 'Reading your message and the project context…'
+  const workingMessage = sawTokens
+    ? status || 'Working — running the next step…'
+    : workedSinceSubmit
+      ? 'Reading the conversation so far…'
+      : 'Reading your message and the project context…'
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [dragging, setDragging] = useState(false)
@@ -199,6 +208,8 @@ export function ChatPanel() {
         )}
         <div ref={endRef} />
       </div>
+
+      <ContextMeter />
 
       {/* shadcn-style composer: one rounded container, textarea on top, a toolbar row beneath. */}
       <div className="px-3 pb-3 pt-1">

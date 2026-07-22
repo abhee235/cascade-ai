@@ -12,6 +12,8 @@ export type Item =
 export type Streaming = { text: string; thinking: string }
 export type Recovering = { attempt: number; reason: string }
 export type RightTab = 'preview' | 'code' | 'versions' // top builder pane (Console moved to the bottom panel)
+/** Preview viewport: shows the built app at real device widths so responsive work is visible. */
+export type PreviewDevice = 'desktop' | 'tablet' | 'mobile'
 export type BottomTab = 'terminal' | 'problems' | 'output' | 'ports' // VS Code-style bottom panel (M7)
 export type Page = 'home' | 'project' | 'projects' | 'chats' | 'settings'
 export type PreviewState = { status: 'installing' | 'starting' | 'running' | 'error' | 'stopped'; url?: string }

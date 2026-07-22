@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils'
 import { CodePane } from './CodePane'
 import { PreviewPane } from './PreviewPane'
 import { VersionsPane } from './VersionsPane'
+import { DeviceSwitcher } from './DeviceSwitcher'
 
 const TABS: { id: RightTab; label: string; icon: LucideIcon; title: string; sub: string }[] = [
   { id: 'preview', label: 'Preview', icon: Eye, title: 'Live preview', sub: 'Runs the project in a sandbox and shows it here.' },
@@ -51,6 +52,11 @@ export function BuilderPane() {
         >
           <SquareTerminal className="h-4 w-4" /> Terminal
         </button>
+        {/* Responsive viewport, far right on the same row it acts on — it only ever affects the Preview tab,
+            so it belongs with the tabs rather than floating in the project header above them. */}
+        <div className="ml-auto">
+          <DeviceSwitcher />
+        </div>
       </div>
 
       {TABS.map((t) =>

@@ -5,7 +5,7 @@
 
 import { create } from 'zustand'
 import type { WireEvent, WireMessage } from './wsClient'
-import { extractMessage, type BottomTab, type Item, type Page, type PreviewState, type Recovering, type RightTab, type RuntimeError, type Streaming } from './types'
+import { extractMessage, type BottomTab, type Item, type Page, type PreviewDevice, type PreviewState, type Recovering, type RightTab, type RuntimeError, type Streaming } from './types'
 import { StreamingOptimizer } from './streamingOptimizer'
 import { applyAccent, applyTheme, getInitialAccent, getInitialTheme, type Theme } from './theme'
 import type { ChatMeta, EnabledModelInfo, FileNode, ModelLimits, Problem, ProjectInfo, TemplateInfo, Version } from '@cascade/app-protocol'
@@ -13,7 +13,7 @@ import type { ChatMeta, EnabledModelInfo, FileNode, ModelLimits, Problem, Projec
 // ADR-068: events that mutate the active-chat transcript/streaming. Gated to the viewed project so a
 // background turn (another project) can't bleed into this one. Everything else (projects, files, preview,
 // turnActivity, chatHistory, …) is view-agnostic and always applied.
-const TURN_EVENTS = new Set(['step', 'status', 'recovering', 'thinking_delta', 'text_delta', 'toolStart', 'toolProgress', 'toolResult', 'message', 'memory', 'question', 'compacted', 'turnDone', 'error'])
+const TURN_EVENTS = new Set(['step', 'status', 'recovering', 'thinking_delta', 'text_delta', 'toolStart', 'toolProgress', 'toolResult', 'message', 'memory', 'question', 'compacted', 'context', 'turnDone', 'error'])
 
 // Label for the `compacted` event's layer kind (ADR-039). Mirrors core's compactionKindLabel; inlined so the
 // browser bundle doesn't pull in the node-side @cascade/core runtime just for a string.
@@ -52,6 +52,9 @@ interface UiState {
   status: string | null
   recovering: Recovering | null
   busy: boolean
+  /** ADR-039: how full the model's context window is (last model call). Survives turn end on purpose — after
+   *  a build stops, "how close am I to compaction?" is exactly what you want to see before typing again. */
+  context: { used: number; window: number; auto: number } | null
   // ADR-068: the single active turn (server-tracked). Drives the sidebar dot + composer lock; a turn whose
   // projectId ≠ the viewed project keeps running in the background (its events are gated out of this view).
   turnActivity: { projectId?: string; chatId?: string; phase: 'running' | 'awaiting' } | null
@@ -154,6 +157,8 @@ interface UiState {
   restoreVersion: (id: string) => void // M6: restore the project to a checkpoint
   // bottom panel + terminal (M7)
   setBottomTab: (t: BottomTab) => void
+  previewDevice: PreviewDevice // responsive preview viewport (desktop/tablet/mobile)
+  setPreviewDevice: (d: PreviewDevice) => void
   toggleBottom: () => void
   toggleBottomMax: () => void
   newTerminal: () => void // add a new terminal session + make it active
@@ -258,6 +263,7 @@ export const useStore = create<UiState>((set, get) => {
     status: null,
     recovering: null,
     busy: false,
+    context: null,
     turnActivity: null,
     stepStartedAt: null,
     sawTokens: false,
@@ -276,6 +282,7 @@ export const useStore = create<UiState>((set, get) => {
     runtimeErrors: [],
     versions: [],
     bottomTab: 'terminal',
+    previewDevice: 'desktop',
     bottomOpen: false, // M12: terminal/bottom panel starts CLOSED (VS Code-like); opens on demand (Terminal button / Ctrl+`)
     bottomMaximized: false,
     terminals: [],
@@ -397,6 +404,9 @@ export const useStore = create<UiState>((set, get) => {
             items: [...s.items, { kind: 'compacted', text: compactedLabel(e.kind) }],
           }))
           break
+        case 'context':
+          set({ context: { used: e.used, window: e.window, auto: e.auto } })
+          break
         case 'turnDone':
           flushStream()
           thinkStart = null
@@ -505,6 +515,7 @@ export const useStore = create<UiState>((set, get) => {
             streaming: null,
             status: null,
             busy: false,
+            context: null, // a different chat has a different history — occupancy is unknown until it next calls the model
           })
           break
         }
@@ -707,6 +718,7 @@ export const useStore = create<UiState>((set, get) => {
       }),
     restoreVersion: (id) => get().send({ type: 'version', action: 'restore', id }),
     setBottomTab: (bottomTab) => set({ bottomTab, bottomOpen: true }),
+    setPreviewDevice: (previewDevice) => set({ previewDevice }),
     toggleBottom: () => set((s) => ({ bottomOpen: !s.bottomOpen, bottomMaximized: false })),
     toggleBottomMax: () => set((s) => ({ bottomMaximized: !s.bottomMaximized, bottomOpen: true })),
     newTerminal: () => {

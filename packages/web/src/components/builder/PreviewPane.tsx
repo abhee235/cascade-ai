@@ -6,14 +6,16 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { AlertTriangle, Loader2, MousePointerSquareDashed, Play, RotateCw, Square } from 'lucide-react'
 import { useStore } from '@/lib/store'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { DEVICE_WIDTH } from './DeviceSwitcher'
 
 function Center({ children }: { children: ReactNode }) {
   return <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">{children}</div>
 }
 
 export function PreviewPane() {
-  const { activeId, preview, startPreview, stopPreview, selectMode, toggleSelectMode, busy } = useStore()
+  const { activeId, preview, startPreview, stopPreview, selectMode, toggleSelectMode, busy, previewDevice: device } = useStore()
   const [reloadKey, setReloadKey] = useState(0)
   const iframeRef = useRef<HTMLIFrameElement>(null)
 
@@ -46,14 +48,16 @@ export function PreviewPane() {
             <Square className="h-3.5 w-3.5" />
           </Button>
         </div>
-        <div className="relative min-h-0 flex-1">
+        <div className={cn('relative min-h-0 flex-1', device !== 'desktop' && 'flex justify-center overflow-auto bg-muted/40 p-4')}>
           <iframe
             ref={iframeRef}
             key={reloadKey}
             src={preview.url}
             title="Preview"
             onLoad={postMode}
-            className="h-full w-full border-0 bg-white"
+            // Desktop fills the pane; tablet/mobile clamp to a real device width and get a device-ish frame.
+            style={device === 'desktop' ? undefined : { width: DEVICE_WIDTH[device], maxWidth: '100%' }}
+            className={cn('border-0 bg-white', device === 'desktop' ? 'h-full w-full' : 'h-full shrink-0 rounded-xl border border-border shadow-lg')}
           />
           {/* Building banner (walkthrough feedback): while the agent works, what's rendering may still be
               the starter showcase — label it so it's never mistaken for the user's finished app. The
