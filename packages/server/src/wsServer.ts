@@ -16,13 +16,13 @@ import { randomBytes } from 'node:crypto'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { CascadeSession, InboundMessage } from '@cascade/core'
 import type { BuilderCommand } from '@cascade/app-protocol'
-import { ProjectManager } from './projectManager.js'
+import { flushTracers, ProjectManager, setTraceSession } from './projectManager.js'
 import { ensurePlanPersisted } from './planStage.js'
 import { DockerSandbox, dockerAvailable, sweepSandboxContainers } from './dockerSandbox.js'
 import { ensureVisualEditConfig, listTemplates } from './templates.js'
 import { ChatStore } from './chatStore.js'
 import { listModels, modelInfo, providerCatalog, setProviderKey } from './modelCaps.js'
-import { addEnabledModel, enabledModels, initModelRegistry, modelContextFor, modelParamsFor, removeEnabledModel, setModelContext, setModelParams } from './modelRegistry.js'
+import { activeModel, addEnabledModel, enabledModels, initModelRegistry, modelContextFor, modelParamsFor, removeEnabledModel, setActiveModel, setModelContext, setModelParams } from './modelRegistry.js'
 import type { ChatHistoryItem } from '@cascade/app-protocol'
 import type { Message } from '@cascade/core'
 import { createFile, deletePath, editJsxTextAtLoc, makeDir, readDiff, readFile, readTree, renamePath, setClassAtLoc, writeFile } from './fileService.js'
@@ -31,6 +31,7 @@ import { PreviewProxy } from './previewProxy.js'
 import { runCheck } from './checkProject.js'
 import { VersionManager } from './versionManager.js'
 import { createTerminal, type TerminalHandle } from './terminalSession.js'
+import { liveTurn } from './liveTurn.js'
 
 /** What a connection can receive: a core session message OR an app/builder command. */
 type Inbound = InboundMessage | BuilderCommand
@@ -135,22 +136,29 @@ export function handleConnection(
   // responses (answer/permission/abort) must reach IT, not the builder, for the stage's duration.
   let stageAborted = false // abort during the stage cancels the WHOLE submit, not just the planner
   let activeChatId: string | undefined // M11: which chat (conversation) the active session is currently on
-  // ADR-068: the SINGLE active turn (block-until-free). Holds a live snapshot so navigating away and back
-  // restores the exact panel — committed items come from the replay log, the in-flight streaming + a parked
-  // approval card come from here (kept in memory, re-sent on re-attach). `phase` drives the sidebar dot.
-  let activeTurn:
-    | { projectId: string; chatId: string; phase: 'running' | 'awaiting'; streamText: string; streamThinking: string; status?: string; pendingQuestion?: unknown }
-    | null = null
-  const sendTurnActivity = () => send({ type: 'turnActivity', projectId: activeTurn?.projectId, chatId: activeTurn?.chatId, phase: activeTurn?.phase ?? null })
+  // ADR-068: the SINGLE active turn lives in the server-wide `liveTurn` registry, NOT in this connection —
+  // so a hard reload or a second tab still sees the build running and re-attaches to its stream.
+  const sendTurnActivity = () => {
+    const t = liveTurn.current
+    send({ type: 'turnActivity', projectId: t?.projectId, chatId: t?.chatId, phase: t?.phase ?? null })
+  }
   // On opening the project whose turn is live, replay the in-flight state that the persisted log doesn't hold.
   const reattachTurn = () => {
-    if (!activeTurn || activeTurn.projectId !== activeId) return
-    if (activeTurn.status) send({ type: 'status', text: activeTurn.status })
-    if (activeTurn.streamThinking) send({ type: 'thinking_delta', thinking: activeTurn.streamThinking })
-    if (activeTurn.streamText) send({ type: 'text_delta', text: activeTurn.streamText })
-    if (activeTurn.pendingQuestion) send(activeTurn.pendingQuestion) // the parked card — still answerable (loop alive)
+    const t = liveTurn.for(activeId)
+    if (!t) return
+    if (t.status) send({ type: 'status', text: t.status })
+    if (t.streamThinking) send({ type: 'thinking_delta', thinking: t.streamThinking })
+    if (t.streamText) send({ type: 'text_delta', text: t.streamText })
+    if (t.pendingQuestion) send(t.pendingQuestion) // the parked card — still answerable (loop alive)
     sendTurnActivity()
   }
+  // Hear the turn wherever it was started (this socket, a previous one that reloaded away, another tab):
+  // its events when we're viewing that project, and every activity change regardless — the sidebar dot has
+  // to appear on a project we're not looking at. Dropped on close, below.
+  const unsubscribeTurn = liveTurn.subscribe((n) => {
+    if (n.kind === 'activity') sendTurnActivity()
+    else if (n.projectId === activeId) send(n.ev)
+  })
   let stopTail: (() => void) | undefined // M5: stops the Console log stream (tail) for this connection
   const terms = new Map<string, TerminalHandle>() // M7: the connection's terminal sessions, keyed by id
   const killAllTerms = () => {
@@ -183,6 +191,7 @@ export function handleConnection(
   // provider come from the manager (runtime-mutable), and the provider menu rides along for the picker.
   if (serverInfo) send({ type: 'serverInfo', sandbox: serverInfo.sandbox, model: manager.currentModel, provider: manager.currentProvider, providers: providerCatalog() })
   send({ type: 'projects', projects: manager.list(), activeId })
+  sendTurnActivity() // a build may already be running from an earlier connection — say so up front, not on the next change
   send({ type: 'templates', templates: listTemplates() })
   // ADR-067: the curated model list for the picker (always includes the running model).
   const sendEnabledModels = () => send({ type: 'enabledModels', models: enabledModels({ provider: manager.currentProvider, model: manager.currentModel }) })
@@ -211,7 +220,11 @@ export function handleConnection(
     const dir = activeId && manager.dirOf(activeId)
     if (!dir || !chatStore || !active) return
     activeChatId = id
-    active.loadHistory(chatStore.messages(dir, id))
+    // ADR-068: a RUNNING turn's history lives in the session — disk is stale until the turn ends (save()
+    // only runs after the loop). Re-loading it here would hand the live session an EMPTY history mid-build,
+    // silently discarding everything the agent has done so far. In-memory wins while the turn is in flight.
+    const live = liveTurn.for(activeId)?.chatId === id
+    if (!live) active.loadHistory(chatStore.messages(dir, id))
     sendChats()
     // High-fidelity path: replay the ActivityEvents the client rendered live (identical transcript by
     // construction). The flattened items ride along as the fallback for pre-log chats.
@@ -274,8 +287,12 @@ export function handleConnection(
             sendTree() // populate the Code pane for the opened project
             sendVersions() // populate the Versions panel (M6)
             // M11: load the project's chats and restore the most-recent one's conversation into the session.
+            // ADR-068: if a turn is STILL RUNNING for this project, land on ITS chat — a turn started after
+            // this one (or a freshly created empty chat) would otherwise hide the build in progress. Passing
+            // it as `keepId` also protects it from prune while it has no saved messages yet.
             const dir = activeId && manager.dirOf(activeId)
-            if (dir && chatStore) loadChat(chatStore.list(dir)[0].id)
+            const liveChat = liveTurn.for(activeId)?.chatId
+            if (dir && chatStore) loadChat(liveChat || chatStore.list(dir, liveChat)[0].id)
             const pv = activeId && preview?.state(activeId) // re-show a preview already running for this project
             if (pv) {
               emitPreview(pv)
@@ -333,6 +350,7 @@ export function handleConnection(
         case 'setModel': {
           // ADR-067: apply the target model's saved params (window/output/sampling) on activation.
           await manager.setModelConfig({ provider: msg.provider, model: msg.model, baseUrl: msg.baseUrl, ...modelParamsFor(msg.provider, msg.model) })
+          setActiveModel({ provider: msg.provider, model: msg.model, baseUrl: msg.baseUrl }) // survive a restart (see boot restore)
           // The switch dropped every cached session; rebuild the active one and reload its history so the
           // conversation continues under the new provider. Then re-announce the active model.
           if (activeId) {
@@ -353,30 +371,15 @@ export function handleConnection(
           const pinnedLog = (entry: import('@cascade/app-protocol').ChatReplayEntry) => {
             if (turnDir && chatStore && turnChatId) chatStore.appendEvent(turnDir, turnChatId, entry)
           }
-          activeTurn = { projectId: turnProjectId, chatId: turnChatId, phase: 'running', streamText: '', streamThinking: '' }
-          sendTurnActivity()
-          // relay: update the live snapshot (for perfect re-attach) + flip phase on approval + send + log.
+          // ADR-053: group this turn's spans under the chat it belongs to, BEFORE anything is traced — the
+          // plan stage builds its tracer partway through this handler and must inherit the same session.
+          if (turnDir) setTraceSession(turnDir, turnChatId || undefined)
+          const turn = liveTurn.start(turnProjectId, turnChatId)
+          // relay: fold into the live snapshot (for perfect re-attach) + flip phase on approval + fan out to
+          // every attached connection viewing this project (including this one) + log. Note it does NOT write
+          // to this socket directly — the turn is not ours to own; whoever is watching gets it.
           const relay = (ev: { type: string; [k: string]: unknown }) => {
-            if (activeTurn) {
-              if (ev.type === 'text_delta') activeTurn.streamText += String(ev.text ?? '')
-              else if (ev.type === 'thinking_delta') activeTurn.streamThinking += String(ev.thinking ?? '')
-              else if (ev.type === 'status') activeTurn.status = String(ev.text ?? '')
-              else if (ev.type === 'message' || ev.type === 'toolStart' || ev.type === 'toolResult' || ev.type === 'memory' || ev.type === 'compacted') {
-                activeTurn.streamText = ''
-                activeTurn.streamThinking = ''
-                activeTurn.status = undefined
-              }
-              if (ev.type === 'question') {
-                activeTurn.phase = 'awaiting'
-                activeTurn.pendingQuestion = ev
-                sendTurnActivity() // → amber dot
-              } else if (activeTurn.phase === 'awaiting') {
-                activeTurn.phase = 'running'
-                activeTurn.pendingQuestion = undefined
-                sendTurnActivity()
-              }
-            }
-            send(ev)
+            liveTurn.publish(turn, ev)
             if (REPLAY_TYPES.has(ev.type)) pinnedLog({ event: ev })
           }
 
@@ -408,8 +411,7 @@ export function handleConnection(
             }
             for await (const ev of s.submit(msg.text, msg.images)) relay(ev) // M11: images = attached data-URIs
           } finally {
-            activeTurn = null // turn over (or aborted) — clear the dot + composer lock
-            sendTurnActivity()
+            liveTurn.end(turn) // turn over (or aborted) — clears the dot + composer lock everywhere
           }
           sendTree() // the agent may have created/edited files — refresh the tree
           if (turnDir && chatStore) chatStore.save(turnDir, turnChatId, s.getHistory(), msg.text) // pinned save
@@ -634,6 +636,7 @@ export function handleConnection(
     stopTail?.() // end the Console log stream (the dev server itself stays up in the container)
     stopTail = undefined
     killAllTerms() // end the terminal shells (the container stays up)
+    unsubscribeTurn() // stop hearing the turn — it keeps running, and the next connection re-attaches
     active = undefined
     activeId = undefined
   })
@@ -682,6 +685,13 @@ async function start() {
 
   initModelRegistry(PROJECTS_ROOT) // ADR-067: curated model list persisted under PROJECTS_ROOT/.cascade/
   const manager = new ProjectManager({ root: PROJECTS_ROOT, provider: PROVIDER, model: MODEL, baseUrl: BASE_URL, contextWindow: CONTEXT_WINDOW, sandboxFor })
+  // ADR-067: restore the model the user last SELECTED. The env vars are the first-run default, not a
+  // standing override — otherwise every restart silently moved the session back to CASCADE_MODEL (measured:
+  // a chosen local Ollama model reverted to a paid hosted one, with only a small label to give it away).
+  const restored = activeModel()
+  if (restored) {
+    await manager.setModelConfig({ provider: restored.provider, model: restored.model, baseUrl: restored.baseUrl, ...modelParamsFor(restored.provider, restored.model) })
+  }
   // M5.2: a stable preview origin. The proxy forwards http://localhost:PREVIEW_PORT → the active container,
   // and the dev server's HMR connects on PREVIEW_PORT too (same origin as the iframe).
   const previewProxy = hasDocker ? new PreviewProxy(PREVIEW_PORT) : undefined
@@ -697,11 +707,15 @@ async function start() {
   httpServer.listen(PORT, HOST)
   // Graceful exit (Ctrl-C / SIGTERM): dispose sessions + remove this run's sandbox containers. (A hard
   // SIGKILL skips this — the startup sweep above is the backstop.)
-  const shutdown = () => void Promise.allSettled([manager.dispose(), sweepSandboxContainers()]).finally(() => process.exit(0))
+  // flushTracers FIRST: the exporter batches, so the spans describing whatever we're about to tear down are
+  // still in memory — exiting without it loses the tail of every session (and `tsx watch` restarts often).
+  const shutdown = () => void flushTracers().finally(() => Promise.allSettled([manager.dispose(), sweepSandboxContainers()]).finally(() => process.exit(0)))
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
   console.log(
-    `Cascade server listening on ws://${HOST}:${PORT}  (provider: ${PROVIDER}, model: ${MODEL}, projects: ${PROJECTS_ROOT}, sandbox: ${hasDocker ? 'docker' : 'host'})`,
+    // Report the ACTIVE model (restored selection, or the env default) — not the env vars, which are only
+    // the first-run seed. A boot line that names a model you aren't running is worse than none.
+    `Cascade server listening on ws://${HOST}:${PORT}  (provider: ${manager.currentProvider}, model: ${manager.currentModel}${restored ? ' [restored selection]' : ''}, projects: ${PROJECTS_ROOT}, sandbox: ${hasDocker ? 'docker' : 'host'})`,
   )
   if (sandboxEnabled && !hasDocker)
     console.warn('⚠️  Docker not available — agent commands run on the HOST (no isolation). Install/start Docker Desktop for per-project sandboxing.')

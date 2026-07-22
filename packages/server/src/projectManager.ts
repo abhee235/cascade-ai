@@ -8,9 +8,10 @@
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createProvider, createSession, JsonlTracer, type AgentDef, type CascadeSession, type Sandbox } from '@cascade/core'
+import { fanout, OtelTracer } from './otelTracer.js'
 import type { ProjectInfo } from '@cascade/app-protocol'
 import { applyTemplate, readAiRules } from './templates.js'
 import { createPlannerSession, needsPlanStage } from './planStage.js'
@@ -53,6 +54,9 @@ export interface ProjectManagerOptions {
   createSessionFor?: (dir: string, sandbox?: Sandbox, extraInstructions?: string) => CascadeSession
   /** How to build a plan-stage session (ADR-056 rung 3). Injected for tests; default: planStage.ts. */
   createPlanSessionFor?: (dir: string, def: AgentDef, sandbox?: Sandbox) => CascadeSession
+  /** How to construct a ModelProvider. Injected for tests so they can assert WHICH provider/model a session
+   *  was built from — the plan stage silently used the env default for a while (see planSessionFor). */
+  createProviderFn?: typeof createProvider
 }
 
 /** Builder behavior injected ahead of every project's AI rules (as generic `extraInstructions`). The core
@@ -95,8 +99,58 @@ export const skillDirsFor = (dir: string) => [join(import.meta.dirname, '..', 's
 export const agentDirsFor = (dir: string) => [join(import.meta.dirname, '..', 'agents', 'builder'), join(dir, '.cascade', 'agents')]
 
 /** Per-project forensic traces (ADR-023, product path — the first live walkthrough was UNDIAGNOSABLE
- *  without them). One JSONL per session under the project's own .cascade/traces/. */
-export const tracerFor = (dir: string, kind: 'builder' | 'planner') => new JsonlTracer(join(dir, '.cascade', 'traces', `${kind}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.jsonl`))
+ *  without them). One JSONL per session under the project's own .cascade/traces/.
+ *
+ *  ADR-053 (amended): when OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is set, the SAME event stream also goes live
+ *  to an OTLP viewer (Phoenix: http://localhost:6006/v1/traces), so a build is browsable WHILE it runs
+ *  instead of only after replaying its .jsonl with otelBackfill.mts. Unset ⇒ byte-identical to before:
+ *  no exporter, no timers, no network. The JSONL stays the source of truth either way — it is written
+ *  first in the fanout, so a viewer being down can never cost you the forensic record. */
+const otelTracers = new Map<string, OtelTracer>() // one exporter per project+kind; a new one per turn would leak timers
+const traceSessions = new Map<string, string>() // project dir → the chat its spans should be grouped under
+
+/** ADR-053: group a project's turns into ONE conversation in the viewer (Phoenix Sessions / `session.id`).
+ *  Every submit is its own trace by design, so without this a build and its follow-ups arrive as unrelated
+ *  traces. Called per submit with the chat the turn is pinned to; the planner and builder share it, so a
+ *  fresh project's plan stage and the build it feeds group together instead of looking like two jobs. */
+/** Push whatever is still buffered to the viewer. BatchSpanProcessor holds spans for seconds, so without
+ *  this every shutdown — including each `tsx watch` restart in dev, which happens constantly — silently drops
+ *  the tail of the session. Best-effort and bounded: exiting must not hang on an unreachable collector. */
+export async function flushTracers(timeoutMs = 2_000): Promise<void> {
+  const tracers = [...otelTracers.values()]
+  if (!tracers.length) return
+  // CLOSE, then flush — in that order, and never one without the other. Flushing an in-flight turn pushes
+  // nothing, because an unended span is never exported: the turn doesn't arrive truncated, it doesn't arrive.
+  for (const t of tracers) t.endOpenSpans('server shutdown')
+  const flushed = tracers.map((t) => t.forceFlush().catch(() => {}))
+  await Promise.race([Promise.allSettled(flushed), new Promise((r) => setTimeout(r, timeoutMs))])
+}
+
+export function setTraceSession(dir: string, chatId: string | undefined): void {
+  if (chatId) traceSessions.set(dir, chatId)
+  else traceSessions.delete(dir)
+  for (const kind of ['builder', 'planner'] as const) otelTracers.get(`${dir}:${kind}`)?.setSession(chatId)
+}
+export const tracerFor = (dir: string, kind: 'builder' | 'planner') => {
+  const jsonl = new JsonlTracer(join(dir, '.cascade', 'traces', `${kind}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.jsonl`))
+  const endpoint = process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+  if (!endpoint) return jsonl
+  const key = `${dir}:${kind}`
+  let otel = otelTracers.get(key)
+  if (!otel) {
+    otel = new OtelTracer({
+      endpoint,
+      service: `cascade-${kind}:${basename(dir)}`,
+      project: process.env.PHOENIX_PROJECT_NAME, // unset ⇒ the viewer's default bucket (shared with eval runs)
+      attributes: { 'cascade.project': basename(dir), 'cascade.session_kind': kind },
+    })
+    otelTracers.set(key, otel)
+  }
+  // The PLANNER's tracer is created mid-submit — after setTraceSession has already run — so a tracer born
+  // now must adopt the session in flight, or the plan stage lands outside the conversation it belongs to.
+  otel.setSession(traceSessions.get(dir))
+  return fanout(jsonl, otel)
+}
 
 export class ProjectManager {
   private readonly projects = new Map<string, Project>()
@@ -113,11 +167,14 @@ export class ProjectManager {
    *  UI can switch provider+model WITHOUT restarting the server. New sessions read this; switching
    *  invalidates cached sessions (history lives in chatStore and reloads on re-open). */
   private active!: { provider: string; model: string; baseUrl?: string; apiKey?: string; contextWindow?: number; maxOutputTokens?: number; temperature?: number; topP?: number; topK?: number }
+  /** Provider construction, injectable so tests can assert which model a session was actually built from. */
+  private readonly makeProvider: typeof createProvider
 
   constructor(private readonly opts: ProjectManagerOptions) {
     mkdirSync(opts.root, { recursive: true })
     this.metaFile = join(opts.root, 'projects.json')
     this.active = { provider: opts.provider ?? 'ollama', model: opts.model, baseUrl: opts.baseUrl, apiKey: opts.apiKey, contextWindow: opts.contextWindow }
+    this.makeProvider = opts.createProviderFn ?? createProvider
     void hasVision(this.active.model, this.active.baseUrl, this.active.provider).then((v) => {
       this.visionOk = v
     })
@@ -126,7 +183,7 @@ export class ProjectManager {
       ((dir, sandbox, extraInstructions) =>
         createSession({
           cwd: dir,
-          provider: createProvider({ provider: this.active.provider, model: this.active.model, baseUrl: this.active.baseUrl, apiKey: this.active.apiKey }),
+          provider: this.makeProvider({ provider: this.active.provider, model: this.active.model, baseUrl: this.active.baseUrl, apiKey: this.active.apiKey }),
           model: this.active.model,
           // Hosted providers have no live window probe — honor an explicit override so the compactor sizes
           // against the NIM endpoint's real window instead of the model→map guess (or the 8k default).
@@ -201,8 +258,16 @@ export class ProjectManager {
       ((dir: string, d: AgentDef, sandbox?: Sandbox) =>
         createPlannerSession(d, {
           dir,
-          provider: createProvider({ provider: this.opts.provider ?? 'ollama', model: this.opts.model, baseUrl: this.opts.baseUrl, apiKey: this.opts.apiKey }),
-          model: this.opts.model,
+          // ADR-067: the ACTIVE selection, NOT `opts` (the env seed). Measured 2026-07-22: with the picker on
+          // a local Ollama model, the plan stage still ran its whole pass on CASCADE_MODEL — Ollama's request
+          // log shows zero calls for the 56s the planner spent making 10 model calls to the hosted default.
+          // Silent, billed, and invisible except in a per-message label.
+          provider: this.makeProvider({ provider: this.active.provider, model: this.active.model, baseUrl: this.active.baseUrl, apiKey: this.active.apiKey }),
+          model: this.active.model,
+          // The window matters as much as the model: unset, a local backend silently front-truncates the
+          // prompt (ADR-038) — so the planner must size against the same window the builder uses.
+          contextWindow: this.active.contextWindow,
+          maxOutputTokens: this.active.maxOutputTokens,
           skillDirs: skillDirsFor(dir),
           sandbox,
           tracer: tracerFor(dir, 'planner'), // stage forensics in the product too

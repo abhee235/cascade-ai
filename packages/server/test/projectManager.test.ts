@@ -79,6 +79,33 @@ describe('ProjectManager (13.2)', () => {
     expect(mgr.list()).toHaveLength(0)
   })
 
+  // ADR-067 — measured 2026-07-22: with the picker switched to a local Ollama model, the PLAN STAGE still
+  // built its provider from `opts` (the env seed), so a fresh project's first message spent 56s and 10 model
+  // calls on the hosted default while Ollama's request log sat silent. Both session kinds must follow the
+  // ACTIVE selection, or a "switch" only half-switches — and the half you don't see is the billed one.
+  it('the plan stage follows the ACTIVE model, not the env default', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'cascade-pm-'))
+    const built: { provider: string; model: string }[] = []
+    const mgr = new ProjectManager({
+      root,
+      provider: 'openai', // the env seed — what the planner used to be stuck on
+      model: 'gpt-5.6-luna',
+      createSessionFor: (dir) => createSession({ cwd: dir, provider: fakeProvider, model: 'fake' }),
+      createProviderFn: (cfg) => {
+        built.push({ provider: cfg.provider, model: cfg.model })
+        return fakeProvider
+      },
+    })
+    const project = mgr.create('Planned')
+    await mgr.setModelConfig({ provider: 'ollama', model: 'qwen36-agentic' })
+    mgr.open(project.id) // setModelConfig dropped cached sessions; the submit path always re-opens first
+    built.length = 0 // ignore anything built before the switch — we assert on the PLANNER only
+    const planner = mgr.planSessionFor(project.id)
+    expect(planner).toBeDefined() // a fresh project with no PLAN.md still gets a plan stage
+    expect(built).toEqual([{ provider: 'ollama', model: 'qwen36-agentic' }])
+    await planner?.dispose()
+  })
+
   it('metadata persists: a second manager on the same root re-lists projects', () => {
     const { mgr, root } = manager()
     mgr.create('Persisted')

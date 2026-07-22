@@ -1,11 +1,11 @@
 // ADR-067 — the enabled-model registry: curated picker list + editable per-model params (context window,
 // output cap, sampling) persisted to disk and merged (never clobbered) on update.
 
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { addEnabledModel, enabledModels, initModelRegistry, modelParamsFor, removeEnabledModel, setModelContext, setModelParams } from '../src/modelRegistry'
+import { activeModel, addEnabledModel, enabledModels, initModelRegistry, modelParamsFor, removeEnabledModel, setActiveModel, setModelContext, setModelParams } from '../src/modelRegistry'
 
 let root = ''
 beforeEach(() => {
@@ -63,5 +63,34 @@ describe('modelRegistry per-model params (ADR-067)', () => {
 		removeEnabledModel('ollama', 'temp-model')
 		expect(enabledModels().some((m) => m.model === 'temp-model')).toBe(false)
 		expect(modelParamsFor('ollama', 'temp-model')).toEqual({})
+	})
+})
+
+// The SELECTION, not just the list. Measured: `active` lived only in ProjectManager memory, so every server
+// restart silently reverted to CASCADE_PROVIDER/CASCADE_MODEL — a chosen local Ollama model quietly became a
+// paid hosted one again, with only a small label to give it away.
+describe('active model selection survives a restart (ADR-067)', () => {
+	it('is undefined on first run, so the env default still seeds the server', () => {
+		expect(activeModel()).toBeUndefined()
+	})
+
+	it('round-trips the selection through disk (a restart re-reads it)', () => {
+		setActiveModel({ provider: 'ollama', model: 'qwen36-agentic' })
+		initModelRegistry(root) // simulate the restart: caches dropped, same dir
+		expect(activeModel()).toEqual({ provider: 'ollama', model: 'qwen36-agentic' })
+	})
+
+	it('keeps baseUrl for custom endpoints, where the id alone cannot locate the backend', () => {
+		setActiveModel({ provider: 'vllm-box', model: 'qwen3-32b', baseUrl: 'http://10.0.0.4:8000' })
+		initModelRegistry(root)
+		expect(activeModel()?.baseUrl).toBe('http://10.0.0.4:8000')
+	})
+
+	it('a corrupt selection file degrades to the env default, never taking the curated list down with it', () => {
+		setActiveModel({ provider: 'ollama', model: 'qwen36-agentic' })
+		writeFileSync(join(root, '.cascade', 'active-model.json'), '{ not json')
+		initModelRegistry(root)
+		expect(activeModel()).toBeUndefined()
+		expect(enabledModels().length).toBeGreaterThan(0) // the list is a SEPARATE file — untouched
 	})
 })

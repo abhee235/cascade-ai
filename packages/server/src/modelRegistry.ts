@@ -31,13 +31,50 @@ const DEFAULTS: EnabledModel[] = [
   { provider: 'ollama', model: 'qwen36-agentic' },
 ]
 
+/** WHICH enabled model is currently selected. Kept in its OWN file, not folded into models.json, so the
+ *  user's curated list needs no migration and a corrupt selection can never cost them the list. */
+export interface ActiveModel {
+  provider: string
+  model: string
+  /** Only meaningful for custom/unknown provider ids, where the endpoint isn't derivable from the id. */
+  baseUrl?: string
+}
+
 let filePath = ''
 let cache: EnabledModel[] | null = null
+let activePath = ''
+let activeCache: ActiveModel | null | undefined // undefined = not read yet, null = nothing persisted
 
 /** Point the registry at a project-root-adjacent file (called once at server startup). */
 export function initModelRegistry(rootDir: string): void {
   filePath = join(rootDir, '.cascade', 'models.json')
+  activePath = join(rootDir, '.cascade', 'active-model.json')
   cache = null
+  activeCache = undefined
+}
+
+/** The model the user last switched to, or undefined ⇒ fall back to the env default (first run). Without
+ *  this, every server restart silently reverted to CASCADE_PROVIDER/CASCADE_MODEL — measured: a restart
+ *  moved a session from the selected local Ollama model back to a paid hosted one, visible only in a label. */
+export function activeModel(): ActiveModel | undefined {
+  if (activeCache === undefined) {
+    try {
+      activeCache = JSON.parse(readFileSync(activePath, 'utf8')) as ActiveModel
+    } catch {
+      activeCache = null
+    }
+  }
+  return activeCache ?? undefined
+}
+
+export function setActiveModel(a: ActiveModel): void {
+  activeCache = a
+  try {
+    mkdirSync(dirname(activePath), { recursive: true })
+    writeFileSync(activePath, JSON.stringify(a, null, 2))
+  } catch {
+    /* best-effort — a read-only fs just loses persistence, not the switch */
+  }
 }
 
 function load(): EnabledModel[] {
