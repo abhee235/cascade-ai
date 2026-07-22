@@ -141,6 +141,8 @@ export const tracerFor = (dir: string, kind: 'builder' | 'planner') => {
     otel = new OtelTracer({
       endpoint,
       service: `cascade-${kind}:${basename(dir)}`,
+      kind, // names the root: a fresh project's first prompt shows as `agent (planner)` then `agent (builder)`
+
       project: process.env.PHOENIX_PROJECT_NAME, // unset ⇒ the viewer's default bucket (shared with eval runs)
       attributes: { 'cascade.project': basename(dir), 'cascade.session_kind': kind },
     })

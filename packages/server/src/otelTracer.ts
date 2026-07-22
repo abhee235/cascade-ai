@@ -34,6 +34,10 @@ export interface OtelTracerOptions {
 	/** Which viewer-side project these traces belong to (Phoenix groups by it). Omit ⇒ the viewer's default,
 	 *  where product builds and eval runs pile into one bucket. */
 	project?: string
+	/** Which agent this tracer serves ("builder" | "planner"), used to NAME the root. One user prompt on a
+	 *  fresh project produces two turns — the plan stage runs to completion first, then the builder — and with
+	 *  both roots called "agent" the only way to tell them apart was to open one and notice AskUserQuestion. */
+	kind?: string
 	/** Injected timestamps (backfill replays original event times). Omit ⇒ wall clock. */
 	now?: () => number
 	/** Test seam: inject a span processor (e.g. SimpleSpanProcessor(InMemoryExporter)) instead of OTLP. */
@@ -51,6 +55,7 @@ export class OtelTracer implements Tracer {
 	private readonly tools = new Map<string, { span: Span }>()
 	private session?: string
 	private window?: number // the context window this turn's prompts are sized against (from model_request)
+	private readonly rootName: string // "agent (planner)" / "agent (builder)" — one prompt yields both
 	private turnStart = 0 // wall clock of the submit — the summary span is backdated to it
 	private turns = 0 // model turns so far, reported on the summary
 	/** permission decisions keyed by tool-call id — they arrive BEFORE the tool span exists, so they wait here. */
@@ -68,6 +73,7 @@ export class OtelTracer implements Tracer {
 		})
 		this.otel = this.provider.getTracer('cascade')
 		this.now = opts.now ?? (() => Date.now())
+		this.rootName = opts.kind ? `agent (${opts.kind})` : 'agent'
 	}
 
 	/** Group every following turn under one conversation (Phoenix's Sessions view; OpenInference `session.id`).
@@ -158,7 +164,7 @@ export class OtelTracer implements Tracer {
 				// underneath as it completes — the point of the exercise is watching a build while it runs.
 				// Children legitimately outlive their parent here; the true wall-clock span of the turn is
 				// recorded by the summary span in closeTurn(), backdated to this instant.
-				this.root = this.otel.startSpan('agent', { startTime: at, attributes: { ...this.common(), [SC.OPENINFERENCE_SPAN_KIND]: 'AGENT', [SC.INPUT_VALUE]: cut(e.text) } })
+				this.root = this.otel.startSpan(this.rootName, { startTime: at, attributes: { ...this.common(), [SC.OPENINFERENCE_SPAN_KIND]: 'AGENT', [SC.INPUT_VALUE]: cut(e.text) } })
 				this.root.end(at)
 				break
 			}
@@ -201,6 +207,23 @@ export class OtelTracer implements Tracer {
 					[SC.LLM_TOKEN_COUNT_COMPLETION]: e.usage?.outputTokens ?? 0,
 					[SC.OUTPUT_VALUE]: cut(e.text || `(tools: ${e.toolUses.map((t) => t.name).join(',') || 'none'})`),
 					'llm.latency_ms': at - this.llmStart,
+					// Prefill/decode split (Ollama native durations; ADR-053 amendment 2026-07-23). This is the
+					// KV-cache observable: prompt token COUNTS include cached tokens, so a cache miss shows up
+					// ONLY here — prefill_tps collapses (~500 tok/s = full re-prefill) vs a hit (10k+ tok/s).
+					// A nonzero load_ms mid-session means the runner itself was evicted and reloaded.
+					...(e.usage?.promptEvalMs
+						? {
+								'cascade.prompt_eval_ms': e.usage.promptEvalMs,
+								'cascade.prefill_tps': Math.round(((e.usage.inputTokens ?? 0) / e.usage.promptEvalMs) * 1000),
+							}
+						: {}),
+					...(e.usage?.decodeMs
+						? {
+								'cascade.decode_ms': e.usage.decodeMs,
+								'cascade.decode_tps': Math.round((((e.usage.outputTokens ?? 0) / e.usage.decodeMs) * 1000 + Number.EPSILON) * 10) / 10,
+							}
+						: {}),
+					...(e.usage?.loadMs && e.usage.loadMs > 500 ? { 'cascade.model_load_ms': e.usage.loadMs } : {}),
 					// OCCUPANCY, not throughput. Summing prompt tokens across calls is what a viewer shows by
 					// default and it reads like a runaway (measured: 344k over 12 calls) — but each call only has
 					// to FIT, and these peaked at 34% of the window, which is why nothing ever compacted.

@@ -52,6 +52,16 @@ describe('OtelTracer — span tree from the forensic event stream', () => {
 		expect(tool.parentSpanContext?.spanId).toBe(root.spanContext().spanId)
 	})
 
+	// One user prompt on a fresh project yields TWO turns — the plan stage runs to completion, then the
+	// builder starts — and with both roots called "agent" the only way to tell them apart in the viewer's
+	// turn list was to open one and notice AskUserQuestion in it.
+	it('names the root after the agent that produced it', () => {
+		const exporter = new InMemorySpanExporter()
+		const tracer = new OtelTracer({ endpoint: 'http://unused.invalid/v1/traces', service: 'test', kind: 'planner', processor: new SimpleSpanProcessor(exporter) })
+		tracer.event({ t: 'submit', text: 'build the shop' } as never)
+		expect(exporter.getFinishedSpans().map((s) => s.name)).toContain('agent (planner)')
+	})
+
 	// Reasoning was captured in the JSONL and then dropped on the floor by the exporter, so the viewer showed
 	// WHAT the model answered and WHICH tools it called, but never why. Worst on a tool-only turn, where
 	// `output.value` degrades to "(tools: …)" and the thinking that chose those tools vanished entirely.
