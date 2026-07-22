@@ -45,6 +45,15 @@ export interface CompletionRequest {
 export interface TokenUsage {
   inputTokens?: number // prompt tokens (OpenAI prompt_tokens / Ollama prompt_eval_count)
   outputTokens?: number // completion tokens (OpenAI completion_tokens / Ollama eval_count)
+  /** PREFILL wall time (Ollama native `prompt_eval_duration`, ns→ms). The prefill/decode split is the only
+   *  way to SEE KV-cache behavior: `inputTokens` counts cached tokens too (measured 2026-07-23 — identical
+   *  counts on hit and miss), so a cache miss is visible ONLY as prefill time exploding. Ollama-native only. */
+  promptEvalMs?: number
+  /** DECODE wall time (Ollama native `eval_duration`, ns→ms) — outputTokens/decodeMs = true tokens/s. */
+  decodeMs?: number
+  /** Model (re)load time (Ollama `load_duration`, ns→ms). A big value mid-session = the runner was evicted
+   *  and reloaded — a whole-model stall no other metric explains. */
+  loadMs?: number
 }
 
 export interface CompletionResult {

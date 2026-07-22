@@ -182,7 +182,15 @@ export class OllamaProvider extends OpenAIChatProvider {
         if (obj.done) {
           if (obj.done_reason === 'length') stopReason = 'max_tokens'
           if (obj.prompt_eval_count !== undefined || obj.eval_count !== undefined) {
-            usage = { inputTokens: obj.prompt_eval_count, outputTokens: obj.eval_count }
+            usage = {
+              inputTokens: obj.prompt_eval_count,
+              outputTokens: obj.eval_count,
+              // Prefill/decode/load wall times (ns→ms). prompt_eval_count includes CACHED tokens (measured),
+              // so promptEvalMs is the only signal that distinguishes a KV-cache hit from a full re-prefill.
+              ...(obj.prompt_eval_duration ? { promptEvalMs: Math.round(obj.prompt_eval_duration / 1e6) } : {}),
+              ...(obj.eval_duration ? { decodeMs: Math.round(obj.eval_duration / 1e6) } : {}),
+              ...(obj.load_duration ? { loadMs: Math.round(obj.load_duration / 1e6) } : {}),
+            }
           }
         }
       }

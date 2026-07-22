@@ -10,6 +10,7 @@
 import { createWriteStream, mkdirSync, type WriteStream } from 'node:fs'
 import { dirname } from 'node:path'
 import type { Message } from '../protocol'
+import type { TokenUsage } from '../llm/provider'
 
 /** One forensic event. Serializable (plain JSON) like ActivityEvent — but richer and untruncated. */
 export type TraceEvent =
@@ -19,7 +20,7 @@ export type TraceEvent =
   // contextWindow: what the prompt is being sized AGAINST. Without it a viewer can only sum tokens across
   // calls (throughput), which looks alarming — 344k across 12 calls — while actual occupancy never left 34%.
   | { t: 'model_request'; turn: number; provider: string; model: string; contextWindow?: number; system: string; tools: string[]; messages: Message[] }
-  | { t: 'model_response'; turn: number; text: string; thinking: string; toolUses: { id: string; name: string; input: unknown }[]; usage?: { inputTokens?: number; outputTokens?: number } } // usage: E1/ADR-040 — backend-reported token counts for this call
+  | { t: 'model_response'; turn: number; text: string; thinking: string; toolUses: { id: string; name: string; input: unknown }[]; usage?: TokenUsage } // usage: E1/ADR-040 — token counts + (Ollama-native) prefill/decode/load durations, the KV-cache observables
   | { t: 'permission'; id: string; tool: string; decision: string; asked: boolean } // asked=true ⇒ a prompt was shown
   | { t: 'tool_call'; id: string; name: string; input: unknown; repaired?: boolean }
   | { t: 'tool_result'; id: string; name: string; ok: boolean; ms: number; content: string }
