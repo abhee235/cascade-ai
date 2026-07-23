@@ -63,6 +63,11 @@ export interface ProjectManagerOptions {
   /** How to construct a ModelProvider. Injected for tests so they can assert WHICH provider/model a session
    *  was built from — the plan stage silently used the env default for a while (see planSessionFor). */
   createProviderFn?: typeof createProvider
+  /** ADR-071: the ENABLED MCP servers to give each new session, read fresh (a thunk, so a config change +
+   *  session-invalidation is picked up on the next open). Undefined ⇒ no MCP. */
+  mcpServers?: () => Record<string, import('@cascade/core').McpServerConfig>
+  /** ADR-071: how to connect an MCP server (the real stdio adapter is `sdkConnect`; injected for tests). */
+  mcpConnect?: import('@cascade/core').McpConnect
 }
 
 /** Builder behavior injected ahead of every project's AI rules (as generic `extraInstructions`). The core
@@ -204,6 +209,11 @@ export class ProjectManager {
           // Hardware knob (2026-07-23): earlier compaction keeps decode fast on offloaded setups — see
           // ProjectManagerOptions.compactRatio for the measured rationale.
           compactRatio: this.opts.compactRatio,
+          // ADR-071: MCP servers (web search, etc.) the user configured in the MCP panel. The session builds
+          // its own McpHub from these and connects in the background; their tools join the registry. Injected
+          // (not read from a file here) so a config change + session-invalidation surfaces on the next open.
+          mcpServers: this.opts.mcpServers?.(),
+          mcpConnect: this.opts.mcpConnect,
           tracer: tracerFor(dir, 'builder'), // product forensics (walkthrough lesson: no trace = no diagnosis)
           // LATENCY (walkthrough forensics): curation adds hidden model calls (dead air) AND its memory
           // writes mutate the system prompt mid-session — a prefix-cache breaker. A builder project gains
@@ -292,6 +302,28 @@ export class ProjectManager {
   /** The host dir of a project — SERVER-INTERNAL only (never crosses the wire). For the file service. */
   dirOf(id: string): string | undefined {
     return this.projects.get(id)?.dir
+  }
+
+  /** ADR-071: drop cached sessions so the next open() rebuilds with fresh config (e.g. after an MCP server is
+   *  added/removed). Same mechanism setModelConfig uses; exposed so the MCP panel can apply changes live. */
+  async invalidateSessions(): Promise<void> {
+    for (const p of this.projects.values()) {
+      await p.session?.dispose().catch(() => {})
+      p.session = undefined
+    }
+  }
+
+  /** Live MCP connection statuses. Prefer the active project's session; else ANY open session — they all
+   *  connect the SAME global config, so any one's status is representative. This lets the standalone
+   *  Connectors page show real status even though it isn't scoped to a project. [] if nothing is open. */
+  mcpStatuses(activeId: string | undefined): import('@cascade/core').McpServerStatus[] {
+    const active = activeId ? this.projects.get(activeId)?.session?.mcpStatuses() : undefined
+    if (active?.length) return active
+    for (const p of this.projects.values()) {
+      const st = p.session?.mcpStatuses()
+      if (st?.length) return st
+    }
+    return []
   }
 
   /** The project's sandbox (created on open) — SERVER-INTERNAL. For live preview (the dev server runs in it). */

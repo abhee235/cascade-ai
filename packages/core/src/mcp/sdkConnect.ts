@@ -1,15 +1,30 @@
-// mcp/sdkConnect.ts — the REAL McpConnect, backed by @modelcontextprotocol/sdk (stdio transport).
+// mcp/sdkConnect.ts — the REAL McpConnect, backed by @modelcontextprotocol/sdk.
 //
-// Kept in its own file so the SDK is only loaded when a frontend actually wires MCP — the deterministic
-// tests use a fake McpConnect and never import this.
+// Two transports: HTTP (streamable) — remote, no subprocess, SAFE on a hosted server — and stdio, which
+// spawns a subprocess and is therefore arbitrary code execution on the host. HTTP is preferred; stdio is
+// refused unless CASCADE_ALLOW_STDIO_MCP is set (a local/trusted box the user owns). Kept in its own file so
+// the SDK loads only when a frontend wires MCP.
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { McpClient, McpConnect } from './mcpHub'
 
-/** Spawn the server over stdio, do the MCP handshake, and adapt its client to our McpClient interface. */
+/** Connect to the server (HTTP or stdio), do the MCP handshake, and adapt its client to our McpClient. */
 export const sdkConnect: McpConnect = async (_name, config) => {
-  const transport = new StdioClientTransport({ command: config.command, args: config.args, env: config.env })
+  let transport
+  if (config.url) {
+    // Remote HTTP MCP — no process spawned. Auth: a header, or a token already in the URL query (Tavily).
+    transport = new StreamableHTTPClientTransport(new URL(config.url), config.headers ? { requestInit: { headers: config.headers } } : undefined)
+  } else if (config.command) {
+    // A subprocess is code execution on the host — only allow it on a deployment that opted in.
+    if (typeof process !== 'undefined' && !process.env.CASCADE_ALLOW_STDIO_MCP) {
+      throw new Error('stdio MCP is disabled (it spawns a subprocess). Use an HTTP MCP URL, or set CASCADE_ALLOW_STDIO_MCP=1 on a machine you own.')
+    }
+    transport = new StdioClientTransport({ command: config.command, args: config.args, env: config.env })
+  } else {
+    throw new Error('MCP server config needs a `url` (HTTP) or a `command` (stdio).')
+  }
   const client = new Client({ name: 'cascade', version: '0.0.0' }, { capabilities: {} })
   await client.connect(transport) // performs `initialize`
 

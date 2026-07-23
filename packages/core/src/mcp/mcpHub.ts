@@ -8,7 +8,15 @@
 import type { Tool, ToolResult } from '../tools/Tool'
 
 export interface McpServerConfig {
-  command: string
+  /** HTTP (streamable) transport — the SAFE transport for a HOSTED server: no subprocess, just HTTP to a
+   *  remote MCP (e.g. https://mcp.tavily.com/mcp/?tavilyApiKey=…). Preferred; the only kind the web UI offers. */
+  url?: string
+  /** Optional auth headers for the HTTP transport (e.g. { Authorization: 'Bearer …' }). */
+  headers?: Record<string, string>
+  /** STDIO transport — spawns a SUBPROCESS. That is arbitrary code execution on the host, so it is LOCAL /
+   *  trusted-deployment only: sdkConnect refuses it unless CASCADE_ALLOW_STDIO_MCP is set, and the web UI
+   *  never exposes it. Present for the extension / a local box where the user owns the machine. */
+  command?: string
   args?: string[]
   env?: Record<string, string>
   disabled?: boolean

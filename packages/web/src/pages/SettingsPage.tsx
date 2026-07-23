@@ -69,7 +69,7 @@ export function SettingsPage() {
         </section>
 
         <p className="mt-6 text-xs text-muted-foreground">
-          Model/provider switching and tools &amp; MCP configuration are coming in a later milestone. The model is currently set with{' '}
+          Switch models from the picker in a project; configure tool servers in the <strong>MCP</strong> panel. The default model is set with{' '}
           <code className="rounded bg-muted px-1 py-0.5">CASCADE_MODEL</code> when starting the server.
         </p>
       </div>

@@ -24,6 +24,9 @@ import { ensureVisualEditConfig, listTemplates } from './templates.js'
 import { ChatStore } from './chatStore.js'
 import { listModels, modelInfo, providerCatalog, setProviderKey } from './modelCaps.js'
 import { activeModel, addEnabledModel, enabledModels, initModelRegistry, modelContextFor, modelParamsFor, removeEnabledModel, setActiveModel, setModelContext, setModelParams } from './modelRegistry.js'
+import { addMcpServer, enabledMcpServers, initMcpRegistry, mcpServers as mcpServersConfig, removeMcpServer, toggleMcpServer } from './mcpRegistry.js'
+import { sdkConnect } from '@cascade/core'
+import type { McpServerInfo } from '@cascade/app-protocol'
 import type { ChatHistoryItem } from '@cascade/app-protocol'
 import type { Message } from '@cascade/core'
 import { createFile, deletePath, editJsxTextAtLoc, makeDir, readDiff, readFile, readTree, renamePath, setClassAtLoc, writeFile } from './fileService.js'
@@ -200,6 +203,35 @@ export function handleConnection(
   // ADR-067: the curated model list for the picker (always includes the running model).
   const sendEnabledModels = () => send({ type: 'enabledModels', models: enabledModels({ provider: manager.currentProvider, model: manager.currentModel }) })
   sendEnabledModels()
+  // ADR-071: the configured MCP servers + live connection status. env VALUES (API keys) are NEVER sent — only
+  // their key NAMES — so a key set from the panel stays server-side, exactly like a model API key.
+  // Mask query-string secrets in a connector URL (Tavily puts the key in ?tavilyApiKey=…). The client sees
+  // enough to identify the server, never the secret.
+  const maskUrl = (url: string): string => {
+    try {
+      const u = new URL(url)
+      for (const k of u.searchParams.keys()) u.searchParams.set(k, '***')
+      return decodeURIComponent(u.toString())
+    } catch {
+      return url
+    }
+  }
+  const sendMcpServers = () => {
+    const config = mcpServersConfig()
+    const statuses = new Map(manager.mcpStatuses(activeId).map((s) => [s.name, s]))
+    const servers: McpServerInfo[] = Object.entries(config).map(([name, c]) => ({
+      name,
+      url: c.url ? maskUrl(c.url) : undefined,
+      headerKeys: c.headers ? Object.keys(c.headers) : undefined,
+      command: c.command, // a local stdio server, if hand-added; the web UI never creates these
+      disabled: c.disabled,
+      status: statuses.get(name)?.status,
+      toolCount: statuses.get(name)?.toolNames.length,
+      error: statuses.get(name)?.error,
+    }))
+    send({ type: 'mcpServers', servers })
+  }
+  sendMcpServers()
 
   // Send the active project's file tree (M4) — on open and after each turn (the agent may have edited files).
   const sendTree = () => {
@@ -349,6 +381,30 @@ export function handleConnection(
           if (manager.currentProvider === msg.provider && manager.currentModel === msg.model) {
             await manager.setModelConfig({ provider: msg.provider, model: msg.model, ...modelParamsFor(msg.provider, msg.model) })
           }
+          break
+        }
+        // ── ADR-071: MCP server management ───────────────────────────────────────────────────────────
+        case 'listMcpServers':
+          sendMcpServers()
+          break
+        case 'addMcpServer': {
+          // HTTP connector only (no subprocess). url/headers may carry a key — persisted server-side
+          // (mcp.json), never echoed to the client (sendMcpServers masks the url + drops header values).
+          addMcpServer(msg.name, { url: msg.url, headers: msg.headers })
+          await manager.invalidateSessions() // next open connects the new connector
+          sendMcpServers()
+          break
+        }
+        case 'removeMcpServer': {
+          removeMcpServer(msg.name)
+          await manager.invalidateSessions()
+          sendMcpServers()
+          break
+        }
+        case 'toggleMcpServer': {
+          toggleMcpServer(msg.name, msg.disabled)
+          await manager.invalidateSessions()
+          sendMcpServers()
           break
         }
         case 'setModel': {
@@ -688,7 +744,19 @@ async function start() {
   const sandboxFor = hasDocker ? (dir: string) => new DockerSandbox(dir) : undefined
 
   initModelRegistry(PROJECTS_ROOT) // ADR-067: curated model list persisted under PROJECTS_ROOT/.cascade/
-  const manager = new ProjectManager({ root: PROJECTS_ROOT, provider: PROVIDER, model: MODEL, baseUrl: BASE_URL, contextWindow: CONTEXT_WINDOW, compactRatio: COMPACT_RATIO, sandboxFor })
+  initMcpRegistry(PROJECTS_ROOT) // ADR-071: configured MCP servers persisted under PROJECTS_ROOT/.cascade/mcp.json
+  const manager = new ProjectManager({
+    root: PROJECTS_ROOT,
+    provider: PROVIDER,
+    model: MODEL,
+    baseUrl: BASE_URL,
+    contextWindow: CONTEXT_WINDOW,
+    compactRatio: COMPACT_RATIO,
+    sandboxFor,
+    // ADR-071: a thunk so each new session reads the CURRENT enabled set (after add/remove/toggle + invalidate).
+    mcpServers: enabledMcpServers,
+    mcpConnect: sdkConnect,
+  })
   // ADR-067: restore the model the user last SELECTED. The env vars are the first-run default, not a
   // standing override — otherwise every restart silently moved the session back to CASCADE_MODEL (measured:
   // a chosen local Ollama model reverted to a paid hosted one, with only a small label to give it away).

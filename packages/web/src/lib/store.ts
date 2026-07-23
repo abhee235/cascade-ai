@@ -8,7 +8,7 @@ import type { WireEvent, WireMessage } from './wsClient'
 import { extractMessage, type BottomTab, type Item, type Page, type PreviewDevice, type PreviewState, type Recovering, type RightTab, type RuntimeError, type Streaming } from './types'
 import { StreamingOptimizer } from './streamingOptimizer'
 import { applyAccent, applyTheme, getInitialAccent, getInitialTheme, type Theme } from './theme'
-import type { ChatMeta, EnabledModelInfo, FileNode, ModelLimits, Problem, ProjectInfo, TemplateInfo, Version } from '@cascade/app-protocol'
+import type { ChatMeta, EnabledModelInfo, FileNode, McpServerInfo, ModelLimits, Problem, ProjectInfo, TemplateInfo, Version } from '@cascade/app-protocol'
 
 // ADR-068: events that mutate the active-chat transcript/streaming. Gated to the viewed project so a
 // background turn (another project) can't bleed into this one. Everything else (projects, files, preview,
@@ -41,6 +41,7 @@ interface UiState {
   modelInfo: Record<string, { capabilities: string[]; contextWindow?: number; limits?: ModelLimits }> // ADR-067: per "provider/model" capabilities+context+slider limits (manager)
   modelManagerOpen: boolean // ADR-067: the model-management dialog is open
   enabledModels: EnabledModelInfo[] // ADR-067: the CURATED models shown in the picker (with per-model params)
+  mcpServers: McpServerInfo[] // ADR-071: configured MCP servers + live connection status (the MCP panel)
   projects: ProjectInfo[]
   templates: TemplateInfo[]
   activeId: string | null
@@ -117,6 +118,11 @@ interface UiState {
   removeModel: (provider: string, model: string) => void // ADR-067: remove a model from the curated list
   setModelContext: (provider: string, model: string, contextWindow?: number) => void // ADR-067: set a model's context override
   setModelParams: (provider: string, model: string, params: Omit<EnabledModelInfo, 'provider' | 'model'>) => void // ADR-067: merge editable per-model params
+  // ADR-071: MCP server management (the MCP panel).
+  listMcpServers: () => void
+  addMcpServer: (name: string, url: string, headers?: Record<string, string>) => void
+  removeMcpServer: (name: string) => void
+  toggleMcpServer: (name: string, disabled: boolean) => void
   answerQuestion: (id: string, answers: import('@cascade/core').Answers) => void // ADR-043
   stop: () => void
   newChat: () => void // M11: start a fresh chat in the active project
@@ -239,7 +245,7 @@ export const useStore = create<UiState>((set, get) => {
       }
       return
     }
-    const page: Page = path === '/projects' ? 'projects' : path === '/chats' ? 'chats' : path === '/settings' ? 'settings' : 'home'
+    const page: Page = path === '/projects' ? 'projects' : path === '/chats' ? 'chats' : path === '/settings' ? 'settings' : path === '/mcp' ? 'mcp' : 'home'
     set({ page, pendingSlug: null, slugNotFound: null })
   }
 
@@ -254,6 +260,7 @@ export const useStore = create<UiState>((set, get) => {
     modelInfo: {},
     modelManagerOpen: false,
     enabledModels: [],
+    mcpServers: [],
     projects: [],
     templates: [],
     activeId: null,
@@ -422,6 +429,9 @@ export const useStore = create<UiState>((set, get) => {
         case 'modelInfo': // ADR-067: one model's capabilities+context → cache for the manager
           set((s) => ({ modelInfo: { ...s.modelInfo, [`${e.provider}/${e.model}`]: { capabilities: e.capabilities, contextWindow: e.contextWindow, limits: e.limits } } }))
           break
+        case 'mcpServers': // ADR-071: configured MCP servers + status
+          set({ mcpServers: e.servers })
+          break
         case 'enabledModels': // ADR-067: the curated picker list
           set({ enabledModels: e.models })
           break
@@ -564,6 +574,10 @@ export const useStore = create<UiState>((set, get) => {
     setApiKey: (provider, key) => get().send({ type: 'setApiKey', provider, key }),
     setModelManagerOpen: (open) => set({ modelManagerOpen: open }),
     addModel: (provider, model, contextWindow) => get().send({ type: 'addModel', provider, model, contextWindow }),
+    listMcpServers: () => get().send({ type: 'listMcpServers' }),
+    addMcpServer: (name, url, headers) => get().send({ type: 'addMcpServer', name, url, headers }),
+    removeMcpServer: (name) => get().send({ type: 'removeMcpServer', name }),
+    toggleMcpServer: (name, disabled) => get().send({ type: 'toggleMcpServer', name, disabled }),
     removeModel: (provider, model) => get().send({ type: 'removeModel', provider, model }),
     setModelContext: (provider, model, contextWindow) => get().send({ type: 'setModelContext', provider, model, contextWindow }),
     setModelParams: (provider, model, params) => get().send({ type: 'setModelParams', provider, model, params }),

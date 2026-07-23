@@ -69,8 +69,24 @@ export interface EnabledModelInfo {
   topK?: number
 }
 
+/** ADR-071: one configured connector (MCP server) + its live status, as shown in the Connectors UI. `url`
+ *  is MASKED (query-string secrets like Tavily's ?tavilyApiKey=… come back as ***) and `headerKeys` are NAMES
+ *  only — a secret set from the client lives SERVER-SIDE and is never echoed back (same rule as model keys).
+ *  `command` appears only for a local stdio server (extension / opted-in box); the web UI never adds those. */
+export interface McpServerInfo {
+  name: string
+  url?: string // HTTP connector — query values masked
+  headerKeys?: string[] // auth header NAMES only
+  command?: string // stdio (local-only), shown read-only if present
+  disabled?: boolean
+  status?: 'connecting' | 'ready' | 'failed' | 'disabled'
+  toolCount?: number
+  error?: string
+}
+
 export type BuilderEvent =
   | { type: 'serverInfo'; sandbox: boolean; model: string; provider?: string; providers?: { id: string; configured: boolean }[] } // greeting: Docker up, active provider/model, and the provider menu (ADR-067)
+  | { type: 'mcpServers'; servers: McpServerInfo[] } // ADR-071: configured MCP servers + live connection status (the MCP panel)
   | { type: 'models'; provider: string; models: string[] } // ADR-067: models a provider offers (for the picker)
   | { type: 'modelInfo'; provider: string; model: string; capabilities: string[]; contextWindow?: number; limits?: ModelLimits } // ADR-067: one model's capabilities + context + slider limits (manager)
   | { type: 'enabledModels'; models: EnabledModelInfo[] } // ADR-067: the CURATED models shown in the picker (with per-model params)
@@ -106,6 +122,10 @@ export type BuilderCommand =
   | { type: 'removeModel'; provider: string; model: string } // ADR-067: remove a model from the curated list
   | { type: 'setModelContext'; provider: string; model: string; contextWindow?: number } // ADR-067: set a model's context-window override
   | { type: 'setModelParams'; provider: string; model: string; params: Omit<EnabledModelInfo, 'provider' | 'model'> } // ADR-067: merge editable per-model params (context/output/sampling)
+  | { type: 'listMcpServers' } // ADR-071: request the configured connectors (→ mcpServers)
+  | { type: 'addMcpServer'; name: string; url: string; headers?: Record<string, string> } // ADR-071: add/replace an HTTP connector; url/headers may carry a key (kept server-side). No stdio from the web UI.
+  | { type: 'removeMcpServer'; name: string } // ADR-071: delete a connector
+  | { type: 'toggleMcpServer'; name: string; disabled: boolean } // ADR-071: enable/disable without deleting
   | { type: 'files'; action: 'list' } // request the active project's file tree (M4)
   | { type: 'file'; action: 'read' | 'diff'; path: string } // read a file (M4) or get its diff vs last commit (M2)
   | { type: 'file'; action: 'write'; path: string; content: string } // overwrite a file (M9 visual editing / Code-pane save)

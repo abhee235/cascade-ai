@@ -64,28 +64,35 @@ the **web server never wired MCP into its sessions and has no UI to manage serve
 (keyless, CC-licensed, CDN-allowlisted). App-building-specific and coupled to the preview CSP `img-src`.
 The runtime `webPhoto()` helper stays the primary weak-model path for catalogs (one call, no multi-step).
 
-### 4. MCP integration for the web server + a management UI (to build)
+### 4. "Connectors" — MCP integration for the web server + UI (built)
 
-The web app-protocol has **zero** MCP messages and `projectManager` passes **no** MCP to `createSession`
-(which already accepts `mcpServers` + `mcpConnect` and exposes statuses/connect/disconnect). So:
+The web app-protocol had **zero** MCP messages and `projectManager` passed **no** MCP to `createSession`
+(which already accepts `mcpServers` + `mcpConnect` and exposes statuses). Built:
 
-- **Config store (new, server):** `mcpRegistry.ts` — a global `mcp.json` under `PROJECTS_ROOT/.cascade`
-  (mirrors `modelRegistry.ts`/`active-model.json`), holding `{ name → McpServerConfig }`. Global (per
-  install/user), not per-project, since you configure a search MCP once. Managed by the UI.
-- **Transport:** current `sdkConnect` is **stdio only** (`command`/`args`/`env`) — so hosted MCPs run via
-  `npx` with keys in `env` (e.g. `npx -y tavily-mcp`, `TAVILY_API_KEY` in env). **HTTP/SSE transport is a
-  follow-up** (needed for the hosted Cascade scenario where spawning `npx` on the server is undesirable).
-- **Server wiring (edits `projectManager.ts` + `wsServer.ts`):** `createSessionFor` passes
-  `mcpServers: mcpRegistry.enabled()` + `mcpConnect: sdkConnect`; `wsServer` gains config messages and
-  relays `mcpStatus`. A config change invalidates cached sessions (same as a model switch, ADR-067) so the
-  next turn sees the new tools.
-- **app-protocol (new messages):** `listMcpServers` / `addMcpServer` / `removeMcpServer` /
-  `toggleMcpServer` (client→server) and `mcpServers` / `mcpStatus` (server→client). Keys travel in
-  `env`; like model API keys they are **server-side only**, never echoed back to the client.
-- **Web UI (new):** a **"MCP" (or "Integrations") nav item** → a page listing configured servers with live
-  connection status (connecting/ready/failed + tool count), and an **add form** (name, command, args, env
-  key/value pairs incl. API keys, enable toggle). Presets for common search MCPs (Tavily/SearXNG) to make
-  "add a web search" one click.
+- **TRANSPORT — HTTP, not stdio (the security decision).** `sdkConnect`'s original stdio transport
+  **spawns a subprocess per server** = arbitrary code execution on the host. Fine on a machine the user
+  owns (the extension, a local box); a **critical RCE on a HOSTED server** — any user could add
+  `{command:"bash",args:["-c","…"]}`. So the primary transport is now **StreamableHTTP**: a connector is a
+  remote HTTPS MCP **URL** (+ optional auth header), which Cascade only makes HTTP requests to — no process.
+  stdio is **refused unless `CASCADE_ALLOW_STDIO_MCP` is set** (defense-in-depth, for a local/trusted box)
+  and is **never offered in the web UI**. Tavily's hosted `https://mcp.tavily.com/mcp/?tavilyApiKey=…` is
+  the canonical shape — verified live: connects, exposes `tavily_search`/`extract`/`crawl`/`map`/`research`.
+- **Config store (new):** `mcpRegistry.ts` — a global `mcp.json` under `PROJECTS_ROOT/.cascade` (mirrors
+  `modelRegistry`), `{ name → McpServerConfig }` (`url`/`headers` for HTTP; `command` for opted-in stdio).
+  Global (per install), persisted, hand-editable (portable `{ mcpServers }` shape).
+- **Server wiring:** `createSessionFor` passes `mcpServers` (a thunk → current enabled set) + `sdkConnect`;
+  `invalidateSessions()` so a config change takes effect on the next open; `mcpStatuses()` aggregates live
+  status across open sessions (they share one global config) so the standalone panel shows real status.
+- **Secrets:** URL query values (Tavily's key) come back **masked** (`?tavilyApiKey=***`) and header values
+  are dropped (only NAMES sent) — a key set from the panel lives server-side, never echoed, exactly like a
+  model API key. Verified: the real key never reaches the client.
+- **app-protocol:** `McpServerInfo` + `mcpServers` event + `listMcpServers`/`addMcpServer`(url,headers)/
+  `removeMcpServer`/`toggleMcpServer`.
+- **Web UI:** a **"Connectors" nav item** ("connector" is the user-facing term; MCP is the protocol) → a
+  panel with live status (idle/connecting/ready/failed + tool count), enable/disable, remove, and an
+  add-connector form (name + HTTPS URL + optional Bearer key) with a Tavily preset.
+- **Follow-up:** per-chat connector selection (a composer menu, as hosted chat assistants offer) on top of this registry;
+  HTTP transport already done, so it's UI-only.
 
 ## Security
 

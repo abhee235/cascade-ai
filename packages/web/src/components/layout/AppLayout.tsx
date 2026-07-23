@@ -11,6 +11,7 @@ import { ProjectPage } from '@/pages/ProjectPage'
 import { ProjectsPage } from '@/pages/ProjectsPage'
 import { ChatsPage } from '@/pages/ChatsPage'
 import { SettingsPage } from '@/pages/SettingsPage'
+import { McpPage } from '@/pages/McpPage'
 
 export function AppLayout() {
   const page = useStore((s) => s.page)
@@ -31,6 +32,8 @@ export function AppLayout() {
           <ProjectsPage />
         ) : page === 'chats' ? (
           <ChatsPage />
+        ) : page === 'mcp' ? (
+          <McpPage />
         ) : (
           <SettingsPage />
         )}
