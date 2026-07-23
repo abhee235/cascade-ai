@@ -9,9 +9,17 @@ import type { Tool, ToolResult } from '../tools/Tool'
 
 export interface McpServerConfig {
   /** HTTP (streamable) transport — the SAFE transport for a HOSTED server: no subprocess, just HTTP to a
-   *  remote MCP (e.g. https://mcp.tavily.com/mcp/?tavilyApiKey=…). Preferred; the only kind the web UI offers. */
+   *  remote MCP. The CLEAN endpoint, with NO secret in it (e.g. https://mcp.tavily.com/mcp/). Preferred; the
+   *  only kind the web UI offers. */
   url?: string
-  /** Optional auth headers for the HTTP transport (e.g. { Authorization: 'Bearer …' }). */
+  /** The API key, stored SEPARATELY from the url so it can be rotated / the host changed independently, and
+   *  so the endpoint can be shown to the client for editing without leaking the secret. Applied at connect
+   *  per `apiKeyIn`. Server-side only. */
+  apiKey?: string
+  /** How to apply `apiKey`: `query:<param>` (e.g. `query:tavilyApiKey`), `header:<name>`, or `bearer`
+   *  (Authorization: Bearer …). */
+  apiKeyIn?: string
+  /** Extra static auth headers for the HTTP transport (custom connectors). */
   headers?: Record<string, string>
   /** STDIO transport — spawns a SUBPROCESS. That is arbitrary code execution on the host, so it is LOCAL /
    *  trusted-deployment only: sdkConnect refuses it unless CASCADE_ALLOW_STDIO_MCP is set, and the web UI

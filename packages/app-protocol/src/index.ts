@@ -69,14 +69,15 @@ export interface EnabledModelInfo {
   topK?: number
 }
 
-/** ADR-071: one configured connector (MCP server) + its live status, as shown in the Connectors UI. `url`
- *  is MASKED (query-string secrets like Tavily's ?tavilyApiKey=… come back as ***) and `headerKeys` are NAMES
- *  only — a secret set from the client lives SERVER-SIDE and is never echoed back (same rule as model keys).
- *  `command` appears only for a local stdio server (extension / opted-in box); the web UI never adds those. */
+/** ADR-071: one configured connector (MCP server) + its live status, as shown in the Connectors UI. `url` is
+ *  the CLEAN endpoint (the key is stored separately, never in the url) so it can be shown for EDITING; the
+ *  key itself is server-side only — the client sees `hasKey` (a boolean), never the value. `command` appears
+ *  only for a local stdio server (extension / opted-in box); the web UI never adds those. */
 export interface McpServerInfo {
   name: string
-  url?: string // HTTP connector — query values masked
-  headerKeys?: string[] // auth header NAMES only
+  url?: string // HTTP connector — the endpoint, no secret; editable
+  hasKey?: boolean // an API key IS set (value never sent)
+  apiKeyIn?: string // how the key is applied ('query:<param>' | 'header:<name>' | 'bearer') — lets the editor label the field
   command?: string // stdio (local-only), shown read-only if present
   disabled?: boolean
   status?: 'connecting' | 'ready' | 'failed' | 'disabled'
@@ -123,7 +124,10 @@ export type BuilderCommand =
   | { type: 'setModelContext'; provider: string; model: string; contextWindow?: number } // ADR-067: set a model's context-window override
   | { type: 'setModelParams'; provider: string; model: string; params: Omit<EnabledModelInfo, 'provider' | 'model'> } // ADR-067: merge editable per-model params (context/output/sampling)
   | { type: 'listMcpServers' } // ADR-071: request the configured connectors (→ mcpServers)
-  | { type: 'addMcpServer'; name: string; url: string; headers?: Record<string, string> } // ADR-071: add/replace an HTTP connector; url/headers may carry a key (kept server-side). No stdio from the web UI.
+  // ADR-071: add OR EDIT an HTTP connector. `url` is the clean endpoint. `apiKey` semantics: OMITTED ⇒ keep
+  // the existing key (edit the host without re-entering the key); '' ⇒ clear it; a string ⇒ set/replace it.
+  // `apiKeyIn` says how to apply it. The key lives server-side and is never echoed back.
+  | { type: 'addMcpServer'; name: string; url: string; apiKey?: string; apiKeyIn?: string; headers?: Record<string, string> }
   | { type: 'removeMcpServer'; name: string } // ADR-071: delete a connector
   | { type: 'toggleMcpServer'; name: string; disabled: boolean } // ADR-071: enable/disable without deleting
   | { type: 'files'; action: 'list' } // request the active project's file tree (M4)

@@ -14,8 +14,17 @@ import type { McpClient, McpConnect } from './mcpHub'
 export const sdkConnect: McpConnect = async (_name, config) => {
   let transport
   if (config.url) {
-    // Remote HTTP MCP — no process spawned. Auth: a header, or a token already in the URL query (Tavily).
-    transport = new StreamableHTTPClientTransport(new URL(config.url), config.headers ? { requestInit: { headers: config.headers } } : undefined)
+    // Remote HTTP MCP — no process spawned. The key is stored SEPARATELY from the endpoint (so it can be
+    // rotated / the host changed independently) and applied HERE, per apiKeyIn: a query param, a header, or
+    // a Bearer token.
+    const u = new URL(config.url)
+    const headers: Record<string, string> = { ...config.headers }
+    if (config.apiKey && config.apiKeyIn) {
+      if (config.apiKeyIn.startsWith('query:')) u.searchParams.set(config.apiKeyIn.slice(6), config.apiKey)
+      else if (config.apiKeyIn.startsWith('header:')) headers[config.apiKeyIn.slice(7)] = config.apiKey
+      else if (config.apiKeyIn === 'bearer') headers.Authorization = `Bearer ${config.apiKey}`
+    }
+    transport = new StreamableHTTPClientTransport(u, Object.keys(headers).length ? { requestInit: { headers } } : undefined)
   } else if (config.command) {
     // A subprocess is code execution on the host — only allow it on a deployment that opted in.
     if (typeof process !== 'undefined' && !process.env.CASCADE_ALLOW_STDIO_MCP) {

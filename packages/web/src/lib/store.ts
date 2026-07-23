@@ -120,7 +120,7 @@ interface UiState {
   setModelParams: (provider: string, model: string, params: Omit<EnabledModelInfo, 'provider' | 'model'>) => void // ADR-067: merge editable per-model params
   // ADR-071: MCP server management (the MCP panel).
   listMcpServers: () => void
-  addMcpServer: (name: string, url: string, headers?: Record<string, string>) => void
+  addMcpServer: (name: string, url: string, opts?: { apiKey?: string; apiKeyIn?: string; headers?: Record<string, string> }) => void
   removeMcpServer: (name: string) => void
   toggleMcpServer: (name: string, disabled: boolean) => void
   answerQuestion: (id: string, answers: import('@cascade/core').Answers) => void // ADR-043
@@ -575,7 +575,7 @@ export const useStore = create<UiState>((set, get) => {
     setModelManagerOpen: (open) => set({ modelManagerOpen: open }),
     addModel: (provider, model, contextWindow) => get().send({ type: 'addModel', provider, model, contextWindow }),
     listMcpServers: () => get().send({ type: 'listMcpServers' }),
-    addMcpServer: (name, url, headers) => get().send({ type: 'addMcpServer', name, url, headers }),
+    addMcpServer: (name, url, opts) => get().send({ type: 'addMcpServer', name, url, apiKey: opts?.apiKey, apiKeyIn: opts?.apiKeyIn, headers: opts?.headers }),
     removeMcpServer: (name) => get().send({ type: 'removeMcpServer', name }),
     toggleMcpServer: (name, disabled) => get().send({ type: 'toggleMcpServer', name, disabled }),
     removeModel: (provider, model) => get().send({ type: 'removeModel', provider, model }),

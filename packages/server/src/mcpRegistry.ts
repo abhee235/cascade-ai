@@ -56,10 +56,14 @@ export function enabledMcpServers(): McpServers {
   return Object.fromEntries(Object.entries(load()).filter(([, c]) => !c.disabled))
 }
 
-/** Add or replace a server. env may carry API keys — those live here (server-side) and are never sent back. */
+/** Add OR EDIT a server. The key lives here (server-side), never sent back. Merge rule (the "leave blank to
+ *  keep" workflow): if `config.apiKey` is UNDEFINED and the server already exists, KEEP its current key — so
+ *  the host can be edited without re-entering the key. An empty string CLEARS it; a value SETS it. */
 export function addMcpServer(name: string, config: McpServerConfig): void {
   const servers = load()
-  servers[name] = config
+  const existing = servers[name]
+  const apiKey = config.apiKey === undefined ? existing?.apiKey : config.apiKey || undefined
+  servers[name] = { ...config, apiKey }
   save()
 }
 

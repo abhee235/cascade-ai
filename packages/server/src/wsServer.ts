@@ -205,24 +205,16 @@ export function handleConnection(
   sendEnabledModels()
   // ADR-071: the configured MCP servers + live connection status. env VALUES (API keys) are NEVER sent — only
   // their key NAMES — so a key set from the panel stays server-side, exactly like a model API key.
-  // Mask query-string secrets in a connector URL (Tavily puts the key in ?tavilyApiKey=…). The client sees
-  // enough to identify the server, never the secret.
-  const maskUrl = (url: string): string => {
-    try {
-      const u = new URL(url)
-      for (const k of u.searchParams.keys()) u.searchParams.set(k, '***')
-      return decodeURIComponent(u.toString())
-    } catch {
-      return url
-    }
-  }
   const sendMcpServers = () => {
     const config = mcpServersConfig()
     const statuses = new Map(manager.mcpStatuses(activeId).map((s) => [s.name, s]))
+    // url is the CLEAN endpoint (the key is stored separately), so it's safe to send and editable. The key
+    // itself is never echoed — only `hasKey` (a boolean).
     const servers: McpServerInfo[] = Object.entries(config).map(([name, c]) => ({
       name,
-      url: c.url ? maskUrl(c.url) : undefined,
-      headerKeys: c.headers ? Object.keys(c.headers) : undefined,
+      url: c.url,
+      hasKey: !!c.apiKey,
+      apiKeyIn: c.apiKeyIn,
       command: c.command, // a local stdio server, if hand-added; the web UI never creates these
       disabled: c.disabled,
       status: statuses.get(name)?.status,
@@ -388,10 +380,10 @@ export function handleConnection(
           sendMcpServers()
           break
         case 'addMcpServer': {
-          // HTTP connector only (no subprocess). url/headers may carry a key — persisted server-side
-          // (mcp.json), never echoed to the client (sendMcpServers masks the url + drops header values).
-          addMcpServer(msg.name, { url: msg.url, headers: msg.headers })
-          await manager.invalidateSessions() // next open connects the new connector
+          // Add OR edit. Key stored separately (apiKey/apiKeyIn), server-side, never echoed. apiKey OMITTED ⇒
+          // keep the existing one (the "edit the host, keep the key" path — see mcpRegistry.addMcpServer).
+          addMcpServer(msg.name, { url: msg.url, apiKey: msg.apiKey, apiKeyIn: msg.apiKeyIn, headers: msg.headers })
+          await manager.invalidateSessions() // next open connects with the new config
           sendMcpServers()
           break
         }
