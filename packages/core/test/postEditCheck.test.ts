@@ -51,7 +51,7 @@ describe('postEditDiagnostics — sandbox tsc routing', () => {
 		// the non-edited-file error is ordered last and falls past the cap of 5
 		expect(note?.text).not.toContain('Cannot find name')
 		expect(note?.text).toContain('(+ 1 more)')
-		expect(note?.text).toContain('Fix the FIRST error')
+		expect(note?.text).toContain('Fix ALL the listed errors')
 	})
 
 	it('a clean check injects NOTHING', async () => {

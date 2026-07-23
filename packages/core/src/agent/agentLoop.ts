@@ -199,6 +199,12 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   let todoGateFirings = 0
   let workedSinceTodoGate = false
   const TODO_GATE_MAX_FIRINGS = 3
+  // MAX-TOKENS continuation (2026-07-23): a no-tool-call turn cut off at the output ceiling is the model
+  // spiralling in thinking without acting (measured: a 31-min, ~84k-token thinking runaway). It is NOT a
+  // finished answer — continue the turn with a sharp "act now" nudge, bounded so it can't loop forever.
+  // The backstop cap is in ollama.ts.
+  let maxTokensNudges = 0
+  const MAX_TOKENS_STRIKES = 3
   // The last FAILED tool call of the previous batch (name + error head) — when the model goes terminal
   // right after a failed call, the gate names it so the retry is concrete, not aspirational.
   let lastToolFailure: string | undefined
@@ -221,6 +227,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     let text = ''
     let thinking = ''
     let usage: import('../llm/provider').TokenUsage | undefined // E1/ADR-040: backend token counts for this call
+    let stopReason: 'end_turn' | 'max_tokens' | 'tool_use' | undefined // why the generation ended (max_tokens ⇒ cut off, not finished)
     const toolUses: ToolUse[] = []
 
     // The WIRE prompt carries more than `messages`: system prompt + tool schemas + chat template. Measure it
@@ -314,8 +321,9 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
         yield { type: 'text_delta', text: ev.text }
       } else if (ev.type === 'tool_use') {
         toolUses.push({ id: ev.id, name: ev.name, input: ev.input, repaired: ev.repaired })
-      } else if (ev.type === 'done' && ev.usage) {
-        usage = ev.usage // backend-reported prompt/output token counts (undefined when not reported)
+      } else if (ev.type === 'done') {
+        if (ev.usage) usage = ev.usage // backend-reported prompt/output token counts (undefined when not reported)
+        stopReason = ev.stopReason // 'max_tokens' ⇒ the generation was CUT OFF at the output ceiling
       }
     }
 
@@ -351,6 +359,23 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     // edits exist, or a DECLARED check was never run → inject a nudge turn and loop; after the strike
     // budget the answer is accepted unconditionally (the model may legitimately say "no tests exist here").
     if (toolUses.length === 0) {
+      // MAX-TOKENS CUT-OFF (2026-07-23): the generation hit the output ceiling with no tool call — the model
+      // was spiralling in thinking without acting, NOT answering. Treat it as an interrupted
+      // turn: CONTINUE (sharp "act now" nudge), bounded by
+      // strikes. Checked first — a cut-off turn has thinking, so the empty-response guard below never catches
+      // it, and left unhandled the loop would read the truncated thought as a finished answer.
+      if (stopReason === 'max_tokens' && maxTokensNudges < MAX_TOKENS_STRIKES && turn + 1 < maxTurns) {
+        maxTokensNudges++
+        tracer.event({ t: 'max_tokens_cut', turn })
+        messages.push({
+          role: 'user',
+          content:
+            '<system-reminder>Your previous turn was CUT OFF at the output limit — you produced a very long response without taking an action. Stop planning in your head: emit your single next step as ONE tool call (Write/Edit/Bash) right now. Do not reply to this note.</system-reminder>',
+        })
+        yield { type: 'status', text: 'Response hit the output limit — asking the agent to act…' }
+        turn++
+        continue
+      }
       // DEGRADED-BACKEND retry (iterate-7 forensics): a crashed-then-reloaded local backend can return
       // SUCCESSFUL but EMPTY responses — no error is thrown, so the recovery machinery never fires, and
       // the session silently ends with nothing (the planner stage died exactly this way). An empty

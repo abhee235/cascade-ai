@@ -45,12 +45,17 @@ describe('ADR-038 enforcement — the window travels on the wire', () => {
 		expect((calls[0]!.body.options as Record<string, unknown>).num_predict).toBe(4096)
 	})
 
-	it('ollama WITHOUT a confident window → /v1 unchanged (no guessed enforcement)', async () => {
+	it('ollama WITHOUT a confident window → NATIVE, NO num_ctx guess, but a DEFAULT num_predict backstop', async () => {
+		// 2026-07-23: ollama streams ALWAYS go native (durations + whole tool-call args). The ADR-038 invariant
+		// holds — an unpinned window sends no num_ctx, nothing guessed — but output is ALWAYS capped now:
+		// a default num_predict prevents the unbounded thinking-runaway.
 		const calls = mockFetch()
 		const p = new OllamaProvider({ id: 'ollama', baseUrl: 'http://x' })
 		await drain(p.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm' }))
-		expect(calls[0]!.url).toContain('/v1/chat/completions')
-		expect(calls[0]!.body.options).toBeUndefined()
+		expect(calls[0]!.url).toContain('/api/chat')
+		const opts = calls[0]!.body.options as Record<string, unknown>
+		expect(opts.num_ctx).toBeUndefined() // no window pinned → no guess
+		expect(opts.num_predict).toBe(16384) // but the runaway backstop is always present
 	})
 
 	it('hosted provider (groq) + contextWindow → stays /v1; only max_tokens travels', async () => {

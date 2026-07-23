@@ -7,6 +7,7 @@ import { describe, expect, it, vi, afterEach } from 'vitest'
 import { tmpdir } from 'node:os'
 import { RAW_ARGS_KEY, parseToolArgs } from '../src/llm/jsonRepair'
 import { OllamaProvider } from '../src/llm/providers/ollama'
+import { OpenAIChatProvider } from '../src/llm/providers/openaiChat'
 import { executeTool } from '../src/tools/runTool'
 import type { ToolContext } from '../src/tools/Tool'
 
@@ -72,16 +73,33 @@ describe('runTool — the sentinel produces a DIRECTIVE error, never a misleadin
 	})
 })
 
-describe('the /v1 wire path repairs almost-JSON args end-to-end', () => {
+describe('the wire paths repair almost-JSON args end-to-end', () => {
 	afterEach(() => vi.unstubAllGlobals())
 
-	it('trailing-comma args from the stream arrive as parsed input on the tool_use event', async () => {
+	// The /v1 SSE path (hosted providers: nvidia/groq/openrouter…) accumulates fragmented argument strings.
+	it('/v1: trailing-comma args from the stream arrive as parsed input on the tool_use event', async () => {
 		const sse = [
 			`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'Read', arguments: '{"file_path": "src/a.ts",}' } }] } }] })}`,
 			`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] })}`,
 			'data: [DONE]',
 		].join('\n\n')
 		vi.stubGlobal('fetch', vi.fn(async () => new Response(`${sse}\n\n`, { status: 200 })))
+		const p = new OpenAIChatProvider({ id: 'nvidia', baseUrl: 'http://x' })
+		const events: unknown[] = []
+		for await (const ev of p.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm' })) events.push(ev)
+		const tu = events.find((e) => (e as { type: string }).type === 'tool_use') as { input: unknown }
+		expect(tu).toBeDefined()
+		expect(tu.input).toEqual({ file_path: 'src/a.ts' })
+	})
+
+	// Ollama streams NATIVE-only now (2026-07-23): args usually arrive as objects, but some model templates
+	// deliver a STRING (occasionally malformed) — the same repair ladder must catch those on this path too.
+	it('native: malformed STRING args from /api/chat arrive repaired on the tool_use event', async () => {
+		const ndjson = [
+			JSON.stringify({ message: { content: '', tool_calls: [{ id: 'c1', function: { name: 'Read', arguments: '{"file_path": "src/a.ts",}' } }] } }),
+			JSON.stringify({ done: true, done_reason: 'stop' }),
+		].join('\n')
+		vi.stubGlobal('fetch', vi.fn(async () => new Response(`${ndjson}\n`, { status: 200 })))
 		const p = new OllamaProvider({ id: 'ollama', baseUrl: 'http://x' })
 		const events: unknown[] = []
 		for await (const ev of p.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm' })) events.push(ev)

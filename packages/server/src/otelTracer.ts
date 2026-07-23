@@ -301,7 +301,10 @@ export class OtelTracer implements Tracer {
 			case 'degraded_retry':
 				this.mark('degraded response — retried', at, { 'cascade.turn': e.turn })
 				break
-			case 'slow_prefill':
+			case 'max_tokens_cut':
+			this.mark('max-tokens cut — act-now nudge', at, { 'cascade.turn': e.turn })
+			break
+		case 'slow_prefill':
 				// The dead-air explainer: the backend is alive and chewing through a big cold prompt.
 				this.mark(`slow prefill (${Math.round(e.waitedMs / 1000)}s)`, at, { 'cascade.turn': e.turn, 'cascade.waited_ms': e.waitedMs })
 				break

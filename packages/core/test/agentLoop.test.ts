@@ -46,6 +46,43 @@ describe('runAgentLoop', () => {
     }
   })
 
+  it('a max_tokens cut-off with no tool call CONTINUES (act-now nudge), not terminates', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'cascade-'))
+    try {
+      const provider = createFakeProvider([
+        // turn 1: a long thinking spiral cut off at the output ceiling — no tool call
+        [textDelta('planning planning planning'), done('max_tokens')],
+        // turn 2: after the nudge, the model finally acts and answers
+        [textDelta('Done.'), done('end_turn')],
+      ])
+      const events = await collect(runAgentLoop([{ role: 'user', content: 'build it' }], deps(provider, dir)))
+
+      // It did NOT stop after the cut-off turn — a second call happened, prompted by the nudge.
+      expect(provider.calls.length).toBe(2)
+      // The nudge (an "act now" system-reminder) was injected before the retry.
+      expect(JSON.stringify(provider.calls[1].messages)).toMatch(/CUT OFF at the output limit/i)
+      // And it did eventually finish.
+      expect(events.some((e) => e.type === 'turnDone')).toBe(true)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a persistent max_tokens spiral is bounded by strikes, not infinite', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'cascade-'))
+    try {
+      // Every turn spirals and gets cut off — the strike budget must stop it (not loop forever).
+      const turns = Array.from({ length: 12 }, () => [textDelta('spiral'), done('max_tokens')] as const)
+      const provider = createFakeProvider(turns as any)
+      const events = await collect(runAgentLoop([{ role: 'user', content: 'go' }], deps(provider, dir, 20)))
+      // MAX_TOKENS_STRIKES = 3 continuations, then the turn is accepted as terminal → 4 calls total, not 12/20.
+      expect(provider.calls.length).toBe(4)
+      expect(events.some((e) => e.type === 'turnDone')).toBe(true)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('stops at maxTurns when the model keeps calling tools', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'cascade-'))
     try {

@@ -17,6 +17,18 @@ import { parseToolArgs } from '../jsonRepair'
 import { asBlocks, textOf } from './shared'
 import { OpenAIChatProvider, toOpenAITools } from './openaiChat'
 
+// Default output ceiling when the caller pins none (2026-07-23). WHY this exists: unlike hosted APIs that
+// REQUIRE max_tokens on every request (so a client always sends a per-model output cap), Ollama
+// leaves output UNBOUNDED unless num_predict is set, and a Modelfile without num_predict + a session that
+// doesn't pass maxOutputTokens = no ceiling at all. Measured that exact gap: qwen3.6-A3B fell into a thinking
+// spiral and generated ~84k tokens across 31 minutes on ONE turn, stopping only at the context wall. This is
+// the always-present ceiling that Cascade was missing. Generous enough to never clip a legitimate
+// turn (the largest real generation observed was ~16k, and that's a Write whose args ARE the output), tight
+// enough that a spiral hits the wall in minutes not half an hour. Overridden by an explicit maxOutputTokens
+// (ADR-067 per-model config / detection). The agent loop treats the resulting max_tokens stop as "continue,
+// act now" — not a finished answer — so a clipped legit turn recovers rather than ending the build.
+const DEFAULT_MAX_OUTPUT_TOKENS = 16384
+
 /** Parse Ollama's `/api/show` `parameters` blob (newline-delimited "name    value" lines) into the model's
  *  ALLOCATED limits (ADR-038). `num_ctx` is what Ollama actually runs the model at (the Modelfile pin), NOT the
  *  arch `context_length` (the trained ceiling). `num_predict` ≤ 0 means "unbounded" → not a useful cap. Pure +
@@ -58,17 +70,13 @@ function toNativeMessages(messages: Message[], system?: string): Record<string, 
 
 export class OllamaProvider extends OpenAIChatProvider {
   async *stream(req: CompletionRequest, signal?: AbortSignal): AsyncIterable<StreamEvent> {
-    // ADR-038 ENFORCEMENT: /v1 cannot express num_ctx — when the caller pins a window, route native so
-    // options.num_ctx goes on the wire (else Ollama silently front-truncates the prompt). Static load
-    // options and image turns likewise can only be expressed on /api/chat.
-    const enforceWindow = req.contextWindow !== undefined
-    const hasStaticOptions = !!this.cfg.options && Object.keys(this.cfg.options).length > 0
-    const hasImages = req.messages.some((m) => Array.isArray(m.content) && m.content.some((b) => b.type === 'image'))
-    if (enforceWindow || hasStaticOptions || hasImages) {
-      yield* this.streamNative(req, signal)
-      return
-    }
-    yield* super.stream(req, signal) // the plain /v1/chat/completions path (inherited)
+    // ALWAYS the native /api/chat path (2026-07-23; was conditional on pinned-window/options/images).
+    // /v1-for-Ollama had no remaining advantage, and it silently made observability a function of session
+    // wiring: any session without a pinned window (measured: the planner's six turns on 2026-07-22) streamed
+    // via /v1, which cannot report prompt_eval/eval durations — so exactly the sessions most likely to be
+    // misconfigured were the ones the prefill metrics couldn't see. Native also delivers tool-call args
+    // WHOLE (no SSE fragment reassembly) and honors options.num_ctx when the caller pins one (ADR-038).
+    yield* this.streamNative(req, signal)
   }
 
   /** ADR-038: read the model's allocated limits from Ollama's /api/show (Modelfile num_ctx/num_predict).
@@ -130,7 +138,8 @@ export class OllamaProvider extends OpenAIChatProvider {
   private async *streamNative(req: CompletionRequest, signal?: AbortSignal): AsyncIterable<StreamEvent> {
     const options: Record<string, unknown> = { ...this.cfg.options } // static adapter config first (num_gpu etc.)
     if (req.contextWindow !== undefined) options.num_ctx = req.contextWindow // ADR-038: enforce the allocated window
-    if (req.maxOutputTokens !== undefined) options.num_predict = req.maxOutputTokens
+    // ALWAYS cap output: an explicit cap wins, else the runaway backstop above.
+    options.num_predict = req.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS
     if (req.temperature !== undefined) options.temperature = req.temperature
     if (req.topP !== undefined) options.top_p = req.topP
     if (req.topK !== undefined) options.top_k = req.topK

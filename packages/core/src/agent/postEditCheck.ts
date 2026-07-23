@@ -57,7 +57,10 @@ function format(edited: string[], diags: Diag[]): string | undefined {
 	const more = ordered.length > shown.length ? `\n(+ ${ordered.length - shown.length} more)` : ''
 	return (
 		`<system-reminder>TypeScript check after your edit(s) — ${diags.length} error(s):\n${shown.join('\n')}${more}\n` +
-		'Fix the FIRST error before writing anything else — these will fail the build exactly as listed. ' +
+		// "Fix ALL", not "fix the FIRST": serial fixing measured 14 check rounds in one build (2026-07-23) —
+		// trivial unused-import errors survived 4 rounds each because the model obeyed "first" literally.
+		// Most are mechanical; one pass per FILE drains the whole list in 1-2 rounds.
+		'Fix ALL the listed errors now, batching fixes per file (one Edit per file), before writing anything else — they will fail the build exactly as listed. ' +
 		'This is a background note, NOT a new request: do not reply to it — fix, then continue the task.</system-reminder>'
 	)
 }

@@ -50,6 +50,9 @@ const BASE_URL = process.env.CASCADE_BASE_URL || undefined
 // Compaction window override — mainly for hosted providers (no live probe): set this if your NIM/OpenRouter
 // endpoint serves a different window than the model's native max in the model→window map. 0/unset ⇒ the map.
 const CONTEXT_WINDOW = Number(process.env.CASCADE_CONTEXT_WINDOW) || undefined
+// Compaction trigger fraction (core default 0.7). Hardware knob: on partial-offload boxes decode slows as
+// context grows (measured 48→31 tok/s by 90k), so e.g. 0.5 keeps the working set in the fast range.
+const COMPACT_RATIO = Number(process.env.CASCADE_COMPACT_RATIO) || undefined
 
 // Fail fast at BOOT on obvious misconfiguration — a clear message here beats a cryptic HTTP 401/404
 // twenty turns into a build. Key names mirror the factory's resolution (OPENAI_API_KEY etc. > CASCADE_API_KEY).
@@ -685,7 +688,7 @@ async function start() {
   const sandboxFor = hasDocker ? (dir: string) => new DockerSandbox(dir) : undefined
 
   initModelRegistry(PROJECTS_ROOT) // ADR-067: curated model list persisted under PROJECTS_ROOT/.cascade/
-  const manager = new ProjectManager({ root: PROJECTS_ROOT, provider: PROVIDER, model: MODEL, baseUrl: BASE_URL, contextWindow: CONTEXT_WINDOW, sandboxFor })
+  const manager = new ProjectManager({ root: PROJECTS_ROOT, provider: PROVIDER, model: MODEL, baseUrl: BASE_URL, contextWindow: CONTEXT_WINDOW, compactRatio: COMPACT_RATIO, sandboxFor })
   // ADR-067: restore the model the user last SELECTED. The env vars are the first-run default, not a
   // standing override — otherwise every restart silently moved the session back to CASCADE_MODEL (measured:
   // a chosen local Ollama model reverted to a paid hosted one, with only a small label to give it away).
