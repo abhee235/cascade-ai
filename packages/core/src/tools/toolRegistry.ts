@@ -25,9 +25,12 @@ import { LspTool } from './builtins/Lsp'
 import { AskUserQuestionTool } from './builtins/AskUserQuestion'
 import { EnterPlanModeTool } from './builtins/EnterPlanMode'
 import { ExitPlanModeTool } from './builtins/ExitPlanMode'
+import { WebFetchTool } from './builtins/WebFetch'
 
-/** The always-present tools. MCP tools are added dynamically via createRegistry's `extraTools`. */
-export const builtinTools: Tool[] = [ReadTool, GlobTool, GrepTool, WriteTool, EditTool, MultiEditTool, BashTool, TodoWriteTool, LspTool, AskUserQuestionTool, EnterPlanModeTool, ExitPlanModeTool, MemoryTool, MemorySearchTool, SubagentTool]
+/** The always-present tools. MCP tools are added dynamically via createRegistry's `extraTools`.
+ *  NB: WebFetch is built-in; web SEARCH is deliberately NOT — it's provided via MCP (ADR-071),
+ *  avoiding a hardcoded search backend/key in core. */
+export const builtinTools: Tool[] = [ReadTool, GlobTool, GrepTool, WriteTool, EditTool, MultiEditTool, BashTool, TodoWriteTool, LspTool, WebFetchTool, AskUserQuestionTool, EnterPlanModeTool, ExitPlanModeTool, MemoryTool, MemorySearchTool, SubagentTool]
 
 /** The JSON Schema to advertise for a tool: a builtin's Zod schema converted, an MCP tool's raw
  *  `parameters` used as-is, or an empty object if neither (no args). */

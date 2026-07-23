@@ -17,6 +17,7 @@ import { applyTemplate, readAiRules } from './templates.js'
 import { createPlannerSession, needsPlanStage } from './planStage.js'
 import { createBrowserTool } from './browserTool.js'
 import { createPackTool } from './packTool.js'
+import { createImageSearchTool } from './imageSearchTool.js'
 import { hasVision } from './modelCaps.js'
 
 /** Initialize a git repo in `dir` with one commit — the baseline for checkpoints (Phase 18). Best-effort. */
@@ -46,6 +47,11 @@ export interface ProjectManagerOptions {
    *  (detectModelLimits is Ollama-only), so this is how a user corrects the model→window map when their NIM
    *  endpoint serves a different window than the model's native max. Omit ⇒ the map, then DEFAULT_WINDOW. */
   contextWindow?: number
+  /** Compaction trigger as a fraction of the window (core default 0.7). A HARDWARE knob, not just a context
+   *  one: measured 2026-07-23 (qwen36 on 16GB, partial offload), decode fell 48→31 tok/s as context grew to
+   *  90k with compaction never firing (0.7×131k=91k just out of reach). Lower it (e.g. 0.5) on offloaded
+   *  setups so the working context stays in the fast range and any full re-prefill is proportionally cheaper. */
+  compactRatio?: number
   /** Build a per-project execution sandbox (13.3). The default wiring passes a DockerSandbox when Docker is
    *  available; tests pass none (host exec). The manager owns the sandbox lifecycle (disposed with the project). */
   sandboxFor?: (dir: string) => Sandbox | undefined
@@ -195,6 +201,9 @@ export class ProjectManager {
           temperature: this.active.temperature,
           topP: this.active.topP,
           topK: this.active.topK,
+          // Hardware knob (2026-07-23): earlier compaction keeps decode fast on offloaded setups — see
+          // ProjectManagerOptions.compactRatio for the measured rationale.
+          compactRatio: this.opts.compactRatio,
           tracer: tracerFor(dir, 'builder'), // product forensics (walkthrough lesson: no trace = no diagnosis)
           // LATENCY (walkthrough forensics): curation adds hidden model calls (dead air) AND its memory
           // writes mutate the system prompt mid-session — a prefix-cache breaker. A builder project gains
@@ -236,10 +245,13 @@ export class ProjectManager {
           //   has an UN-applied pack (createPackTool returns undefined otherwise, e.g. after graduation).
           //   templateId is 'react' — every Cascade project uses the one React template (cf.
           //   ensureVisualEditConfig).
+          // - ImageSearch (ADR-071): real stock photos for the app — server-side because it's coupled to the
+          //   preview CSP img-src allowlist. Always offered (no gating; it degrades to webPhoto/ArtImage).
           extraTools: [
             ...(this.visionOk && sandbox && 'getHostPort' in sandbox
               ? [createBrowserTool({ sandbox: sandbox as import('./dockerSandbox.js').DockerSandbox })]
               : []),
+            createImageSearchTool(),
             ...([createPackTool({ projectDir: dir, templateId: 'react' })].filter(Boolean) as import('@cascade/core').Tool[]),
           ],
         }))
