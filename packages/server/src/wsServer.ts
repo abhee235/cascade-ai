@@ -193,6 +193,26 @@ export function handleConnection(
     stopTail = preview.tail(id, sandbox, (line) => send({ type: 'log', line }))
   }
 
+  // Auto-start the live preview for a project IF it's buildable (node_modules populated) and nothing is
+  // already tracked for it — so a finished build shows live without a manual Run. Called on project OPEN
+  // (re-opening a built project) AND on build-TURN completion (the case that matters for a BRAND-NEW app:
+  // at open time node_modules didn't exist yet, so only the first build's completion can flip this on).
+  // A not-yet-installed project is skipped — auto-installing on every trigger would be too heavy. No-op if a
+  // preview is already running/stopped (respects a manual Stop; HMR handles a rebuild that's already live).
+  const maybeAutoStartPreview = async (projectId: string): Promise<void> => {
+    if (!preview || preview.state(projectId)) return // nothing tracked yet ⇒ safe to auto-start
+    const sandbox = manager.sandboxOf(projectId)
+    if (!(sandbox instanceof DockerSandbox)) return
+    const has = await sandbox.exec('[ -n "$(ls -A node_modules 2>/dev/null)" ] && echo yes || echo no').catch(() => ({ output: '', exitCode: 1 }))
+    if (!has.output.includes('yes')) return
+    const dir = manager.dirOf(projectId)
+    if (dir) ensureVisualEditConfig(dir) // M9: backfill the loc-stamp on older scaffolds
+    void preview.start(projectId, sandbox, (s) => {
+      emitPreview(s)
+      if (s.status === 'running') startTail(projectId)
+    })
+  }
+
   // Greet the new connection with capabilities + the project list + available templates so the UI can render
   // immediately (serverInfo drives the Terminal's Docker gate and the Settings page). ADR-067: model +
   // provider come from the manager (runtime-mutable), and the provider menu rides along for the picker.
@@ -325,6 +345,10 @@ export function handleConnection(
             if (pv) {
               emitPreview(pv)
               if (pv.status === 'running' && activeId) startTail(activeId) // resume its Console logs
+            } else if (activeId && !liveTurn.for(activeId)) {
+              // Re-opening a built project: auto-start its preview (no-op if not yet buildable, or a build is
+              // live and owns the dev server). The brand-new-app path is covered on turn completion instead.
+              await maybeAutoStartPreview(activeId)
             }
             reattachTurn() // ADR-068: if this project's turn is live, replay its in-flight stream + parked card
           }
@@ -461,9 +485,26 @@ export function handleConnection(
                 break
               }
             }
+            // Fresh projects ship an EMPTY node_modules (only the preview installs, on Run) — so the agent's
+            // first `npm run build` would hit `tsc: not found`, and a weak model stalls asking to install
+            // (measured: gpt-oss:20b). Install ONCE here, before the build, so the agent always inherits a
+            // build-ready project. No-op after the first install (node_modules populated).
+            const buildSandbox = manager.sandboxOf(turnProjectId)
+            if (buildSandbox instanceof DockerSandbox) {
+              const dep = await buildSandbox.exec('[ -n "$(ls -A node_modules 2>/dev/null)" ] && echo yes || echo no').catch(() => ({ output: 'yes', exitCode: 0 }))
+              if (!dep.output.includes('yes')) {
+                relay({ type: 'status', text: 'Installing dependencies…' })
+                await buildSandbox.exec('npm install --no-audit --no-fund').catch(() => {})
+              }
+            }
             for await (const ev of s.submit(msg.text, msg.images)) relay(ev) // M11: images = attached data-URIs
           } finally {
             liveTurn.end(turn) // turn over (or aborted) — clears the dot + composer lock everywhere
+            // The build just populated node_modules (brand-new app) and/or changed files — auto-start the
+            // preview so a finished build shows live without a manual Run. No-op if already running or the
+            // turn aborted before install (not yet buildable). This is the trigger that covers a NEW app,
+            // whose project was opened before node_modules existed.
+            void maybeAutoStartPreview(turnProjectId)
           }
           sendTree() // the agent may have created/edited files — refresh the tree
           if (turnDir && chatStore) chatStore.save(turnDir, turnChatId, s.getHistory(), msg.text) // pinned save
