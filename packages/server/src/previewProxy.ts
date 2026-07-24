@@ -101,6 +101,10 @@ const SELECT_OVERLAY = `<script>(function(){
   addEventListener('scroll', reposition, true);
   addEventListener('message', function(e){ var d=e.data; if(!d||typeof d!=='object') return;
     if(d.__cascade==='select-mode'){ setMode(!!d.on); } else if(d.__cascade==='select-clear'){ stopEdit(); }
+    // Preview toolbar back/forward: the iframe is cross-origin to the Cascade shell, so the shell can't touch
+    // its history directly — it posts here and we walk history INSIDE the app's own origin. Works for a router
+    // AND for the view-union pattern once App uses useHistoryView (each view push adds a history entry).
+    else if(d.__cascade==='nav'){ if(d.dir==='back') history.back(); else if(d.dir==='forward') history.forward(); }
   });
 })();</script>`
 

@@ -4,7 +4,7 @@
 // overlay script); a click there reports the element back and we float an inspector to edit it.
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { AlertTriangle, Loader2, MousePointerSquareDashed, Play, RotateCw, Square } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRight, Loader2, MousePointerSquareDashed, Play, RotateCw, Square } from 'lucide-react'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -24,6 +24,9 @@ export function PreviewPane() {
   const postMode = () => iframeRef.current?.contentWindow?.postMessage({ __cascade: 'select-mode', on: selectMode }, '*')
   // biome-ignore lint/correctness/useExhaustiveDependencies: also re-post when the iframe reloads
   useEffect(postMode, [selectMode, reloadKey])
+  // Back/forward: the iframe is cross-origin, so we post to the proxy-injected script which walks history in
+  // the app's own origin (works with a router, and with the view-union once App uses useHistoryView).
+  const nav = (dir: 'back' | 'forward') => iframeRef.current?.contentWindow?.postMessage({ __cascade: 'nav', dir }, '*')
 
   if (!activeId) return <Center>Open a project to start.</Center>
 
@@ -31,6 +34,12 @@ export function PreviewPane() {
     return (
       <div className="flex h-full flex-col">
         <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-2">
+          <Button variant="ghost" size="icon-sm" title="Back" onClick={() => nav('back')}>
+            <ArrowLeft className="h-3.5 w-3.5" />
+          </Button>
+          <Button variant="ghost" size="icon-sm" title="Forward" onClick={() => nav('forward')}>
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Button>
           <Button variant="ghost" size="icon-sm" title="Reload" onClick={() => setReloadKey((k) => k + 1)}>
             <RotateCw className="h-3.5 w-3.5" />
           </Button>

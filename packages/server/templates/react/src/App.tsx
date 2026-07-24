@@ -6,13 +6,15 @@ import { useEffect, useState } from 'react'
 import { Moon, Sparkles, Sun } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { NavBar } from '@/components/blocks/NavBar'
+import { useHistoryView } from '@/lib/useHistoryView'
 import { GalleryKit } from '@/demo/GalleryKit'
 import { GalleryLanding } from '@/demo/GalleryLanding'
 
 type View = 'landing' | 'kit'
 
 export default function App() {
-	const [view, setView] = useState<View>('landing')
+	// useHistoryView (not useState) for the top-level view → browser + preview back/forward work, no router.
+	const [view, setView] = useHistoryView<View>('landing')
 	const [dark, setDark] = useState(() => localStorage.getItem('theme') === 'dark')
 
 	useEffect(() => {

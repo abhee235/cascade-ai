@@ -32,15 +32,21 @@ USER explicitly asks for URL routing, honor that (their choice always wins) and 
 But never RECOMMEND one from an assumption about the codebase: no template file uses a router — if you
 believe the skeleton has one, you've lost context; Read src/App.tsx again before saying anything.
 
-One `view` state at the top, a discriminated union, and a switch in App:
+One `view` state at the top, a discriminated union, and a switch in App — but use **`useHistoryView`**
+(from `@/lib/useHistoryView`, already in the template) instead of `useState` for that ONE top-level view.
+It's a drop-in for `useState` that also drives the browser's history, so back/forward (the browser's AND
+the preview toolbar's) navigate your views — no router, no new dependency:
 
 ```tsx
+import { useHistoryView } from '@/lib/useHistoryView'
 type View = { kind: 'list' } | { kind: 'detail'; id: number } | { kind: 'cart' }
-const [view, setView] = useState<View>({ kind: 'list' })
+const [view, setView] = useHistoryView<View>({ kind: 'list' })
 ```
 
-Pass `setView` down (or wrap in handlers like `openDetail(id)`). Never reach for a router or a new
-dependency — view switching covers everything these apps need.
+Pass `setView` down (or wrap in handlers like `openDetail(id)`). Keep the view value serializable (a
+string or a plain object like `{ kind, id }`) — it's stored in history state. Use `useHistoryView` ONLY for
+the top-level view; local component state stays plain `useState`. Never reach for a router or a new
+dependency — this covers everything these apps need.
 
 ## State placement
 
