@@ -175,7 +175,10 @@ function ModelDetail(props: { em: EnabledModelInfo; info?: { capabilities: strin
 					</div>
 					<div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
 						<span className="capitalize">{em.provider}</span>
-						{info?.contextWindow ? <span>· {fmtCtx(info.contextWindow)} context (detected)</span> : null}
+						{/* EFFECTIVE window: a saved override (what the harness actually runs) beats the detected
+						    default — otherwise a user who set 131K still saw "32K (detected)" and thought it never
+						    applied. "(detected)" shows only when there's no override. */}
+						{em.contextWindow ? <span>· {fmtCtx(em.contextWindow)} context</span> : info?.contextWindow ? <span>· {fmtCtx(info.contextWindow)} context (detected)</span> : null}
 					</div>
 					{/* reserve height so late-loading capability badges don't shift the layout */}
 					<div className="mt-2 flex min-h-6 flex-wrap items-center gap-1">{capBadges(info?.capabilities)}</div>

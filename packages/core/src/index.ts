@@ -14,6 +14,9 @@ export type {
 } from './protocol'
 // Provider abstraction (ADR-020): frontends build a provider via createProvider() and inject it.
 export { createProvider } from './llm/factory'
+// ADR-038: Ollama window detection helpers — the arch-ceiling fallback (+ its safe cap) shared by the
+// server's modelInfo so the UI shows the same window the harness will run.
+export { archContextLength, ARCH_FALLBACK_CAP, parseOllamaLimits } from './llm/providers/ollama'
 export type { ProviderConfig } from './llm/factory'
 export type { ModelProvider, CompletionRequest, CompletionResult } from './llm/provider'
 // Permissions (ADR-009): the frontend picks a mode; checkPermission is the gate.

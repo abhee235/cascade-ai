@@ -29,6 +29,23 @@ import { OpenAIChatProvider, toOpenAITools } from './openaiChat'
 // act now" — not a finished answer — so a clipped legit turn recovers rather than ending the build.
 const DEFAULT_MAX_OUTPUT_TOKENS = 16384
 
+/** When a local model's Modelfile pins NO `num_ctx`, Ollama silently runs it at its ~4k/8k default and the
+ *  compactor guards that tiny window — the gpt-oss:20b trap: arch supports 131k, the Modelfile pins nothing,
+ *  so everything (wire + compaction) collapsed to 8k and it compacted every ~3 turns. So we fall back to the
+ *  model's ARCHITECTURE `context_length` — but CAP it here: putting the full trained ceiling on the wire forces
+ *  Ollama to allocate that whole KV-cache (several GB for a 131k window on a 20B model → OOM on a modest GPU).
+ *  This is a safe DEFAULT the user raises deliberately via the model manager (which sees the true ceiling as the
+ *  slider max). */
+export const ARCH_FALLBACK_CAP = 32_768
+
+/** The model's trained context ceiling from `/api/show` `model_info` (e.g. `gptoss.context_length: 131072`).
+ *  `model_info` keys are namespaced by architecture, so match any `*.context_length`. */
+export function archContextLength(modelInfo: Record<string, unknown> | undefined): number | undefined {
+  if (!modelInfo) return undefined
+  for (const [k, v] of Object.entries(modelInfo)) if (/(^|\.)context_length$/i.test(k) && typeof v === 'number' && v > 0) return v
+  return undefined
+}
+
 /** Parse Ollama's `/api/show` `parameters` blob (newline-delimited "name    value" lines) into the model's
  *  ALLOCATED limits (ADR-038). `num_ctx` is what Ollama actually runs the model at (the Modelfile pin), NOT the
  *  arch `context_length` (the trained ceiling). `num_predict` ≤ 0 means "unbounded" → not a useful cap. Pure +
@@ -91,8 +108,14 @@ export class OllamaProvider extends OpenAIChatProvider {
         signal,
       })
       if (!res.ok) return {}
-      const json = (await res.json()) as { parameters?: string }
-      return parseOllamaLimits(json.parameters)
+      const json = (await res.json()) as { parameters?: string; model_info?: Record<string, unknown> }
+      const fromModelfile = parseOllamaLimits(json.parameters)
+      // A Modelfile `num_ctx` is the user's deliberate allocation (ground truth) — honor it as-is.
+      if (fromModelfile.contextWindow) return fromModelfile
+      // No pin: fall back to the arch ceiling, CAPPED (ARCH_FALLBACK_CAP) — a sane window instead of Ollama's
+      // 4k/8k default, without forcing a giant KV-cache. The manager slider still reaches the true ceiling.
+      const arch = archContextLength(json.model_info)
+      return { contextWindow: arch ? Math.min(arch, ARCH_FALLBACK_CAP) : undefined, maxOutputTokens: fromModelfile.maxOutputTokens }
     } catch {
       return {} // network error / aborted — the caller keeps its fallback window
     }

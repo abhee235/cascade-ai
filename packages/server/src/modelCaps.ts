@@ -8,6 +8,7 @@
 // the list claims nothing and the Browser tool stays off — a wrong OFF degrades gracefully, a wrong ON
 // hands the model a tool that errors on every screenshot.
 
+import { archContextLength, ARCH_FALLBACK_CAP } from '@cascade/core'
 import { limitsFor, type ModelLimits, specCapabilities } from './modelSpecs.js'
 
 const cache = new Map<string, string[]>()
@@ -45,19 +46,26 @@ export function providerCatalog(): ProviderCatalogEntry[] {
 export async function modelInfo(provider: string, model: string, baseUrl?: string): Promise<{ capabilities: string[]; contextWindow?: number; limits: ModelLimits }> {
   const capabilities = await modelCapabilities(model, baseUrl, provider)
   let contextWindow: number | undefined
+  let archMax: number | undefined
   if (provider === 'ollama') {
     try {
       const base = (baseUrl ?? BASE_URLS.ollama).replace(/\/v1\/?$/, '')
       const res = await fetch(`${base}/api/show`, { method: 'POST', body: JSON.stringify({ model }), signal: AbortSignal.timeout(5000) })
-      const j = (await res.json()) as { parameters?: string }
+      const j = (await res.json()) as { parameters?: string; model_info?: Record<string, unknown> }
       const m = (j.parameters ?? '').match(/^\s*num_ctx\s+(\d+)/m)
+      archMax = archContextLength(j.model_info)
+      // Modelfile num_ctx is the deliberate allocation; otherwise default to the arch ceiling CAPPED — the
+      // SAME rule as core's detectModelLimits, so the window the UI shows equals the one the harness runs
+      // (no silent 8k fallback for a model whose Modelfile pins nothing, e.g. gpt-oss:20b).
       if (m) contextWindow = Number(m[1])
+      else if (archMax) contextWindow = Math.min(archMax, ARCH_FALLBACK_CAP)
     } catch {
       /* unreachable — leave undefined */
     }
   }
-  // The live-detected window raises the context ceiling so the slider reaches the real Modelfile allocation.
-  return { capabilities, contextWindow, limits: limitsFor(provider, model, contextWindow) }
+  // The slider max reaches the TRUE ceiling (archMax) so the user can raise the window to what the model
+  // supports; the detected value stays the safe default.
+  return { capabilities, contextWindow, limits: limitsFor(provider, model, Math.max(contextWindow ?? 0, archMax ?? 0) || undefined) }
 }
 
 /** Set a provider's API key for the RUNNING server (process.env). Session-scoped — not written to disk
