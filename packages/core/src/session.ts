@@ -40,6 +40,10 @@ export interface SessionOptions {
    *  top-level session, e.g. the server's plan stage). Absent ⇒ full registry. Generic mechanism: core
    *  doesn't know WHY a caller narrows the set. */
   tools?: string[]
+  /** Remove specific builtins by name (e.g. the autonomous builder drops `AskUserQuestion` — there is no
+   *  user to answer synchronously mid-build, so a weak model calling it just stalls the turn). Applied AFTER
+   *  the `tools` allowlist. */
+  excludeTools?: string[]
   /** ADR-060: caller-provided EXTRA tools joined into the registry (e.g. the server's vision-gated Browser
    *  tool, which needs Playwright + the preview URL — capabilities core can't own). Subject to the same
    *  `tools` grant scoping as everything else. */
@@ -196,7 +200,14 @@ export function createSession(opts: SessionOptions): CascadeSession {
   // Session-level allowlist (same mechanism the Subagent path applies from AgentDef.tools): a persona run
   // as its own top-level session gets its declared tools and nothing else — and grants may be arg-scoped
   // (`Write(PLAN.md)`), so a planner literally cannot write code (ADR-056 rung 4).
-  const registry = opts.tools?.length ? registryOf(() => scopeToolsByGrants(fullRegistry.list(), opts.tools!)) : fullRegistry
+  const excluded = new Set(opts.excludeTools ?? [])
+  const registry =
+    opts.tools?.length || excluded.size
+      ? registryOf(() => {
+          const list = opts.tools?.length ? scopeToolsByGrants(fullRegistry.list(), opts.tools!) : fullRegistry.list()
+          return excluded.size ? list.filter((t) => !excluded.has(t.name)) : list
+        })
+      : fullRegistry
 
   // Archival (semantic) memory — Tier 2. The embedder is bound to the provider + embed model; if the
   // provider can't embed (or no model), archival quietly degrades to keyword search.

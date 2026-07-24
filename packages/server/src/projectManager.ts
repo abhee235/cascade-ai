@@ -79,8 +79,23 @@ export const BUILDER_BEHAVIOR = [
   'When asked to build or change the app:',
   '- Complete the ENTIRE request in this turn. Create or edit every file needed, one tool call at a time, until it is fully done.',
   '- Do not stop after exploring or after writing a plan. A plan or explanation is NOT a deliverable — the working files are.',
+  // Measured (gpt-oss:20b, 2026-07-24): the model read 24 files across 30 turns and wrote ZERO — pure
+  // analysis-paralysis. The skills + PLAN.md are already pinned, so surveying the tree earns nothing.
+  '- Do NOT survey the codebase. The architecture + design skills and your PLAN.md are already in front of you — THAT is your context. Read a file ONLY right before you Edit that exact file; never read files just to "understand the project". Start WRITING within your first couple of tool calls.',
+  // Same run: it tried to READ files its own plan says to CREATE (src/lib/data.ts 4×, types.ts), looping on
+  // ENOENT and even passing `content` to Read. The files in a plan are TARGETS to write, not files to open.
+  '- Your PLAN lists files to CREATE (data.ts, types.ts, your components, hooks) — they DO NOT EXIST YET. CREATE each with the Write tool. NEVER Read a file your plan tells you to create; if a Read says "does not exist", that is your cue to Write it, not to retry Read.',
   '- Keep going tool-by-tool (write a file, then the next…). Do not ask for confirmation; you are sandboxed and pre-authorized.',
-  '- Only end your turn when the feature is fully implemented and the app still runs (`npm run dev` must work).',
+  // Measured (gpt-oss:20b, 2026-07-24): the weak model repeatedly ENDED its turn asking permission ("if you'd
+  // like me to install…, let me know"), citing scope ("beyond what can be done in one turn"), and treating a
+  // `tsc: not found` error as a blocker instead of installing. These three rules target each behaviour head-on.
+  '- NEVER end your turn to ask a question or wait for permission — there is no one to answer mid-build, so a question just burns the turn. Do not write "let me know", "if you\'d like", "shall I", or offer the user options. Act.',
+  '- SELF-HEAL, do not stall: if a command fails because something is missing (`tsc: not found`, a missing package, an absent dir), FIX it yourself — run `npm install` / `npm install <pkg>`, create the file — and continue. A missing dependency is a step to fix, never a reason to stop and ask.',
+  '- No task is "too big". Never claim the request is "beyond what can be reliably implemented in a single turn" and never silently downscope — decompose it and keep building until the WHOLE thing is done and the build is green.',
+  '- Only end your turn when the feature is fully implemented and the production build is green (the declared `npm run build` check).',
+  // A dev server never exits, so a foreground `npm run dev` blocks the turn until Bash times out — the model
+  // has no port-readiness signal on that path (unlike the Browser tool, which starts dev detached + polls).
+  '- To confirm the app RUNS, use the Browser tool (op:"open") if you have it — it starts the dev server the right way (detached, port-polled) and shows you the live app. NEVER run `npm run dev` in the foreground with Bash: it does not return, it only stalls your turn.',
   '- Be thorough over brief: prefer many correct file edits over a short summary. Ignore any instinct to keep the response short.',
   // Measured (shop-iterate-1): one ever-growing App.tsx crossed the read cap by round 2 — every later edit
   // fought windowed reads and stale views. Many small files keep every read/edit cheap and precise.
@@ -94,9 +109,11 @@ export const BUILDER_BEHAVIOR = [
   '- MANDATORY SKILLS: before your FIRST Write or Edit in a session, call Skill {name: "architecture"} and Skill {name: "design"}. This is not optional. Load the other skills when their trigger words match the task.',
   // Design-system v2: the aesthetic bar, one line (the mechanics live in the design skill
   // + the blocks; this makes "looks designed" part of the definition of done).
-  '- QUALITY BAR: the app must look DESIGNED, not scaffolded — assemble pages from src/components/blocks (NavBar/Hero/Section/MediaCard…), token colors only (never bg-white/bg-blue-600/hex), real imagery via photoFor()/ArtImage (NEVER an emoji as an image). First impression is part of "done".',
+  '- QUALITY BAR: the app must look DESIGNED, not scaffolded — assemble pages from src/components/blocks (NavBar/Hero/Section/MediaCard…), token colors only (never bg-white/bg-blue-600/hex), and real imagery (NEVER an emoji as an image). IMAGERY ROUTING: a GRID/LIST of distinct items (a product catalog, listings) → `<Photo web="<subject keywords>" seed={item.id} kind="product">` so every card is a DISTINCT, on-subject photo; a single hero/banner → photoFor()/photo(); abstract covers/avatars → <ArtImage>. NEVER photoFor() for a grid — the bundled pack has ~2 images per category, so every card shows the same picture. First impression is part of "done".',
   // ADR-066: backend graduation is MECHANICAL via the ApplyPack tool + the backend skill — never hand-rolled.
-  '- BACKEND: apps persist in the browser (the src/lib/storage.ts seam) by default. If the user asks for a database, a server, or persistence across devices/users, load Skill {name: "backend"} and use the ApplyPack tool — do NOT hand-write a server, Prisma schema, or migration.',
+  // Measured (gpt-oss:20b, 2026-07-24): the model tried `npm run applypack` and `npx @cascade/backend` — it
+  // mapped "apply the pack" to a shell command instead of the provided tool. Say plainly what ApplyPack is.
+  '- BACKEND: apps persist in the browser (the src/lib/storage.ts seam) by default. If the user asks for a database, a server, or persistence across devices/users, load Skill {name: "backend"} and call the ApplyPack tool DIRECTLY (it is a tool in your toolset, exactly like Write or Bash). It is NOT a shell command — `npm run applypack` and `npx @cascade/backend` DO NOT EXIST. Do NOT hand-write a server, Prisma schema, or migration.',
 ].join('\n')
 
 /** name → a filesystem-safe slug (so dirs are readable); id keeps them unique. */
@@ -206,6 +223,10 @@ export class ProjectManager {
           temperature: this.active.temperature,
           topP: this.active.topP,
           topK: this.active.topK,
+          // The autonomous builder has no synchronous user to answer mid-build — drop AskUserQuestion so a
+          // weak model can't stall the turn asking permission / for the next step (it must ACT — see
+          // BUILDER_BEHAVIOR). Clarifying questions belong to the planner stage, which keeps the tool.
+          excludeTools: ['AskUserQuestion'],
           // Hardware knob (2026-07-23): earlier compaction keeps decode fast on offloaded setups — see
           // ProjectManagerOptions.compactRatio for the measured rationale.
           compactRatio: this.opts.compactRatio,

@@ -90,6 +90,23 @@ export const ReadTool: Tool<z.infer<typeof inputSchema>> = {
       return { content: numbered.length > cap * 1.2 ? `${numbered.slice(0, cap)}\n…[truncated — use a smaller limit]` : numbered }
     } catch (err) {
       // Return the error AS the result (not a throw) so the model can self-correct.
+      const code = (err as NodeJS.ErrnoException)?.code
+      // A weak model often tries to READ a file its PLAN says to CREATE, loops on ENOENT, or jams the body
+      // into a `content` arg Read ignores (measured: gpt-oss:20b re-read a missing src/lib/data.ts 4×, then
+      // Read-with-content). Redirect it to Write instead of a bare fs error.
+      if (code === 'ENOENT') {
+        return {
+          content: `${input.file_path} does not exist yet. Read only opens files that already EXIST — to CREATE this file, use the Write tool with its full contents. Do NOT retry Read on it.`,
+          isError: true,
+        }
+      }
+      // Reading a directory: point at Glob rather than leaving the model to loop on EISDIR.
+      if (code === 'EISDIR') {
+        return {
+          content: `${input.file_path} is a directory, not a file. List its contents with Glob {path: "${input.file_path}", pattern: "*"}, then Read a specific file.`,
+          isError: true,
+        }
+      }
       return {
         content: `Error reading ${input.file_path}: ${err instanceof Error ? err.message : String(err)}`,
         isError: true,
