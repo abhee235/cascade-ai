@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Streamdown } from 'streamdown'
-import { ArrowUp, FileText, Loader2, Paperclip, RefreshCw, Square, X } from 'lucide-react'
+import { ArrowUp, ChevronRight, FileText, Loader2, Paperclip, RefreshCw, Square, X } from 'lucide-react'
 import { useStore } from '@/lib/store'
 import type { Item } from '@/lib/types'
 import { ActivityCard, ChangeSet } from './ActivityCard'
@@ -56,32 +56,21 @@ function useTick(active: boolean) {
   }, [active])
 }
 
-// Live reasoning view: streams the tail of the model's thinking as it arrives (auto-scrolled to the bottom),
-// with a spinner + ticking elapsed. Replaces the old static "Thinking…" pill so the user can see the model is
-// actively reasoning — and roughly how long — instead of guessing whether it's thinking or stuck.
-function LiveThinking({ thinking, seconds }: { thinking: string; seconds: number }) {
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    ref.current?.scrollTo({ top: ref.current.scrollHeight })
-  }, [thinking])
-  return (
-    <div className="my-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
-      <div className="mb-1 flex items-center gap-2 text-[13px] leading-[21px] text-muted-foreground">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        <span>Thinking…</span>
-        {seconds > 0 && <span className="opacity-60 tabular-nums">{seconds}s</span>}
-      </div>
-      <div ref={ref} className="max-h-24 overflow-y-auto whitespace-pre-wrap text-[13px] leading-[21px] text-muted-foreground/80">
-        {thinking}
-      </div>
-    </div>
-  )
-}
-
 export function ChatPanel() {
-  const { items, streaming, status, recovering, busy, stepStartedAt, sawTokens, connected, activeId, submit, stop, composerDraft, setComposerDraft } = useStore()
+  const { items, streaming, status, recovering, busy, stepStartedAt, sawTokens, lastTokenAt, thinkStartedAt, connected, activeId, submit, stop, composerDraft, setComposerDraft } = useStore()
   useTick(busy) // re-render ~1×/s while a turn runs so the elapsed timer ticks even with no tokens
   const elapsed = stepStartedAt ? Math.max(0, Math.floor((Date.now() - stepStartedAt) / 1000)) : 0
+  // The live thinking timer counts from the FIRST THINKING TOKEN, not from step start — step start includes
+  // prefill, which billed "Reading the conversation…" time as thinking ("Thinking… 18s" on 8s of thought,
+  // silently corrected when the committed card appeared). Frozen at the last token once the burst goes quiet.
+  const thinkElapsed = thinkStartedAt ? Math.max(0, Math.floor(((lastTokenAt && Date.now() - lastTokenAt > 2500 ? lastTokenAt : Date.now()) - thinkStartedAt) / 1000)) : 0
+  // Thinking went QUIET: no delta for a while but the step is still running ⇒ the model is silently generating
+  // tool-call arguments (that phase streams NOTHING — a 118-line Write is ~20s of dead air). Labelling it
+  // "Thinking…" made healthy turns look stuck (measured: users hit Stop on a working build). useTick's 1s
+  // re-render keeps this fresh without extra state churn.
+  const thinkingQuiet = busy && sawTokens && lastTokenAt !== null && Date.now() - lastTokenAt > 2500
+  // (The early thought-commit itself lives in the STORE as a quiet-debounced timer on the event clock —
+  // a render-clock useEffect here raced the event stream and could chop a resumed burst mid-stream.)
   // The working-indicator message must reflect the ACTUAL current phase, not one catch-all fallback.
   // (1) While a tool runs, the tool CARD is the activity indicator (its own spinner + "Writing X" /
   //     streaming output) — the generic row is suppressed so it can't contradict it with a stale message
@@ -97,7 +86,9 @@ export function ChatPanel() {
   const lastUserIdx = items.map((i) => i.kind).lastIndexOf('user')
   const workedSinceSubmit = lastUserIdx >= 0 && items.slice(lastUserIdx + 1).some((i) => i.kind === 'tool' || i.kind === 'assistant')
   const workingMessage = sawTokens
-    ? status || 'Working — running the next step…'
+    ? thinkingQuiet
+      ? 'Preparing changes…' // post-thinking silent phase: the model is generating tool args (nothing streams)
+      : status || 'Working — running the next step…'
     : workedSinceSubmit
       ? 'Reading the conversation so far…'
       : 'Reading your message and the project context…'
@@ -108,9 +99,39 @@ export function ChatPanel() {
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  // SCROLL PINNING — follow the bottom ONLY while the user is already there. If they scrolled up to read,
+  // new activity must not yank the viewport (the reported pain: cards popping in shoved the content they
+  // were reading upward). `atBottomRef` is updated on every scroll; ~80px of slack counts as "at bottom".
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const atBottomRef = useRef(true)
+  const trackScroll = () => {
+    const el = scrollerRef.current
+    if (el) atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+  }
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [items, streaming, status, recovering])
+    // Discrete card appends: a SMOOTH glide (a sudden full-card jump reads as a pop even when pinned).
+    if (atBottomRef.current) endRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [items])
+  useEffect(() => {
+    // Token streams: INSTANT — smooth scrolling chasing per-frame growth is the bottom-jitter we removed.
+    if (atBottomRef.current) endRef.current?.scrollIntoView({ behavior: 'auto' })
+  }, [streaming, status, recovering])
+
+  // (A layout-shift absorber lived here — it held the collapsing thinking block's height as bottom padding so
+  //  the transcript never shrank. REVERTED 2026-07-25: it could not tell a *block collapsing* from the
+  //  transcript being REPLACED. On a new submit / chat switch, `items` resets and the content height drops by
+  //  the whole previous conversation; the absorber read that as "content vanished" and reserved all of it —
+  //  hundreds of px of blank panel, cleared only by a reload (which resets the ref). A cosmetic shift beats a
+  //  blank screen. Any retry must key off the thinking block's own height via ResizeObserver, NOT the
+  //  scroller's total height, so a transcript swap can never be mistaken for a collapse.)
+
+  // Live reasoning is pinned to its NEWEST line inside the fixed-height slot (same instant-scroll rule as the
+  // transcript: smooth would chase per-token growth). Self-contained — this scroller never moves the panel.
+  const thinkScrollRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = thinkScrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [streaming?.thinking])
 
   // M9: "Edit with AI" (and similar) prefill the composer through the store. Adopt the draft, focus, and
   // place the caret at the end so the user just types the change.
@@ -169,41 +190,71 @@ export function ChatPanel() {
   return (
     <div className="flex h-full flex-col text-sm">
       <ChatHeader />
-      <div className="chat-transcript flex-1 overflow-y-auto px-4 py-3">
+      {/* pb-8: breathing room — the last card / activity slot must never sit flush against the composer. */}
+      <div ref={scrollerRef} onScroll={trackScroll} className="chat-transcript flex-1 overflow-y-auto px-4 pt-3 pb-15">
         {renderTranscript(items)}
 
-        {/* Live turn: while only thinking has arrived, stream the reasoning tail live (so the user sees the
-            model IS working, not frozen); once the answer text starts, render it as plain flow (no role
-            label) — matches the finished assistant style. */}
-        {streaming &&
-          (streaming.text ? (
-            <div className="my-3 prose prose-sm dark:prose-invert max-w-none">
-              <Streamdown>{streaming.text}</Streamdown>
+        {/* LIVE THOUGHT — must render ABOVE the streaming answer, because that is where the COMMITTED
+            ThoughtBlock lands (ActivityCard renders thinking above text inside the assistant item). It used to
+            live in the activity slot BELOW the text and was hidden once text began, so a thought visibly
+            vanished from under the answer and re-appeared above it a moment later — the reported "thought
+            loads one step down, inverted" jump. Same position + same row geometry ⇒ it morphs in place into
+            "Thought for Ns" instead of moving. Stays mounted while the answer streams (no !streaming.text
+            condition) so it can't disappear mid-turn. */}
+        {busy && streaming?.thinking && (
+          // `cascade-reveal` grows this block 0 → full height instead of claiming it on one frame, so it
+          // unfolds top-to-bottom rather than popping (see index.css). Height-agnostic — it reads the inner
+          // block's own height, so retuning h-30 needs no CSS change.
+          <div className="cascade-reveal">
+          {/* This middle div is the grid TRACK child and must stay height-free — the 0fr→1fr track can only
+              compress an auto-height box. The fixed-height block below it overflows and is clipped. */}
+          <div>
+          <div className="my-1.5 flex h-34 flex-col justify-center overflow-hidden">
+            <div className="flex shrink-0 items-center gap-1 mb-1 text-[13px] leading-[21px] text-muted-foreground">
+              <ChevronRight className="h-3 w-3 rotate-90" />
+              <span className={cn(!streaming.text && 'animate-pulse')}>{thinkingQuiet && !streaming.text ? 'Preparing changes…' : 'Thinking…'}</span>
+              {thinkElapsed > 0 && <span className="ml-1 tabular-nums text-xs text-muted-foreground/60">{thinkElapsed}s</span>}
             </div>
-          ) : streaming.thinking ? (
-            <LiveThinking thinking={streaming.thinking} seconds={elapsed} />
-          ) : null)}
-
-        {recovering && (
-          <div className="my-2 flex items-center gap-2 rounded-lg border border-yellow-700/50 bg-yellow-900/20 px-3 py-2 text-xs text-yellow-200">
-            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-            {recovering.reason === 'overflow' ? 'Context too large — compacting and retrying…' : "Can't reach the model — reconnecting…"}
-            <span className="opacity-60">attempt {recovering.attempt}</span>
+            <div ref={thinkScrollRef} className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap border-l-2 border-border pl-3 text-[13px] leading-[21px] text-muted-foreground/80">
+              {streaming.thinking}
+            </div>
+          </div>
+          </div>
           </div>
         )}
 
-        {/* Persistent "still working" indicator — THE dead-air contract: while `busy` (i.e. until the
-            final turnDone, the ONLY completion signal), something visible must always say we're working.
-            Before a step's first token the model is INGESTING the prompt (a local model re-reads the
-            whole conversation — 10-30s of true silence); the ticking per-step seconds prove it's alive.
-            Rendered as a real card (not a whisper) so it can't be missed or mistaken for "finished". */}
-        {busy && !streaming && !recovering && !toolRunning && (
-          // A naked row (matches the flattened tool rows). Suppressed while a tool runs — the
-          // tool card carries the activity then (so the row never shows a message that fights the card).
-          <div className="my-1.5 flex items-center gap-2 py-1 text-[13px] text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
-            <span>{workingMessage}</span>
-            <span className="ml-auto tabular-nums text-xs text-muted-foreground/60">{elapsed}s</span>
+        {/* Streaming ANSWER text is real content — it flows in the transcript like a finished message. */}
+        {streaming?.text && (
+          <div className="my-3 prose prose-sm dark:prose-invert max-w-none">
+            <Streamdown>{streaming.text}</Streamdown>
+          </div>
+        )}
+
+        {/* ACTIVITY SLOT — the dead-air contract, structurally shift-free. ONE fixed-height container exists
+            for the whole turn; every transient indicator (live thinking / retry / working row) swaps INSIDE
+            it. Previously each indicator was its own block that appeared/disappeared — the ~120px live
+            thinking box popping in and out between qwen's 1-3s think bursts was the bottom-of-panel flicker.
+            The full reasoning still lands in the transcript as the collapsible "Thought for Ns" item. */}
+        {busy && (
+          <div className="my-1.5 flex h-10 flex-col justify-center overflow-hidden">
+            {recovering ? (
+              <div className="flex items-center gap-2 text-[13px] text-yellow-600 dark:text-yellow-300">
+                <RefreshCw className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                <span className="truncate">{recovering.reason === 'overflow' ? 'Context too large — compacting and retrying…' : "Can't reach the model — reconnecting…"}</span>
+                <span className="shrink-0 opacity-60">attempt {recovering.attempt}</span>
+              </div>
+              // Streaming content (thinking OR answer) is its own indicator while it MOVES — the row would
+              // just duplicate it. Once it goes quiet the model is silently generating tool-call arguments (a
+              // 118-line Write is ~20s of NOTHING on the wire); suppressing the row there left a blank panel
+              // that reads as frozen, which is when users hit Stop on a healthy build. So quiet falls through
+              // to the working row and surfaces "Preparing changes…".
+            ) : (streaming?.text || streaming?.thinking) && !thinkingQuiet ? null : !toolRunning ? (
+              <div className="flex w-full items-center gap-2 text-[13px] text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
+                <span className="truncate">{workingMessage}</span>
+                <span className="ml-auto shrink-0 tabular-nums text-xs text-muted-foreground/60">{elapsed}s</span>
+              </div>
+            ) : null /* tool running: its card above carries the activity — the slot stays as silent ballast */}
           </div>
         )}
         <div ref={endRef} />

@@ -182,6 +182,61 @@ body {
   font-size: 13px;
   line-height: 22px;
 }
+/* Card entry: each new transcript child eases in instead of appearing on one frame, so an append reads as
+   arriving rather than snapping — and it visually blends with the smooth scroll that follows it.
+   ONLY opacity + transform (both GPU-composited): animating height/margin here would reflow the scroller
+   mid-append and fight the bottom-pinning. `both` holds the end state so a settled card never flickers.
+   CSS animations run at element CREATION, so re-renders of an existing card don't replay it — only genuinely
+   new children animate. 160ms is deliberately under the ~200ms "instant" threshold: felt, not waited on. */
+@keyframes cascade-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.chat-transcript > * {
+  animation: cascade-card-in 500ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-transcript > * {
+    animation: none;
+  }
+}
+
+/* Thinking block REVEAL: unfold 0 → 30% → 60% → full height instead of claiming the whole box on one frame.
+   Uses the grid 0fr→1fr technique rather than height/max-height keyframes: it interpolates against the
+   child's OWN measured height, so the easing is exact end-to-end (max-height has to overshoot, which stalls
+   the last part of the curve) and retuning the inner h-* needs no CSS change. The child must carry
+   `min-height:0; overflow:hidden` or the track can't compress below its content.
+   Higher specificity than `.chat-transcript > *` so this wins over the generic card fade. */
+@keyframes cascade-reveal {
+  from {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+  to {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+}
+.chat-transcript > .cascade-reveal {
+  display: grid;
+  grid-template-rows: 1fr;
+  animation: cascade-reveal 420ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.cascade-reveal > * {
+  min-height: 0;
+  overflow: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-transcript > .cascade-reveal {
+    animation: none;
+  }
+}
 .chat-transcript .prose {
   /* Main prose = 13px/21px w400 NEAR-BLACK
      (rgb 24,24,27); muted gray belongs ONLY to step/log rows. */
