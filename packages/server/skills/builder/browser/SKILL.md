@@ -14,9 +14,47 @@ its main flow works. The Browser tool opens the live preview so you can verify a
 Smoke:
 - [ ] 1. Browser {op:"open"}                     — loads the app (starts the dev server if needed)
 - [ ] 2. Browser {op:"snapshot"}                 — READ the tree: are the nav, headings, lists, buttons there?
-- [ ] 3. Browser {op:"screenshot"}               — LOOK at it against the design checklist below
-- [ ] 4. Fix what you saw; build; re-check the one thing you fixed
+- [ ] 3. For EACH key route (/, and every main view in PLAN.md): Browser {op:"open", path:"/route"} then snapshot
+- [ ] 4. Browser {op:"screenshot"}               — LOOK at it against the design checklist below
+- [ ] 5. Fix what you saw; build; re-check the one thing you fixed
 ```
+
+## Is it actually RUNNING? — check before you judge the look
+
+A page can compile and still be dead. Before the design pass, confirm the app is alive on every main route:
+
+- **Crash on open** — `open` returning a dev-server error means the app throws at runtime. Read the error,
+  fix the cause, rebuild. Do not proceed to screenshots.
+- **Blank / white page** — `snapshot` shows an almost-empty tree (no headings, no landmarks) or the
+  screenshot is a blank canvas ⇒ the root didn't mount (a throwing component, a bad import, an empty
+  route). That is a FAILURE even though the build passed.
+- **Every PLAN.md view loads** — `open` each route. A route that 404s, blanks, or shows a stub is "not
+  running" — list it explicitly; don't silently count it as done.
+- **The main flow works** — do the one thing the app exists for (add a todo, add to cart, submit the form)
+  and confirm the UI actually changes. A store where "Add to cart" does nothing is broken, not built.
+
+## Write a Smoke Report — the output of this pass
+
+End the smoke pass with a short, explicit report (this is what "I checked it" means):
+
+```
+SMOKE REPORT
+- Running: <routes/flows that work>
+- Not running: <routes that 404/blank/crash, flows that do nothing>  ← fix these FIRST
+- Design-system gaps: <raw colors, unstyled boxes, block not used, inconsistent badges/cards>
+- Imagery: <distinct-count per grid, any repeats/mismatches, any emoji-as-image>
+- Verdict: SHIP / FIX (list the fixes)
+```
+
+Then FIX everything under "Not running" and "gaps", rebuild, and re-check what you fixed.
+
+## Delegating the whole pass — the `smoketester` subagent
+
+For a thorough, independent QA pass that keeps all the verbose snapshot/screenshot output OUT of your
+build context, delegate: `Subagent {agent: "smoketester", prompt: "<what the app is + the routes/flows in
+PLAN.md to exercise>"}`. It opens the app, walks every route and the main flow, and returns just the SMOKE
+REPORT above — a punch-list you then fix. Prefer this on a larger app; run the inline smoke pass yourself
+on a small one.
 
 ## Judging a screenshot — write a verdict for EVERY line
 
@@ -26,8 +64,11 @@ you didn't look. A screenshot with zero problems named is a screenshot you waste
 
 - **Imagery — the #1 miss.** COUNT the distinct images. Do any repeat across different cards/items? Does
   each image actually MATCH its label (a "Ratatouille" card must not show a noodle bowl)? Repeated or
-  mismatched photos are a bug even when each image loads fine — fix the data/`photoFor` mapping so every
-  item gets a distinct, on-topic image. (No broken-icon ≠ good imagery.)
+  mismatched photos are a bug even when each image loads fine. **The usual cause + fix:** the grid was
+  mapped through `photoFor` (only ~2 photos per category → they MUST repeat). Switch each item to
+  `<Photo web="<the item's real subject>" seed={item.id} kind="product" />` — a distinct, on-subject real
+  photo per item that auto-falls back to `<ArtImage>`. Only reach for the `ImageSearch` tool if you want
+  to hand-pick a specific hero shot. (No broken-icon ≠ good imagery.)
 - **Consistency across states.** Put the variants side by side: do all the difficulty/status BADGES share
   one style (all solid, or all outline — not "Medium" solid-purple next to "Hard" white-outline)? Do all
   cards share one height, radius, shadow? Drift between siblings is the tell.

@@ -74,8 +74,13 @@ const seedNum = (s: string | number): number => {
  *  `webPhoto('leather watch minimal', product.name)`. Use when generated ArtImage looks too abstract
  *  for the subject (real products, real-world listings). Space-separated keywords narrow the subject. */
 export function webPhoto(keywords: string, seed: string | number, size = 600): string {
-	const kw = keywords.trim().replace(/\s+/g, ',')
-	return `https://loremflickr.com/${size}/${size}/${encodeURIComponent(kw)}/${seedNum(seed)}`
+	// loremflickr AND-matches comma keywords; 3+ tags usually match NOTHING and it serves a generic
+	// placeholder at HTTP 200 (so <Photo>'s onError fallback never fires — you get a wrong photo, not
+	// ArtImage). Keep the 2 most salient words so the query actually resolves to a real, on-subject photo.
+	const kw = keywords.trim().split(/\s+/).slice(0, 2).join(',')
+	// The deterministic pin MUST be the `?lock=` QUERY param. A trailing `/<n>` path segment (the old form)
+	// now 404s on loremflickr — which silently dropped EVERY web photo to the ArtImage fallback.
+	return `https://loremflickr.com/${size}/${size}/${encodeURIComponent(kw)}?lock=${seedNum(seed)}`
 }
 
 /** A seeded realistic stock photo (random subject) from picsum.photos (allowlisted, keyless). For

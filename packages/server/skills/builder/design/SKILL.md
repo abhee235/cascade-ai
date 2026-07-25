@@ -75,11 +75,15 @@ use `flex flex-col gap-*`, never margin stacks.
 
 Choose by what the subject needs — don't default to abstract art when a real photo would sell it:
 
-- **Bundled photos** (fast, offline, curated) — hero shots, lifestyle, journal cards:
-  `import { photo, photoFor } from '@/lib/photos'`; `photo('nature-mountain')` or `photoFor(seed, 'food')`
-  (categories: food, product, workspace, nature, interior, people, texture).
-- **Real web photos** — when the subject genuinely needs REAL photography the small bundled pack can't
-  cover (an **e-commerce catalog of real products**, travel/real-estate/recipe listings): use the
+- **Bundled photos** (fast, offline, curated) — for **ONE or TWO big images**: a hero, a section banner,
+  a lifestyle shot. `import { photo, photoFor } from '@/lib/photos'`; `photo('nature-mountain')` or
+  `photoFor(seed, 'food')` (categories: food, product, workspace, nature, interior, people, texture).
+  ⚠️ **The pack holds only ~2 photos PER CATEGORY.** So `photoFor` on a **grid of distinct items** makes
+  every card show one of the same two pictures — the "why do all my products look like the same watch?"
+  bug. NEVER map a catalog/list through `photoFor`; use `<Photo web>` (below) so each item is distinct.
+- **Real web photos — the DEFAULT for any grid/list/catalog of distinct subjects.** When the subject needs
+  REAL photography the small bundled pack can't cover (an **e-commerce catalog of real products**,
+  travel/real-estate/recipe listings): use the
   `<Photo>` block — `import { Photo } from '@/components/blocks/Photo'` →
   `<Photo web="leather watch minimal" seed={p.name} kind="product" />`. `web` = space-separated keywords
   for the subject; it pulls a real, deterministic photo from an **allowlisted, hotlink-safe source** and
@@ -108,6 +112,7 @@ popups after the click).
 
 - [ ] Page assembled from blocks (NavBar + Hero/PageHeader + Sections + Footer where it's a landing)
 - [ ] Zero raw colors in your diff (no bg-white/black, -500/-600 shades, hex — stars/stock/success = text-primary)
-- [ ] Every image is photo()/photoFor()/<Photo>/<ArtImage> — zero emoji-as-image; real-product catalogs use <Photo web="…">, not abstract art
+- [ ] Every image is photo()/photoFor()/<Photo>/<ArtImage> — zero emoji-as-image; any GRID/LIST of distinct items uses `<Photo web="<subject>" seed={item.id}>` (distinct per item), NEVER photoFor (repeats) or abstract art
+- [ ] Opened the grid in the Browser and COUNTED: no two cards share a photo, and each photo matches its label
 - [ ] Exactly one bg-primary CTA per screenful; empty lists show <EmptyState>
 - [ ] Checked once in light AND dark mode before done

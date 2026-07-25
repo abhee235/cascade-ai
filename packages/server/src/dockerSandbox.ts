@@ -104,15 +104,36 @@ export class DockerSandbox implements Sandbox {
     return this.starting
   }
 
-  async exec(command: string, opts: ExecOptions = {}): Promise<ExecResult> {
+  /** "No such container" / "is not running" from `docker exec` means our cached container id is STALE — the
+   *  container vanished mid-session. It's `--rm`, so anything that stops it (Docker Desktop/WSL restart on a
+   *  system sleep, a daemon restart, an OOM) also REMOVES it, and `ensure()` would otherwise keep handing back
+   *  the dead id forever — every Bash call failing identically while the model builds blind (observed: a whole
+   *  60-min build where all 9 shell calls returned "No such container"). Detect it so exec can self-heal. */
+  private isStaleContainer(res: ExecResult): boolean {
+    return res.exitCode !== 0 && /No such container|is not running|No such object/i.test(res.output)
+  }
+
+  /** Run a `docker exec` and, if the container turns out to be gone, drop the cached id, start a FRESH one,
+   *  and retry ONCE. Safe because the workspace survives: source is bind-mounted and node_modules lives on a
+   *  named volume — a new container re-mounts both, so no install/edit is lost across the recreate. */
+  private async execWithRecovery(prefix: string[], command: string, opts: { signal?: AbortSignal; onData?: (s: string) => void } = {}): Promise<ExecResult> {
     const id = await this.ensure()
-    return dockerRun(['exec', '-w', '/workspace', id, 'sh', '-c', command], { signal: opts.signal, onData: opts.onData })
+    const res = await dockerRun([...prefix, id, 'sh', '-c', command], opts)
+    if (!this.isStaleContainer(res)) return res
+    this.containerId = undefined // force ensure() to start a new container next call
+    this.starting = undefined
+    this.hostPort = undefined
+    const freshId = await this.ensure()
+    return dockerRun([...prefix, freshId, 'sh', '-c', command], opts)
+  }
+
+  async exec(command: string, opts: ExecOptions = {}): Promise<ExecResult> {
+    return this.execWithRecovery(['exec', '-w', '/workspace'], command, { signal: opts.signal, onData: opts.onData })
   }
 
   /** Start a long-lived command in the background (e.g. the dev server) and return immediately. */
   async execDetached(command: string): Promise<void> {
-    const id = await this.ensure()
-    await dockerRun(['exec', '-d', '-w', '/workspace', id, 'sh', '-c', command])
+    await this.execWithRecovery(['exec', '-d', '-w', '/workspace'], command)
   }
 
   /** The host port mapped to the container's dev port (ensures the container is up). For live preview. */

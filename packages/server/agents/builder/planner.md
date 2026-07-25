@@ -41,7 +41,7 @@ Do exactly this:
    - **Views** — one line each (name — purpose), in build order.
    - **Design** — 1–2 lines: `preset: <name from src/themes/, premium unless the user's adjectives say
      otherwise>` + each view as a BLOCK composition + imagery source. Example:
-     `preset: premium; catalog: NavBar+PageHeader+MediaCard grid; detail: Section; imagery: ArtImage(product), photoFor('food') hero`
+     `preset: premium; catalog: NavBar+PageHeader+MediaCard grid; detail: Section; imagery: <Photo web> per catalog item (distinct real photos — NOT photoFor, which repeats), photoFor() single hero`
    - **Data model** — TypeScript interface signatures only (names + fields); one line: where seed lives.
    - **Components** — `src/components/X.tsx` — one clause each; note the blocks/kit pieces it composes. NEVER plan a component a block already provides (header→NavBar, product card→MediaCard, empty→EmptyState).
    - **State** — one line each: what's in App, what's in a hook, what persists.
