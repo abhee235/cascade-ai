@@ -27,7 +27,11 @@ import { OpenAIChatProvider, toOpenAITools } from './openaiChat'
 // enough that a spiral hits the wall in minutes not half an hour. Overridden by an explicit maxOutputTokens
 // (ADR-067 per-model config / detection). The agent loop treats the resulting max_tokens stop as "continue,
 // act now" — not a finished answer — so a clipped legit turn recovers rather than ending the build.
-const DEFAULT_MAX_OUTPUT_TOKENS = 16384
+// Defined in openaiChat.ts (the base adapter) and re-exported here: BOTH wire paths — native /api/chat and
+// OpenAI-compatible /v1 — must apply the same ceiling, or a model behaves differently depending on which
+// endpoint it was reached through (measured 2026-07-25: a remote Ollama on /v1 had no cap and truncated turns).
+export { DEFAULT_MAX_OUTPUT_TOKENS } from './openaiChat'
+import { DEFAULT_MAX_OUTPUT_TOKENS } from './openaiChat'
 
 /** When a local model's Modelfile pins NO `num_ctx`, Ollama silently runs it at its ~4k/8k default and the
  *  compactor guards that tiny window — the gpt-oss:20b trap: arch supports 131k, the Modelfile pins nothing,

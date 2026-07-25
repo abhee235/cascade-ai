@@ -23,7 +23,7 @@ import { DockerSandbox, dockerAvailable, sweepSandboxContainers } from './docker
 import { ensureVisualEditConfig, listTemplates } from './templates.js'
 import { ChatStore } from './chatStore.js'
 import { listModels, modelInfo, providerCatalog, setProviderKey } from './modelCaps.js'
-import { activeModel, addEnabledModel, enabledModels, initModelRegistry, modelContextFor, modelParamsFor, removeEnabledModel, setActiveModel, setModelContext, setModelParams } from './modelRegistry.js'
+import { activeModel, addEnabledModel, enabledModelsForClient, initModelRegistry, modelContextFor, modelEndpointFor, modelParamsFor, removeEnabledModel, setActiveModel, setModelContext, setModelParams } from './modelRegistry.js'
 import { addMcpServer, enabledMcpServers, initMcpRegistry, mcpServers as mcpServersConfig, removeMcpServer, toggleMcpServer } from './mcpRegistry.js'
 import { sdkConnect } from '@cascade/core'
 import type { McpServerInfo } from '@cascade/app-protocol'
@@ -221,7 +221,7 @@ export function handleConnection(
   sendTurnActivity() // a build may already be running from an earlier connection — say so up front, not on the next change
   send({ type: 'templates', templates: listTemplates() })
   // ADR-067: the curated model list for the picker (always includes the running model).
-  const sendEnabledModels = () => send({ type: 'enabledModels', models: enabledModels({ provider: manager.currentProvider, model: manager.currentModel }) })
+  const sendEnabledModels = () => send({ type: 'enabledModels', models: enabledModelsForClient({ provider: manager.currentProvider, model: manager.currentModel }) })
   sendEnabledModels()
   // ADR-071: the configured MCP servers + live connection status. env VALUES (API keys) are NEVER sent — only
   // their key NAMES — so a key set from the panel stays server-side, exactly like a model API key.
@@ -371,7 +371,7 @@ export function handleConnection(
           break
         }
         case 'addModel': {
-          addEnabledModel(msg.provider, msg.model, msg.contextWindow)
+          addEnabledModel(msg.provider, msg.model, msg.contextWindow, msg.baseUrl, msg.apiKey, msg.api) // ADR-076/077: baseUrl+key+wire-protocol for a custom endpoint
           sendEnabledModels()
           break
         }
@@ -424,9 +424,13 @@ export function handleConnection(
           break
         }
         case 'setModel': {
-          // ADR-067: apply the target model's saved params (window/output/sampling) on activation.
-          await manager.setModelConfig({ provider: msg.provider, model: msg.model, baseUrl: msg.baseUrl, ...modelParamsFor(msg.provider, msg.model) })
-          setActiveModel({ provider: msg.provider, model: msg.model, baseUrl: msg.baseUrl }) // survive a restart (see boot restore)
+          // ADR-067/076: apply the target model's saved params (window/output/sampling) + its custom endpoint on
+          // activation. baseUrl/apiKey come from the server-side registry (modelEndpointFor), NOT the client — the
+          // browser never holds the key, and `setModel` needs only provider+model. msg.baseUrl is a fallback for
+          // an ad-hoc switch that didn't go through addModel.
+          const ep = modelEndpointFor(msg.provider, msg.model)
+          await manager.setModelConfig({ provider: msg.provider, model: msg.model, baseUrl: ep.baseUrl ?? msg.baseUrl, apiKey: ep.apiKey, api: ep.api, ...modelParamsFor(msg.provider, msg.model) })
+          setActiveModel({ provider: msg.provider, model: msg.model, baseUrl: ep.baseUrl ?? msg.baseUrl }) // survive a restart (see boot restore)
           // The switch dropped every cached session; rebuild the active one and reload its history so the
           // conversation continues under the new provider. Then re-announce the active model.
           if (activeId) {
@@ -795,7 +799,9 @@ async function start() {
   // a chosen local Ollama model reverted to a paid hosted one, with only a small label to give it away).
   const restored = activeModel()
   if (restored) {
-    await manager.setModelConfig({ provider: restored.provider, model: restored.model, baseUrl: restored.baseUrl, ...modelParamsFor(restored.provider, restored.model) })
+    // ADR-076: re-apply the saved custom endpoint's key too, so a remote GPU keeps working across restarts.
+    const ep = modelEndpointFor(restored.provider, restored.model)
+    await manager.setModelConfig({ provider: restored.provider, model: restored.model, baseUrl: ep.baseUrl ?? restored.baseUrl, apiKey: ep.apiKey, api: ep.api, ...modelParamsFor(restored.provider, restored.model) })
   }
   // M5.2: a stable preview origin. The proxy forwards http://localhost:PREVIEW_PORT → the active container,
   // and the dev server's HMR connects on PREVIEW_PORT too (same origin as the iframe).

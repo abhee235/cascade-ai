@@ -19,6 +19,17 @@ export interface EnabledModel {
   topP?: number
   /** Top-K sampling (Ollama-native). Omit ⇒ backend default. */
   topK?: number
+  /** ADR-076: custom OpenAI-compatible endpoint (rented vLLM/SGLang/remote Ollama). When set, the switch sends
+   *  this baseUrl to createProvider instead of the provider-id default — so a remote GPU is configured entirely
+   *  from the Model Manager, no .env edit or restart. */
+  baseUrl?: string
+  /** ADR-076: the endpoint's API key. Persisted here (gitignored models.json) so it survives a restart, but
+   *  STRIPPED before the list is sent to the client — the browser only ever learns `hasKey`, never the value. */
+  apiKey?: string
+  /** ADR-077: the endpoint's WIRE PROTOCOL. 'ollama' forces the native /api/chat adapter (which reports
+   *  prefill/decode/load timings); omitted ⇒ the generic OpenAI-compatible /v1 path. Only meaningful with a
+   *  custom baseUrl — the built-in provider ids already pick their own adapter. */
+  api?: 'openai' | 'ollama'
 }
 
 /** The editable per-model params (everything on EnabledModel except its identity). */
@@ -105,12 +116,29 @@ export function enabledModels(ensure?: { provider: string; model: string }): Ena
   return list
 }
 
-export function addEnabledModel(provider: string, model: string, contextWindow?: number): void {
+export function addEnabledModel(provider: string, model: string, contextWindow?: number, baseUrl?: string, apiKey?: string, api?: 'openai' | 'ollama'): void {
   const list = load()
   const existing = list.find((m) => same(m, provider, model))
-  if (existing) existing.contextWindow = contextWindow ?? existing.contextWindow
-  else list.push({ provider, model, contextWindow })
+  if (existing) {
+    existing.contextWindow = contextWindow ?? existing.contextWindow
+    if (baseUrl !== undefined) existing.baseUrl = baseUrl.trim() || undefined
+    if (apiKey) existing.apiKey = apiKey.trim() || undefined // OMITTED key ⇒ keep the stored one (edit-friendly)
+    if (api !== undefined) existing.api = api
+  } else list.push({ provider, model, contextWindow, baseUrl: baseUrl?.trim() || undefined, apiKey: apiKey?.trim() || undefined, api })
   save()
+}
+
+/** ADR-076/077: the custom endpoint (baseUrl + apiKey + wire protocol) saved for a model, applied on
+ *  activation. Empty for the built-in providers (their endpoint derives from the id). Server-side only —
+ *  the apiKey is never serialized to the client. */
+export function modelEndpointFor(provider: string, model: string): { baseUrl?: string; apiKey?: string; api?: 'openai' | 'ollama' } {
+  const m = load().find((e) => same(e, provider, model))
+  return { baseUrl: m?.baseUrl, apiKey: m?.apiKey, api: m?.api }
+}
+
+/** ADR-076: the enabled list as sent to the CLIENT — the apiKey value is dropped and replaced by `hasKey`. */
+export function enabledModelsForClient(ensure?: { provider: string; model: string }): (Omit<EnabledModel, 'apiKey'> & { hasKey?: boolean })[] {
+  return enabledModels(ensure).map(({ apiKey, ...rest }) => ({ ...rest, hasKey: !!apiKey }))
 }
 
 export function removeEnabledModel(provider: string, model: string): void {

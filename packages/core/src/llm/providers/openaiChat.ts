@@ -16,6 +16,11 @@ import { extractProseToolCalls } from '../proseToolCalls'
 import { parseToolArgs } from '../jsonRepair'
 import { asBlocks, textOf } from './shared'
 
+/** Output cap sent when the caller pins none. Generous enough never to clip a real answer, but present so a
+ *  BACKEND's own (sometimes tiny) default can't silently truncate turns — see body(). Shared with the native
+ *  Ollama adapter so the two wire paths can't drift apart. */
+export const DEFAULT_MAX_OUTPUT_TOKENS = 16384
+
 interface OpenAIToolCall {
   id: string
   type: 'function'
@@ -124,7 +129,13 @@ export class OpenAIChatProvider implements ModelProvider {
 
   protected headers(): Record<string, string> {
     const h: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (this.cfg.apiKey) h.Authorization = `Bearer ${this.cfg.apiKey}`
+    // A key that ALREADY names its auth scheme is passed through verbatim. Measured (2026-07-24): a rented
+    // Vast.ai GPU fronts its Ollama port with Caddy demanding HTTP **Basic** auth (`WWW-Authenticate: Basic`),
+    // while everything else in this family wants Bearer — and Node's fetch REFUSES a `user:pass@host` URL
+    // ("Request cannot be constructed from a URL that includes credentials"), so the URL trick can't work.
+    // Accepting a full scheme here lets any such endpoint be configured with no protocol/UI change:
+    // paste `Basic <base64(user:pass)>` as the API key. A bare key still gets the usual `Bearer` prefix.
+    if (this.cfg.apiKey) h.Authorization = /^(Basic|Bearer) /i.test(this.cfg.apiKey) ? this.cfg.apiKey : `Bearer ${this.cfg.apiKey}`
     return h
   }
 
@@ -140,12 +151,19 @@ export class OpenAIChatProvider implements ModelProvider {
     if (stream) body.stream_options = { include_usage: true }
     if (req.temperature !== undefined) body.temperature = req.temperature // eval determinism (temperature 0)
     if (req.topP !== undefined) body.top_p = req.topP // ADR-067 per-model sampling (top_k has no OpenAI-chat equivalent)
-    if (req.maxOutputTokens !== undefined) {
+    {
       // ADR-038: output cap on the wire. OpenAI RENAMED the field: current models (gpt-5.x, o-series)
       // reject `max_tokens` with HTTP 400 and require `max_completion_tokens` (older gpt-4o accepts both).
       // Every other compat backend (Ollama, NVIDIA NIM, OpenRouter, Groq…) only knows `max_tokens`.
-      if (this.cfg.id === 'openai') body.max_completion_tokens = req.maxOutputTokens
-      else body.max_tokens = req.maxOutputTokens
+      //
+      // ALWAYS send a cap (never omit max_tokens). Omitting it hands the decision to
+      // the BACKEND's default, which can be tiny: measured 2026-07-25 against a rented Ollama `/v1` endpoint
+      // configured without maxOutputTokens — turns came back `finish_reason:"length"` after as few as 38 output
+      // tokens, so the loop's max-tokens gate fired 6× and the build stalled mid-answer with empty responses.
+      // An explicit generous default makes truncation mean what it says instead of tracking a backend quirk.
+      const cap = req.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS
+      if (this.cfg.id === 'openai') body.max_completion_tokens = cap
+      else body.max_tokens = cap
     }
     // Learned (see forceReasoningNone): this model needs reasoning OFF to accept tools on this endpoint.
     if (this.forceReasoningNone.has(req.model)) body.reasoning_effort = 'none'

@@ -15,7 +15,7 @@ import type { CompletionRequest, StreamEvent, TokenUsage } from '../provider'
 import { extractProseToolCalls } from '../proseToolCalls'
 import { parseToolArgs } from '../jsonRepair'
 import { asBlocks, textOf } from './shared'
-import { OpenAIChatProvider } from './openaiChat'
+import { DEFAULT_MAX_OUTPUT_TOKENS, OpenAIChatProvider } from './openaiChat'
 
 type ResponsesItem = Record<string, unknown>
 
@@ -75,7 +75,9 @@ export class OpenAIResponsesProvider extends OpenAIChatProvider {
     const tools = toResponsesTools(req.tools)
     if (tools) body.tools = tools
     // Responses counts reasoning against the output budget, so max_output_tokens caps reasoning+answer together.
-    if (req.maxOutputTokens !== undefined) body.max_output_tokens = req.maxOutputTokens
+    // ALWAYS capped (wire-parity rule, see wireParity.test.ts): an omitted cap delegates to the backend's
+    // default — the exact silent-truncation class that stalled builds on the chat path (ADR-077).
+    body.max_output_tokens = req.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS
     // NOTE: no `temperature` — reasoning models reject anything but the default (eval determinism is moot here).
     const res = await fetch(`${this.cfg.baseUrl}/v1/responses`, { method: 'POST', headers: this.headers(), body: JSON.stringify(body), signal })
     if (!res.ok || !res.body) {

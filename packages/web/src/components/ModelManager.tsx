@@ -315,6 +315,8 @@ function ProviderKey(props: { provider: string; configured: boolean }) {
 }
 
 // ── Add-model flow: pick a provider, then type a model id OR browse its catalog ──
+const CUSTOM_PROVIDER = '__custom__' // ADR-076: dropdown sentinel for "Custom endpoint…" (a remote OpenAI-compatible GPU)
+
 function AddModelPane(props: { onAdded: (provider: string, model: string) => void }) {
 	const serverInfo = useStore((s) => s.serverInfo)
 	const models = useStore((s) => s.models)
@@ -328,10 +330,20 @@ function AddModelPane(props: { onAdded: (provider: string, model: string) => voi
 	const [provider, setProvider] = useState(providers[0]?.id ?? 'ollama')
 	const [modelId, setModelId] = useState('')
 	const [query, setQuery] = useState('')
+	// ADR-076: "Custom endpoint" is just another entry in the Provider dropdown. Selecting it reveals the endpoint
+	// fields (label / URL / key / context) and reuses the same Model id + Add below — no separate form, no catalog.
+	const isCustom = provider === CUSTOM_PROVIDER
+	const [cLabel, setCLabel] = useState('')
+	const [cUrl, setCUrl] = useState('')
+	const [cKey, setCKey] = useState('')
+	const [cCtx, setCCtx] = useState('')
+	// ADR-077: which wire protocol the box speaks. A remote OLLAMA reached over the generic /v1 path reports
+	// only token counts — picking "Ollama" routes to its native /api/chat so prefill/decode timings come back.
+	const [cApi, setCApi] = useState<'openai' | 'ollama'>('openai')
 
 	useEffect(() => {
-		if (provider && !models[provider]) listModels(provider)
-	}, [provider, models, listModels])
+		if (!isCustom && provider && !models[provider]) listModels(provider)
+	}, [provider, models, listModels, isCustom])
 	const loading = !models[provider]
 	const catalog = (models[provider] ?? []).filter((m) => m.toLowerCase().includes(query.toLowerCase()))
 	useEffect(() => {
@@ -340,8 +352,16 @@ function AddModelPane(props: { onAdded: (provider: string, model: string) => voi
 	}, [provider, models, query])
 	const isEnabled = (m: string) => enabled.some((e) => e.provider === provider && e.model === m)
 
+	const canAdd = !!modelId.trim() && (!isCustom || (!!cLabel.trim() && !!cUrl.trim()))
 	const add = (m: string) => {
 		if (!m.trim()) return
+		if (isCustom) {
+			if (!cLabel.trim() || !cUrl.trim()) return
+			addModel(cLabel.trim(), m.trim(), cCtx.trim() ? Number(cCtx) : undefined, cUrl.trim(), cKey.trim() || undefined, cApi)
+			props.onAdded(cLabel.trim(), m.trim())
+			setCKey('') // don't retain the secret after it's sent
+			return
+		}
 		addModel(provider, m.trim(), modelInfo[`${provider}/${m.trim()}`]?.contextWindow)
 		props.onAdded(provider, m.trim())
 	}
@@ -353,7 +373,8 @@ function AddModelPane(props: { onAdded: (provider: string, model: string) => voi
 				<p className="mt-0.5 text-sm text-muted-foreground">Type any model id manually, or pick one from the provider's catalog below.</p>
 			</div>
 
-			{/* provider + manual id */}
+			{/* provider + manual id. "Custom endpoint" is just another provider choice (ADR-076) — selecting it
+			    reveals the endpoint fields and reuses this same Model id + Add. */}
 			<div className="flex flex-col gap-3">
 				<label className="flex flex-col gap-1.5">
 					<span className="text-sm font-medium">Provider</span>
@@ -364,20 +385,50 @@ function AddModelPane(props: { onAdded: (provider: string, model: string) => voi
 								{p.id === 'ollama' ? ' (local)' : p.configured ? ' (key set)' : ' (no key)'}
 							</option>
 						))}
+						<option value={CUSTOM_PROVIDER}>Custom endpoint (remote GPU)…</option>
 					</select>
 				</label>
+
+				{isCustom && (
+					<div className="grid grid-cols-2 gap-3 bg-muted/30">
+						<p className="col-span-2 text-sm text-muted-foreground">A rented vLLM/SGLang box or remote Ollama. Give it a distinct label (not <code>openai</code>); the key is stored on the server, never shown again.</p>
+						<label className="flex flex-col gap-1"><span className="text-xs font-medium text-muted-foreground">Provider label</span><input value={cLabel} onChange={(e) => setCLabel(e.target.value)} placeholder="vastai" className="rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:ring-1 focus:ring-ring" /></label>
+						<label className="flex flex-col gap-1"><span className="text-xs font-medium text-muted-foreground">Context window</span><input value={cCtx} onChange={(e) => setCCtx(e.target.value.replace(/[^0-9]/g, ''))} placeholder="32768" className="rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:ring-1 focus:ring-ring" /></label>
+						<label className="col-span-2 flex flex-col gap-1">
+							<span className="text-xs font-medium text-muted-foreground">Server type</span>
+							<select value={cApi} onChange={(e) => setCApi(e.target.value as 'openai' | 'ollama')} className="rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:ring-1 focus:ring-ring">
+								<option value="openai">OpenAI-compatible (vLLM, SGLang, LM Studio…)</option>
+								<option value="ollama">Ollama — native API (adds speed metrics)</option>
+							</select>
+							<span className="text-xs text-muted-foreground">Pick Ollama for a remote Ollama box: its native API reports prefill/decode timings, which the generic /v1 path omits.</span>
+							{/* Wire-parity guard (see core/test/wireParity.test.ts): the OpenAI-compat protocol has NO field for a
+							    context window, so this setting only sizes Cascade's planning — the server keeps its own window and
+							    silently truncates past it (measured: a remote box at 32k squeezed generation to zero while Cascade
+							    planned against 131k). Surface that at setup time, not seven turns into a build. */}
+							{cApi === 'openai' && cCtx.trim() && (
+								<span className="rounded-md bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-600 dark:text-amber-400">
+									⚠ The OpenAI-compatible API cannot enforce a context window — your server must itself be configured for ≥ {Number(cCtx).toLocaleString()} tokens, or it will silently truncate. (For a remote Ollama, pick Server type: Ollama — its native API enforces the window per request.)
+								</span>
+							)}
+						</label>
+						<label className="col-span-2 flex flex-col gap-1"><span className="text-xs font-medium text-muted-foreground">Endpoint URL</span><input value={cUrl} onChange={(e) => setCUrl(e.target.value)} placeholder="http://localhost:8000/v1" className="rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:ring-1 focus:ring-ring" /></label>
+						<label className="col-span-2 flex flex-col gap-1"><span className="text-xs font-medium text-muted-foreground">API key</span><input type="password" value={cKey} onChange={(e) => setCKey(e.target.value)} placeholder="sk-…" className="rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:ring-1 focus:ring-ring" /></label>
+					</div>
+				)}
+
 				<label className="flex flex-col gap-1.5">
 					<span className="text-sm font-medium">Model id</span>
 					<div className="flex items-center gap-2">
-						<input value={modelId} onChange={(e) => setModelId(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add(modelId)} placeholder="e.g. gpt-4.1-mini, qwen36-agentic, llama3.3" className="flex-1 rounded-md border border-border bg-background px-2.5 py-2 text-sm outline-none focus:ring-1 focus:ring-ring" />
-						<button type="button" disabled={!modelId.trim()} onClick={() => add(modelId)} className={cn('rounded-md px-4 py-2 text-sm font-medium', modelId.trim() ? 'bg-primary text-primary-foreground hover:bg-primary/90' : 'bg-muted text-muted-foreground')}>
+						<input value={modelId} onChange={(e) => setModelId(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add(modelId)} placeholder={isCustom ? 'Qwen/Qwen3.6-27B' : 'e.g. gpt-4.1-mini, qwen36-agentic, llama3.3'} className="flex-1 rounded-md border border-border bg-background px-2.5 py-2 text-sm outline-none focus:ring-1 focus:ring-ring" />
+						<button type="button" disabled={!canAdd} onClick={() => add(modelId)} className={cn('rounded-md px-4 py-2 text-sm font-medium', canAdd ? 'bg-primary text-primary-foreground hover:bg-primary/90' : 'bg-muted text-muted-foreground')}>
 							Add
 						</button>
 					</div>
 				</label>
 			</div>
 
-			{/* catalog browse — fills remaining height so its own scroll never resizes the pane */}
+			{/* catalog browse — hidden for a custom endpoint (no browsable catalog). Fills remaining height so its own scroll never resizes the pane. */}
+			{!isCustom && (
 			<section className="flex min-h-0 flex-1 flex-col">
 				<div className="mb-2 flex items-center justify-between">
 					<h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{provider} catalog</h3>
@@ -417,6 +468,7 @@ function AddModelPane(props: { onAdded: (provider: string, model: string) => voi
 					)}
 				</div>
 			</section>
+			)}
 		</div>
 	)
 }

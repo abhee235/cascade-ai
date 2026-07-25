@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from 'vitest'
-import { OpenAIChatProvider, toOpenAIMessages } from '../src/llm/providers/openaiChat'
+import { DEFAULT_MAX_OUTPUT_TOKENS, OpenAIChatProvider, toOpenAIMessages } from '../src/llm/providers/openaiChat'
 import { OpenAIResponsesProvider, toResponsesInput } from '../src/llm/providers/openaiResponses'
 import type { StreamEvent } from '../src/llm/provider'
 import type { Message } from '../src/protocol'
@@ -71,6 +71,17 @@ describe('hosted wire format', () => {
       expect(sentBody(fetchMock)[field], id).toBe(512)
       expect(sentBody(fetchMock)[absent], id).toBeUndefined()
     }
+  })
+
+  it('ALWAYS sends an output cap — an unpinned maxOutputTokens falls back to the default, never omitted', async () => {
+    // Measured 2026-07-25: a rented Ollama `/v1` endpoint added without maxOutputTokens got NO max_tokens, so
+    // the BACKEND's own default applied and returned finish_reason:"length" after as few as 38 output tokens —
+    // the loop's max-tokens gate fired 6× and the build stalled with empty turns. Never omit it.
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] })))
+    vi.stubGlobal('fetch', fetchMock)
+    const p = new OpenAIChatProvider({ id: 'vast', baseUrl: 'http://x' })
+    await p.complete({ messages: [{ role: 'user', content: 'hi' }], model: 'm' }) // no maxOutputTokens
+    expect(sentBody(fetchMock).max_tokens).toBe(DEFAULT_MAX_OUTPUT_TOKENS)
   })
 
   it('streams reasoning_content deltas (NVIDIA/DeepSeek convention) as thinking', async () => {

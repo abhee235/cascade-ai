@@ -65,6 +65,13 @@ interface UiState {
   // the prompt) vs "Thinking…"/streaming once output actually starts.
   stepStartedAt: number | null
   sawTokens: boolean
+  /** When the last thinking/text token arrived (this step). With `sawTokens`, lets the UI tell live reasoning
+   *  ("Thinking…") from the silent tool-args generation that follows it ("Writing changes…" — nothing streams). */
+  lastTokenAt: number | null
+  /** When the CURRENT thinking burst began. The live "Thinking… Ns" timer must count from here — counting from
+   *  stepStartedAt folded the whole prefill into it ("Thinking… 18s" on 8s of actual thought, corrected only
+   *  when the committed card rendered). */
+  thinkStartedAt: number | null
   // multiple chats per project (M11), server-persisted; the list + which is active
   chats: ChatMeta[]
   activeChatId: string | null
@@ -114,7 +121,7 @@ interface UiState {
   fetchModelInfo: (provider: string, model: string) => void // ADR-067: ask for a model's capabilities+context (→ `modelInfo`)
   setApiKey: (provider: string, key: string) => void // ADR-067: set a provider's key on the running server
   setModelManagerOpen: (open: boolean) => void // ADR-067: open/close the model-management dialog
-  addModel: (provider: string, model: string, contextWindow?: number) => void // ADR-067: add a model to the curated list
+  addModel: (provider: string, model: string, contextWindow?: number, baseUrl?: string, apiKey?: string, api?: 'openai' | 'ollama') => void // ADR-067/076/077: add a model; baseUrl+apiKey+api configure a custom endpoint (remote GPU); api picks the wire protocol
   removeModel: (provider: string, model: string) => void // ADR-067: remove a model from the curated list
   setModelContext: (provider: string, model: string, contextWindow?: number) => void // ADR-067: set a model's context override
   setModelParams: (provider: string, model: string, params: Omit<EnabledModelInfo, 'provider' | 'model'>) => void // ADR-067: merge editable per-model params
@@ -196,6 +203,33 @@ export const useStore = create<UiState>((set, get) => {
   // When the model's current thinking burst started (per model step), so a finished message can show
   // "Thought for Ns". Reset after each message and at the start of a turn.
   let thinkStart: number | null = null
+  // …and when its LAST thinking token arrived. The gap between thinkLast and the message commit is the model
+  // silently generating tool-call arguments (nothing streams on that phase — a 118-line Write is ~20s of
+  // dead air), which must NOT be billed as thinking: "Thought for 24s" on 93 chars of reasoning was the tell.
+  let thinkLast: number | null = null
+
+  // Commit whatever is still in the live streaming buffer as a real transcript item. Used when a turn ends
+  // WITHOUT a final `message` (user hit Stop, server abort): previously this content was silently discarded
+  // (`streaming: null`), so an interrupted thinking block just vanished from the transcript.
+  // Quiet-debounce for the early thought-commit: armed on every thinking token, so it can only ever fire
+  // 2.5s after the TRULY last one — on the same task queue as the event handlers. (The first version lived in
+  // a ChatPanel useEffect: render-clock timing raced the event clock and could chop a resumed burst mid-stream,
+  // landing the thought card in the wrong place. Single writer, single clock — the store.)
+  let quietTimer: ReturnType<typeof setTimeout> | null = null
+  const clearQuiet = (): void => {
+    if (quietTimer !== null) { clearTimeout(quietTimer); quietTimer = null }
+  }
+
+  const commitStreaming = (): void => {
+    clearQuiet()
+    flushStream()
+    const st = get().streaming
+    if (!st || (!st.text && !st.thinking)) return
+    const thoughtMs = st.thinking && thinkStart !== null ? Math.max(0, (thinkLast ?? Date.now()) - thinkStart) : undefined
+    thinkStart = null
+    thinkLast = null
+    set((s) => ({ items: [...s.items, { kind: 'assistant', text: st.text, thinking: st.thinking || undefined, thoughtMs }], streaming: null, thinkStartedAt: null }))
+  }
 
   // M7: per-terminal-session xterm.write sinks (imperative — kept out of React state). TerminalPane registers
   // its writer here on mount; `terminalData` events route to the matching session.
@@ -274,6 +308,8 @@ export const useStore = create<UiState>((set, get) => {
     turnActivity: null,
     stepStartedAt: null,
     sawTokens: false,
+    lastTokenAt: null,
+    thinkStartedAt: null,
     chats: [],
     activeChatId: null,
     fileTree: [],
@@ -324,6 +360,7 @@ export const useStore = create<UiState>((set, get) => {
 
       switch (e.type) {
         case 'turnActivity': // ADR-068: the single active turn changed (running / awaiting / done)
+          if (!e.phase) commitStreaming() // turn ended (Stop/abort/done) → keep any in-flight thinking as a real item, don't vanish it
           set({
             turnActivity: e.phase ? { projectId: e.projectId, chatId: e.chatId, phase: e.phase } : null,
             busy: !!e.phase, // block-until-free: any active turn locks the composer everywhere
@@ -334,7 +371,8 @@ export const useStore = create<UiState>((set, get) => {
           // Core's explicit step-start (the dead-air contract): prefill begins NOW — restart the
           // per-step timer and drop back to "reading input" until the first delta. NEVER touches
           // `busy`: only turnDone may declare the work finished.
-          set({ stepStartedAt: Date.now(), sawTokens: false, recovering: null })
+          clearQuiet()
+          set({ stepStartedAt: Date.now(), sawTokens: false, recovering: null, thinkStartedAt: null })
           break
         case 'status':
           set({ status: e.text, recovering: null })
@@ -343,13 +381,26 @@ export const useStore = create<UiState>((set, get) => {
           flushStream()
           set({ streaming: null, status: null, recovering: { attempt: e.attempt, reason: e.reason } })
           break
-        case 'thinking_delta':
-          if (thinkStart === null) thinkStart = Date.now()
-          set({ recovering: null, sawTokens: true }) // first token → we're past prompt eval, now generating
+        case 'thinking_delta': {
+          const firstOfBurst = thinkStart === null
+          if (firstOfBurst) thinkStart = Date.now()
+          thinkLast = Date.now()
+          // first token → past prompt eval, now generating; the burst start feeds the live timer (NOT stepStartedAt — that includes prefill)
+          set({ recovering: null, sawTokens: true, lastTokenAt: thinkLast, ...(firstOfBurst ? { thinkStartedAt: thinkStart } : {}) })
           thinkOpt.push(e.thinking)
+          // Re-armed on EVERY token: fires only 2.5s after the last one → commit the thought block right when
+          // thinking ends (not 10-20s later when `message` finally arrives after silent tool-args generation).
+          clearQuiet()
+          quietTimer = setTimeout(() => {
+            quietTimer = null
+            const st = get().streaming
+            if (st?.thinking && !st.text) commitStreaming()
+          }, 2500)
           break
+        }
         case 'text_delta':
-          set({ recovering: null, sawTokens: true })
+          clearQuiet() // prose answer streaming — the step will end with `message`; never early-commit mid-answer
+          set({ recovering: null, sawTokens: true, lastTokenAt: Date.now() })
           textOpt.push(e.text)
           break
         case 'toolStart':
@@ -380,18 +431,25 @@ export const useStore = create<UiState>((set, get) => {
         case 'message': {
           flushStream()
           const { text, thinking } = extractMessage(e.message)
-          const thoughtMs = thinking && thinkStart !== null ? Date.now() - thinkStart : undefined
+          // Clock stops at the LAST thinking token: everything after it was silent tool-args generation.
+          const thoughtMs = thinking && thinkStart !== null ? Math.max(0, (thinkLast ?? Date.now()) - thinkStart) : undefined
           thinkStart = null
+          thinkLast = null
+          // (thinkStartedAt cleared in the set()s below via streaming reset paths; explicit here for safety)
+          set({ thinkStartedAt: null })
           set((s) => {
             // Merge consecutive assistant steps (no tool/user turn between) into one flowing block, so a
             // multi-step turn reads as a single response — like v0. A tool card between steps breaks the run.
             const last = s.items[s.items.length - 1]
             if (last && last.kind === 'assistant') {
+              // Early-commit dedup: if this message's thinking was already committed verbatim when the stream
+              // went quiet (commitStreamingEarly), keep the committed copy — don't append it a second time.
+              const dupThinking = !!last.thinking && !!thinking && last.thinking.trim() === thinking.trim()
               const merged: Item = {
                 kind: 'assistant',
                 text: last.text + (last.text && text ? '\n\n' : '') + text,
-                thinking: [last.thinking, thinking].filter(Boolean).join('\n\n') || undefined,
-                thoughtMs: (last.thoughtMs ?? 0) + (thoughtMs ?? 0) || undefined,
+                thinking: dupThinking ? last.thinking : [last.thinking, thinking].filter(Boolean).join('\n\n') || undefined,
+                thoughtMs: dupThinking ? last.thoughtMs : (last.thoughtMs ?? 0) + (thoughtMs ?? 0) || undefined,
               }
               return { items: [...s.items.slice(0, -1), merged], streaming: null, stepStartedAt: Date.now(), sawTokens: false }
             }
@@ -415,9 +473,10 @@ export const useStore = create<UiState>((set, get) => {
           set({ context: { used: e.used, window: e.window, auto: e.auto } })
           break
         case 'turnDone':
-          flushStream()
+          commitStreaming() // an aborted turn's in-flight thinking/text becomes a transcript item (was: discarded)
           thinkStart = null
-          set({ status: null, recovering: null, busy: false, stepStartedAt: null, sawTokens: false })
+          thinkLast = null
+          set({ status: null, recovering: null, busy: false, stepStartedAt: null, sawTokens: false, thinkStartedAt: null })
           break
         // ── app/builder events (BuilderEvent) ──
         case 'serverInfo':
@@ -573,7 +632,7 @@ export const useStore = create<UiState>((set, get) => {
     fetchModelInfo: (provider, model) => get().send({ type: 'modelInfo', provider, model }),
     setApiKey: (provider, key) => get().send({ type: 'setApiKey', provider, key }),
     setModelManagerOpen: (open) => set({ modelManagerOpen: open }),
-    addModel: (provider, model, contextWindow) => get().send({ type: 'addModel', provider, model, contextWindow }),
+    addModel: (provider, model, contextWindow, baseUrl, apiKey, api) => get().send({ type: 'addModel', provider, model, contextWindow, baseUrl, apiKey, api }),
     listMcpServers: () => get().send({ type: 'listMcpServers' }),
     addMcpServer: (name, url, opts) => get().send({ type: 'addMcpServer', name, url, apiKey: opts?.apiKey, apiKeyIn: opts?.apiKeyIn, headers: opts?.headers }),
     removeMcpServer: (name) => get().send({ type: 'removeMcpServer', name }),

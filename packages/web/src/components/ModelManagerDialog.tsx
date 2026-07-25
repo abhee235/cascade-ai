@@ -10,7 +10,7 @@ export function ModelManagerDialog() {
 	const setOpen = useStore((s) => s.setModelManagerOpen)
 	return (
 		<Dialog open={open} onOpenChange={setOpen}>
-			<DialogContent className="flex h-[86vh] w-[92vw] max-w-5xl flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
+			<DialogContent className="flex h-[86vh] w-[92vw] max-w-5xl flex-col gap-0 overflow-hidden p-10 sm:p-6 sm:max-w-5xl">
 				<DialogHeader className="border-b border-border px-6 py-4">
 					<DialogTitle>Models &amp; providers</DialogTitle>
 					<DialogDescription>Curate the models in your picker, add models manually or from a provider's catalog, and tune each model's context window, output cap, and sampling. Changes apply live — no restart.</DialogDescription>

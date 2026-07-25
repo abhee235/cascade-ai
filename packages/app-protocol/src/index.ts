@@ -67,6 +67,13 @@ export interface EnabledModelInfo {
   temperature?: number
   topP?: number
   topK?: number
+  /** ADR-076: custom OpenAI-compatible endpoint (e.g. a rented vLLM/SGLang box). The CLEAN URL — safe to show. */
+  baseUrl?: string
+  /** ADR-076: whether an API key is stored server-side for this endpoint. The key VALUE is never sent to the client. */
+  hasKey?: boolean
+  /** ADR-077: wire protocol for a custom endpoint — 'ollama' uses the native /api/chat (reports prefill/decode
+   *  timings); omitted ⇒ the OpenAI-compatible /v1 path. */
+  api?: 'openai' | 'ollama'
 }
 
 /** ADR-071: one configured connector (MCP server) + its live status, as shown in the Connectors UI. `url` is
@@ -119,7 +126,7 @@ export type BuilderCommand =
   | { type: 'listModels'; provider: string; baseUrl?: string } // ADR-067: ask for a provider's model list (→ `models`)
   | { type: 'modelInfo'; provider: string; model: string; baseUrl?: string } // ADR-067: ask for one model's capabilities+context (→ `modelInfo`)
   | { type: 'setApiKey'; provider: string; key: string } // ADR-067: set a provider's API key for the running server (→ fresh serverInfo)
-  | { type: 'addModel'; provider: string; model: string; contextWindow?: number } // ADR-067: add a model to the curated picker list
+  | { type: 'addModel'; provider: string; model: string; contextWindow?: number; baseUrl?: string; apiKey?: string; api?: 'openai' | 'ollama' } // ADR-067/076/077: add a model; baseUrl+apiKey+api configure a custom endpoint (key stored server-side, never echoed; api picks the wire protocol)
   | { type: 'removeModel'; provider: string; model: string } // ADR-067: remove a model from the curated list
   | { type: 'setModelContext'; provider: string; model: string; contextWindow?: number } // ADR-067: set a model's context-window override
   | { type: 'setModelParams'; provider: string; model: string; params: Omit<EnabledModelInfo, 'provider' | 'model'> } // ADR-067: merge editable per-model params (context/output/sampling)

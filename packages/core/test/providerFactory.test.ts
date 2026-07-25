@@ -4,6 +4,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createProvider } from '../src/llm/factory'
+import { OllamaProvider } from '../src/llm/providers/ollama'
 
 /** Stub fetch, run one complete(), and return the {url, headers} the provider actually sent. */
 async function captureRequest(provider: ReturnType<typeof createProvider>) {
@@ -59,5 +60,23 @@ describe('createProvider routing', () => {
     const { url, headers } = await captureRequest(createProvider({ provider: 'ollama', model: 'm' }))
     expect(url).toBe('http://127.0.0.1:11434/v1/chat/completions')
     expect(headers.Authorization).toBeUndefined()
+  })
+
+  // ADR-077: a REMOTE Ollama is reached under a custom id ("vast"), so the id-based routing would hand it to
+  // the generic /v1 adapter — which on Ollama reports token counts but NO prefill/decode timings (measured
+  // 2026-07-25: every KV-cache/throughput observable read 0 on a rented box). `api` forces the native adapter.
+  it('api:"ollama" routes a CUSTOM-id endpoint to the native adapter (keeps its baseUrl)', () => {
+    const p = createProvider({ provider: 'vast', model: 'qwen3.6:27b', baseUrl: 'http://1.2.3.4:45286/v1', api: 'ollama' })
+    expect(p).toBeInstanceOf(OllamaProvider)
+    expect(p.id).toBe('vast') // the label is preserved for logs/traces
+  })
+
+  it('api:"openai" forces the generic adapter even for the ollama id (escape hatch)', () => {
+    expect(createProvider({ provider: 'ollama', model: 'm', api: 'openai' })).not.toBeInstanceOf(OllamaProvider)
+  })
+
+  it('without `api`, routing is unchanged (id decides)', () => {
+    expect(createProvider({ provider: 'ollama', model: 'm' })).toBeInstanceOf(OllamaProvider)
+    expect(createProvider({ provider: 'vast', model: 'm', baseUrl: 'http://1.2.3.4:8000' })).not.toBeInstanceOf(OllamaProvider)
   })
 })
