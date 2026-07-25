@@ -21,16 +21,10 @@ afterAll(() => {
   rmSync(root, { recursive: true, force: true })
 })
 
+// ADR-075: the Lsp tool is NAVIGATION-ONLY. Diagnostics are no longer a pull op here — type errors are pushed
+// after each edit by postEditCheck (a weak model won't pull them, and a pull check that disagrees with the push
+// is pure thrash). So these tests cover definition/references/hover only.
 describe('Lsp tool — real TS semantics via the in-process LanguageService (ADR-041)', () => {
-  it('diagnostics: reports the exact type error (semantic, not text)', async () => {
-    const r = await LspTool.call({ op: 'diagnostics', file: 'src/app.ts' }, ctx())
-    expect(r.content).toMatch(/2:7: error TS2322/)
-    expect(r.content).toMatch(/not assignable/)
-  })
-  it('diagnostics: a clean file → no errors', async () => {
-    const r = await LspTool.call({ op: 'diagnostics', file: 'src/util.ts' }, ctx())
-    expect(r.content).toMatch(/No type errors/)
-  })
   it('definition: jumps ACROSS files to the real declaration', async () => {
     const r = await LspTool.call({ op: 'definition', file: 'src/app.ts', line: 3, column: 1 }, ctx())
     expect(r.content).toMatch(/util\.ts:1:/)
@@ -48,7 +42,7 @@ describe('Lsp tool — real TS semantics via the in-process LanguageService (ADR
     expect(r.isError).toBe(true)
   })
   it('a path outside the project is rejected (ADR-033 confinement)', async () => {
-    const r = await LspTool.call({ op: 'diagnostics', file: '../escape.ts' }, ctx())
+    const r = await LspTool.call({ op: 'definition', file: '../escape.ts', line: 1, column: 1 }, ctx())
     expect(r.isError).toBe(true)
   })
 })

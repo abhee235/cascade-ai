@@ -87,9 +87,21 @@ export async function postEditDiagnostics(files: string[], opts: { cwd: string; 
 			// Bounded: a wedged container must not stall the loop — on timeout we skip silently.
 			const ctrl = new AbortController()
 			const timer = setTimeout(() => ctrl.abort(), CHECK_TIMEOUT_MS)
+			let output: string | undefined
 			try {
-				const { output } = await opts.sandbox.exec('node_modules/.bin/tsc --noEmit --pretty false 2>&1', { signal: ctrl.signal })
-				if (/not found|No such file/i.test(output) && !output.includes('): error TS')) {
+				;({ output } = await opts.sandbox.exec('node_modules/.bin/tsc --noEmit --pretty false 2>&1', { signal: ctrl.signal }))
+			} finally {
+				clearTimeout(timer)
+			}
+			// A dead/absent container (Docker/WSL restart, system sleep — it's `--rm`, so it's REMOVED when it
+			// stops) makes `docker exec` print "No such container" instead of tsc output. That parses to ZERO
+			// diagnostics — a FALSE "clean" — while real type errors sit unseen; measured: a whole build churned
+			// types/imports blind because the sandbox was gone and every check reported nothing wrong. Trust the
+			// sandbox result ONLY when it's an actual tsc run; otherwise fall through to the in-process
+			// LanguageService below, so the model still gets diagnostics without any working shell.
+			const sandboxUnusable = output === undefined || /No such container|Cannot connect to the Docker daemon|Error response from daemon|is not running|^docker:/im.test(output)
+			if (!sandboxUnusable) {
+				if (/not found|No such file/i.test(output!) && !output!.includes('): error TS')) {
 					return {
 						missingDeps: true,
 						text:
@@ -100,17 +112,16 @@ export async function postEditDiagnostics(files: string[], opts: { cwd: string; 
 					}
 				}
 				const diags: Diag[] = []
-				for (const raw of output.split('\n')) {
+				for (const raw of output!.split('\n')) {
 					const m = TSC_LINE.exec(raw.trim())
 					if (m) diags.push({ file: m[1].replace(/^\.\//, ''), line: Number(m[2]), message: m[4] })
 				}
 				const text = format(files, diags)
 				return text ? { text } : undefined
-			} finally {
-				clearTimeout(timer)
 			}
+			// sandbox unusable → fall through to the host LanguageService fallback below.
 		}
-		// Host fallback (extension / no sandbox): LanguageService, edited files only — cheap and local.
+		// Host fallback (no sandbox, OR the sandbox container was gone): LanguageService, edited files only — cheap and local.
 		const diags: Diag[] = []
 		for (const f of files) {
 			for (const d of tsDiagnostics(opts.cwd, f)) {

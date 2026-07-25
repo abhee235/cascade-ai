@@ -2,7 +2,7 @@
 // (the in-IDE pattern: pushed, never pulled). Measured motivation: the Lsp tool's diagnostics op was
 // called ZERO times in 90+ Simmer turns while two multi-turn error hunts were pure type errors.
 
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -92,6 +92,50 @@ describe('postEditDiagnostics — sandbox tsc routing', () => {
 			},
 		})
 		expect(note).toBeUndefined()
+	})
+})
+
+// ADR-075 — THE eval for this fix. The build that motivated it churned types blind: the sandbox container had
+// vanished (Docker/WSL restart on sleep), `docker exec` returned "No such container", the check parsed ZERO
+// diagnostics and reported a FALSE clean, so real type errors were never pushed and the model guessed forever.
+// This proves a dead container now falls through to the in-process LanguageService and pushes the REAL error.
+describe('postEditDiagnostics — dead-container fallback to the in-process LanguageService (ADR-075)', () => {
+	const withProject = async (fn: (cwd: string) => Promise<void>) => {
+		const cwd = mkdtempSync(join(tmpdir(), 'posteditfallback-'))
+		mkdirSync(join(cwd, 'src'))
+		writeFileSync(join(cwd, 'tsconfig.json'), JSON.stringify({ compilerOptions: { strict: true, target: 'ES2022', module: 'ESNext', moduleResolution: 'Bundler' } }))
+		writeFileSync(join(cwd, 'src/data.ts'), 'export const n: number = "not a number"\n') // TS2322: string not assignable to number
+		try {
+			await fn(cwd)
+		} finally {
+			rmSync(cwd, { recursive: true, force: true })
+		}
+	}
+
+	it('a DEAD container ("No such container") pushes the REAL type error instead of a false clean', async () => {
+		await withProject(async (cwd) => {
+			const deadContainer = { exec: async () => ({ output: 'Error response from daemon: No such container: fd15c3b0b53f [exit 1]', exitCode: 1 }) }
+			const note = await postEditDiagnostics(['src/data.ts'], { cwd, sandbox: deadContainer })
+			expect(note).toBeDefined() // NOT the old false-clean
+			expect(note?.text).toMatch(/TS2322|not assignable|number/i) // the actual diagnostic reached the model
+		})
+	})
+
+	it('a daemon-down error also falls back (not just a missing container)', async () => {
+		await withProject(async (cwd) => {
+			const daemonDown = { exec: async () => ({ output: 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock.', exitCode: 1 }) }
+			const note = await postEditDiagnostics(['src/data.ts'], { cwd, sandbox: daemonDown })
+			expect(note?.text).toMatch(/TS2322|not assignable|number/i)
+		})
+	})
+
+	it('a WORKING sandbox is still trusted (fallback does not hijack a real clean tsc run)', async () => {
+		await withProject(async (cwd) => {
+			// real tsc output, clean → must stay clean, NOT fall through to the LanguageService (which WOULD flag the seeded error)
+			const liveClean = { exec: async () => ({ output: '', exitCode: 0 }) }
+			const note = await postEditDiagnostics(['src/data.ts'], { cwd, sandbox: liveClean })
+			expect(note).toBeUndefined()
+		})
 	})
 })
 

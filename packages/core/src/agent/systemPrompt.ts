@@ -81,6 +81,7 @@ function doingTasks(tier: WindowTier): string {
 function usingTools(): string {
   return `# Using your tools
 - Prefer the dedicated tool over Bash so the user can follow your work: **Read** (not cat/head/tail), **Edit** (not sed/awk), **Write** (not echo/heredoc), **Glob** (not find/ls), **Grep** (not grep/rg). Reserve **Bash** for real shell work — build, test, git, install.
+- To FIND where something is defined — a type, a function, an imported name, a colour/style token, a value — use **Grep** (search the text) or **Lsp** (jump to its definition / references / hover type). Do NOT re-read whole files hunting for it. If a change you made doesn't take effect (a colour still looks wrong, a type error persists after an edit), the source is elsewhere: Grep for the token or symbol and fix it at its DEFINITION, not the place that uses it.
 - Plan any 3+-step task with **TodoWrite**: mark exactly one task in_progress before you start it, and completed the moment it's done (don't batch completions).
 - Call independent read-only tools in parallel; run dependent or file-writing calls one at a time.`
 }
