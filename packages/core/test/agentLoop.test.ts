@@ -97,3 +97,59 @@ describe('runAgentLoop', () => {
     }
   })
 })
+
+// ── Loop breakers (2026-07-25) ────────────────────────────────────────────────────────────────────────
+// Measured failure: a submit ran 114 turns re-reading files and re-stating the same diagnosis. The existing
+// read-loop/re-edit breakers are per-FILE so they never crossed. These cover the two detectors added for it —
+// and, most importantly, the FALSE-POSITIVE guard: a repeated verify command after an edit is productive.
+describe('runAgentLoop — identical-call breaker', () => {
+  const nudges = (events: ActivityEvent[]) =>
+    events.filter((e: any) => e.type === 'status' && /Repeated .* call/.test(e.text ?? '')).length
+
+  it('nudges when the SAME tool runs with IDENTICAL args 3× with nothing changed in between', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'cascade-'))
+    try {
+      await writeFile(join(dir, 'a.txt'), 'hello')
+      const read = () => [toolUse('c', 'Read', { file_path: 'a.txt' }), done('tool_use')] as any
+      const provider = createFakeProvider([read(), read(), read(), [textDelta('done'), done('end_turn')]])
+      const events = await collect(runAgentLoop([{ role: 'user', content: 'go' }], deps(provider, dir)))
+      expect(nudges(events)).toBe(1) // fires exactly once, on the 3rd identical call
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('does NOT nudge when a mutation happens in between — re-running a check after an edit is productive', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'cascade-'))
+    try {
+      await writeFile(join(dir, 'a.txt'), 'hello')
+      const read = () => [toolUse('c', 'Read', { file_path: 'a.txt' }), done('tool_use')] as any
+      const write = (n: number) => [toolUse(`w${n}`, 'Write', { file_path: `w${n}.txt`, content: 'x' }), done('tool_use')] as any
+      // read → write → read → write → read : the identical reads never accumulate, because each Write resets.
+      const provider = createFakeProvider([read(), write(1), read(), write(2), read(), [textDelta('done'), done('end_turn')]])
+      const events = await collect(runAgentLoop([{ role: 'user', content: 'go' }], deps(provider, dir)))
+      expect(nudges(events)).toBe(0)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('does NOT nudge when the same tool is called with DIFFERENT args', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'cascade-'))
+    try {
+      await writeFile(join(dir, 'a.txt'), 'a')
+      await writeFile(join(dir, 'b.txt'), 'b')
+      await writeFile(join(dir, 'c.txt'), 'c')
+      const provider = createFakeProvider([
+        [toolUse('1', 'Read', { file_path: 'a.txt' }), done('tool_use')],
+        [toolUse('2', 'Read', { file_path: 'b.txt' }), done('tool_use')],
+        [toolUse('3', 'Read', { file_path: 'c.txt' }), done('tool_use')],
+        [textDelta('done'), done('end_turn')],
+      ])
+      const events = await collect(runAgentLoop([{ role: 'user', content: 'go' }], deps(provider, dir)))
+      expect(nudges(events)).toBe(0)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})

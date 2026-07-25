@@ -96,6 +96,10 @@ export const BUILDER_BEHAVIOR = [
   // A dev server never exits, so a foreground `npm run dev` blocks the turn until Bash times out — the model
   // has no port-readiness signal on that path (unlike the Browser tool, which starts dev detached + polls).
   '- To confirm the app RUNS, use the Browser tool (op:"open") if you have it — it starts the dev server the right way (detached, port-polled) and shows you the live app. NEVER run `npm run dev` in the foreground with Bash: it does not return, it only stalls your turn.',
+  // Measured (2026-07-25): the model ran `pkill -f "vite"; pkill -f "node"` to "get a clean slate" — that
+  // SIGTERMs the whole container (three Bash calls came back exit 143), including the dev server it was about
+  // to inspect and its own tooling. It then spent ~100 turns debugging the empty page it had just caused.
+  '- NEVER run broad process kills — no `pkill -f node`, no `pkill -f vite`, no `killall`. They terminate your own tooling and the dev server (exit 143), so the app you then inspect is empty and you will chase a bug you created. The harness already reaps stale processes before each run; you never need to.',
   '- Be thorough over brief: prefer many correct file edits over a short summary. Ignore any instinct to keep the response short.',
   // Measured (shop-iterate-1): one ever-growing App.tsx crossed the read cap by round 2 — every later edit
   // fought windowed reads and stale views. Many small files keep every read/edit cheap and precise.
@@ -196,7 +200,7 @@ export class ProjectManager {
   /** ADR-067: the RUNTIME provider/model config. Starts from opts (env), mutated by setModelConfig so the
    *  UI can switch provider+model WITHOUT restarting the server. New sessions read this; switching
    *  invalidates cached sessions (history lives in chatStore and reloads on re-open). */
-  private active!: { provider: string; model: string; baseUrl?: string; apiKey?: string; contextWindow?: number; maxOutputTokens?: number; temperature?: number; topP?: number; topK?: number }
+  private active!: { provider: string; model: string; baseUrl?: string; apiKey?: string; api?: 'openai' | 'ollama'; contextWindow?: number; maxOutputTokens?: number; temperature?: number; topP?: number; topK?: number }
   /** Provider construction, injectable so tests can assert which model a session was actually built from. */
   private readonly makeProvider: typeof createProvider
 
@@ -213,7 +217,7 @@ export class ProjectManager {
       ((dir, sandbox, extraInstructions) =>
         createSession({
           cwd: dir,
-          provider: this.makeProvider({ provider: this.active.provider, model: this.active.model, baseUrl: this.active.baseUrl, apiKey: this.active.apiKey }),
+          provider: this.makeProvider({ provider: this.active.provider, model: this.active.model, baseUrl: this.active.baseUrl, apiKey: this.active.apiKey, api: this.active.api }),
           model: this.active.model,
           // Hosted providers have no live window probe — honor an explicit override so the compactor sizes
           // against the NIM endpoint's real window instead of the model→map guess (or the 8k default).
@@ -226,7 +230,12 @@ export class ProjectManager {
           // The autonomous builder has no synchronous user to answer mid-build — drop AskUserQuestion so a
           // weak model can't stall the turn asking permission / for the next step (it must ACT — see
           // BUILDER_BEHAVIOR). Clarifying questions belong to the planner stage, which keeps the tool.
-          excludeTools: ['AskUserQuestion'],
+          // ADR-075: drop Lsp too. Its diagnostics half is redundant (type errors are PUSHED after each edit),
+          // and its navigation half went UNUSED across the whole build corpus (0 calls) while adding a
+          // false-negative hazard — a weak model that fumbles the required line/column gets "no references
+          // found" and can act destructively on that false empty. Push diagnostics, don't offer pull-navigation
+          // to the weak builder. The LanguageService ENGINE stays (the harness uses it for the diagnostics push).
+          excludeTools: ['AskUserQuestion', 'Lsp'],
           // Hardware knob (2026-07-23): earlier compaction keeps decode fast on offloaded setups — see
           // ProjectManagerOptions.compactRatio for the measured rationale.
           compactRatio: this.opts.compactRatio,
@@ -236,10 +245,13 @@ export class ProjectManager {
           mcpServers: this.opts.mcpServers?.(),
           mcpConnect: this.opts.mcpConnect,
           tracer: tracerFor(dir, 'builder'), // product forensics (walkthrough lesson: no trace = no diagnosis)
-          // LATENCY (walkthrough forensics): curation adds hidden model calls (dead air) AND its memory
-          // writes mutate the system prompt mid-session — a prefix-cache breaker. A builder project gains
-          // little from cross-session memory; the seconds matter more.
-          autoMemory: false,
+          // ADR-074: ON. The original OFF had two reasons — (a) curation adds hidden model calls (dead air),
+          // (b) recall mutated the system-prompt PREFIX, breaking the KV cache. (b) is now gone: dynamic recall
+          // appends surfaced facts at the message TAIL (dynamicRecall.ts), leaving the cached prefix intact, and
+          // curation writes to archival never touch the frozen system prompt. That leaves only (a) — curation
+          // fires just at compaction (bounded dead air), a trade the user chose: a durable fact recalled once
+          // beats re-diagnosing it across a dozen fix-loop turns (the measured Velocarta CTA-colour loop).
+          autoMemory: true,
           sandbox, // 13.3: command tools run in the project's sandbox when present
           // Sandboxed ⇒ auto-allow (the builder is contained; it shouldn't prompt for every command/edit).
           // Without a sandbox we keep the default gate (the host is not isolated).
@@ -307,7 +319,7 @@ export class ProjectManager {
           // a local Ollama model, the plan stage still ran its whole pass on CASCADE_MODEL — Ollama's request
           // log shows zero calls for the 56s the planner spent making 10 model calls to the hosted default.
           // Silent, billed, and invisible except in a per-message label.
-          provider: this.makeProvider({ provider: this.active.provider, model: this.active.model, baseUrl: this.active.baseUrl, apiKey: this.active.apiKey }),
+          provider: this.makeProvider({ provider: this.active.provider, model: this.active.model, baseUrl: this.active.baseUrl, apiKey: this.active.apiKey, api: this.active.api }),
           model: this.active.model,
           // The window matters as much as the model: unset, a local backend silently front-truncates the
           // prompt (ADR-038) — so the planner must size against the same window the builder uses.
@@ -385,10 +397,10 @@ export class ProjectManager {
 
   /** ADR-067: switch the active provider/model at RUNTIME (no server restart). Invalidates every cached
    *  session so the next open() rebuilds with the new provider; conversation history lives in chatStore and
-   *  reloads on re-open. The API key is resolved from the ENVIRONMENT for the chosen provider (the client
-   *  never sends keys). On a provider change, the old baseUrl/contextWindow/apiKey are dropped (they were
-   *  provider-specific) unless explicitly supplied. */
-  async setModelConfig(cfg: { provider?: string; model?: string; baseUrl?: string; contextWindow?: number; maxOutputTokens?: number; temperature?: number; topP?: number; topK?: number }): Promise<void> {
+   *  reloads on re-open. The API key is resolved from the ENVIRONMENT for the built-in providers, OR passed
+   *  explicitly (ADR-076: a custom endpoint's key, held server-side in the registry, never by the client).
+   *  On a provider change, the old baseUrl/contextWindow/apiKey are dropped (provider-specific) unless supplied. */
+  async setModelConfig(cfg: { provider?: string; model?: string; baseUrl?: string; apiKey?: string; api?: 'openai' | 'ollama'; contextWindow?: number; maxOutputTokens?: number; temperature?: number; topP?: number; topK?: number }): Promise<void> {
     const providerChanged = !!cfg.provider && cfg.provider !== this.active.provider
     const modelChanged = !!cfg.model && cfg.model !== this.active.model
     // Per-model params (window/output/sampling) are dropped when the TARGET model changes — the caller
@@ -399,7 +411,8 @@ export class ProjectManager {
       provider: cfg.provider ?? this.active.provider,
       model: cfg.model ?? this.active.model,
       baseUrl: cfg.baseUrl ?? (providerChanged ? undefined : this.active.baseUrl),
-      apiKey: providerChanged ? undefined : this.active.apiKey,
+      apiKey: cfg.apiKey ?? (providerChanged ? undefined : this.active.apiKey), // ADR-076: honor an explicitly-supplied key (custom endpoint), not just the carried-over one
+      api: cfg.api ?? (providerChanged ? undefined : this.active.api), // ADR-077: the endpoint's wire protocol travels with it
       contextWindow: cfg.contextWindow ?? (dropModelParams ? undefined : this.active.contextWindow),
       maxOutputTokens: cfg.maxOutputTokens ?? (dropModelParams ? undefined : this.active.maxOutputTokens),
       temperature: cfg.temperature ?? (dropModelParams ? undefined : this.active.temperature),

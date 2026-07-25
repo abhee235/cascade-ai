@@ -31,6 +31,11 @@ export type TraceEvent =
   | { t: 'degraded_retry'; turn: number } // empty terminal response (no text/thinking/tools) — backend recycled once and the turn re-asked
   | { t: 'todo_gate'; turn: number; open: number } // terminal answer refused once: the model's own todo list still has `open` unfinished items
   | { t: 'read_loop'; turn: number; path: string } // ADR-058: same file read N times with no Write/Edit to it — act-now reminder injected
+  | { t: 're_edit'; turn: number; path: string } // ADR-072: same file edited N times — likely thrashing a source that lives elsewhere; Grep/Lsp nudge injected
+  | { t: 'narration_loop'; turn: number } // same opening prose N turns running — re-deciding, not progressing; change-strategy reminder injected
+  | { t: 'repeat_call'; turn: number; tool: string } // same tool + IDENTICAL args N times with no mutation between — act-on-the-result reminder injected
+  | { t: 'tool_cap'; turn: number; calls: number } // per-submit tool-call budget crossed — converge-or-report reminder injected (once per submit)
+  | { t: 'recall'; turn: number; count: number } // ADR-074: dynamic archival recall surfaced `count` fresh durable facts at the tail (cache-safe append)
   | { t: 'stalled_verify'; turn: number } // ADR-058: edits pending unverified for N consecutive turns mid-flight — run-the-check reminder injected
   | { t: 'post_edit_check'; turn: number; files: number } // ADR-059: harness type check after a mutating turn found errors — pushed to the model
   | { t: 'slow_prefill'; turn: number; waitedMs: number } // ADR-061: pre-first-token silence with a LIVE backend — a big cold prefill, waited out instead of killed

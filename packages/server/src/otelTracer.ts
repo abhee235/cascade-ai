@@ -292,6 +292,12 @@ export class OtelTracer implements Tracer {
 			case 'read_loop':
 				this.mark('nudge: read loop', at, { 'cascade.turn': e.turn, 'cascade.path': e.path })
 				break
+			case 're_edit':
+				this.mark('nudge: re-edit → use Grep/Lsp', at, { 'cascade.turn': e.turn, 'cascade.path': e.path })
+				break
+			case 'recall':
+				this.mark('recall: memories surfaced', at, { 'cascade.turn': e.turn, 'cascade.count': e.count })
+				break
 			case 'stalled_verify':
 				this.mark('nudge: stalled verify', at, { 'cascade.turn': e.turn })
 				break

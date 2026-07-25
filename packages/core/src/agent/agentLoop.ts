@@ -24,6 +24,8 @@ import { buildTodoReminder, shouldRemindTodos, type TodoReminderConfig } from '.
 import { buildStalledVerifyNudge, buildVerifyNudge, foldVerifyState, isVerifyCommand, STALLED_VERIFY_TURNS } from './verifyGate'
 import { buildDelegateNudgeText, foldReadPressure, READ_PRESSURE_FRACTION, sawSubagent } from './delegateNudge'
 import { buildReadLoopNudge, foldReadLoop } from './readLoopGate'
+import { buildReEditNudge, foldReEdit } from './reEditGate'
+import { recallForTurn, recentFocusText } from './dynamicRecall'
 import { editedTsFiles, postEditDiagnostics } from './postEditCheck'
 import { agentChildInstructions } from './agentDefs'
 
@@ -214,10 +216,40 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   // file. Only meaningful in loops that CAN mutate — an explore subagent's registry has no Write/Edit, so
   // repeated reads there are its job, not a loop.
   const readLoopCounts = new Map<string, number>()
+  // ADR-072 re-edit breaker: per-file successful-edit counters — sustained churn on one file → Grep/Lsp nudge.
+  const reEditCounts = new Map<string, number>()
+  // ADR-074 dynamic recall: facts already surfaced at the tail this session (dedup) + the last query embedded
+  // (throttle — an unchanged focus mid-tool-loop must not re-embed for an identical result).
+  const surfacedMemories = new Set<string>()
+  let lastRecallQuery: string | undefined
   const canMutate = registry.list().some((t) => t.name === 'Write' || t.name === 'Edit' || t.name === 'MultiEdit')
   // ADR-058 mid-flight check nudge: consecutive turns spent in unverified-edit state; one reminder per submit.
   let stalledVerifyTurns = 0
   let stalledVerifyNudged = false
+  // REPEAT-NARRATION BREAKER (measured 2026-07-25): a session spent turns 100-103 re-emitting the SAME opening
+  // — "The snapshot is completely empty … Let me systematically debug:" — each time calling one read. The
+  // read-loop and re-edit breakers both missed it: the files differed, so no single counter crossed. The tell
+  // is the PROSE repeating, which means the model is re-deciding instead of progressing. Same detect→inject
+  // idiom, keyed on a normalized prefix of the turn's text.
+  let lastNarration = ''
+  let narrationRepeats = 0
+  const NARRATION_REPEAT_LIMIT = 2 // 2 repeats = 3 identical openings; below that a restated plan is normal
+  // IDENTICAL-CALL BREAKER. The signal the loop-detection literature calls definitional ("three identical
+  // tool calls in one task IS a loop") and the one Cascade lacked — our read-loop/re-edit breakers are
+  // per-FILE, so a model alternating across different files (or re-running the same non-file call) slipped
+  // through. Hashing name+args with a threshold of 5 is common; we use 3 because we NUDGE rather than halt,
+  // so firing early is cheap. Crucially the counters RESET on a mutation: `npm run build` repeated after each
+  // edit is PRODUCTIVE (same args, different result) and must never trip — the same reset rule the read-loop
+  // breaker already uses.
+  const repeatCallCounts = new Map<string, number>()
+  const REPEAT_CALL_LIMIT = 3
+  const MUTATING = new Set(['Write', 'Edit', 'MultiEdit'])
+  // PER-SUBMIT TOOL-CALL CAP (100 calls). Measured 2026-07-25: one submit ran
+  // 114 turns thrashing a bug it never solved. maxTurns (500) is a runaway backstop, not a work budget — this
+  // is the "you are not converging, report what's blocking" checkpoint. Nudge once, never a hard stop.
+  let toolCallsThisSubmit = 0
+  let toolCapNudged = false
+  const TOOL_CALL_CAP = 100
   const recycle = deps.provider.recover ? () => deps.provider.recover!(deps.model) : undefined
   // Wire-overhead calibration (ADR-052 companion): real prompt tokens minus our message estimate, EMA'd.
   // Undefined until the backend reports usage once; the static chars/4 overhead estimate is the floor.
@@ -263,6 +295,25 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     if (deps.todoStore) {
       const items = deps.todoStore.get(depth)
       if (shouldRemindTodos(messages, items, deps.todoReminder)) appendReminder(messages, buildTodoReminder(items))
+    }
+
+    // ADR-074 dynamic recall: re-search archival on the CURRENT focus and surface any strong fact learned earlier
+    // this build that the model no longer has in raw context (compacted away). Appended at the TAIL so the KV
+    // cache prefix is untouched; deduped + throttled so it never spams or re-embeds an unchanged focus. Best-effort
+    // — a retrieval failure must never derail the turn. Placed AFTER compaction so it reflects the trimmed state
+    // and the injection survives (isn't summarised away on this turn).
+    if (deps.archival) {
+      try {
+        const focus = recentFocusText(messages)
+        const reminder = await recallForTurn({ archival: deps.archival, query: focus, surfaced: surfacedMemories, lastQuery: lastRecallQuery })
+        lastRecallQuery = focus || lastRecallQuery
+        if (reminder) {
+          appendReminder(messages, reminder)
+          tracer.event({ t: 'recall', turn, count: (reminder.match(/\n- /g) ?? []).length })
+        }
+      } catch {
+        /* recall is advisory; never fail a turn over it */
+      }
     }
 
     yield { type: 'status', text: 'Thinking…' }
@@ -460,12 +511,19 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     }
     if (toolUses.some((tu) => isVerifyCommand(tu, deps.check?.command))) verifiedEver = true // ADR-051: a declared check demands ≥1 real run
 
-    // ADR-059 POST-EDIT DIAGNOSTICS: the harness type-checks after a mutating turn and PUSHES the errors —
-    // the model never has to know the Lsp tool exists (measured: it never called it). Sandbox-routed like
-    // the Lsp tool; injects only when there are real errors; the verify gate still owns "done means built".
-    if (deps.postEditCheck ?? Boolean(deps.sandbox)) {
+    // ADR-059/075 POST-EDIT DIAGNOSTICS: the harness type-checks after a mutating turn and PUSHES the errors —
+    // the model never has to know the Lsp tool exists (measured: it never called it). Default ON regardless of
+    // sandbox: with a sandbox it runs `tsc` inside it (accurate); WITHOUT one (or if the container has died) it
+    // falls back to the in-process LanguageService (postEditCheck.ts). Gating this on Boolean(sandbox) — the old
+    // default — silently disabled the push for host-mode + the Tier-3 bench, the exact channel that stops the
+    // blind type-churn. injects only when there are real errors; the verify gate still owns "done means built".
+    if (deps.postEditCheck ?? true) {
       const edited = editedTsFiles(toolUses, results)
       if (edited.length > 0) {
+        // Surface the harness type-check as ACTIVITY: it can take ~20s (tsc in the sandbox), and without a
+        // status the UI looks idle between the edit and the next turn. A clean check emits nothing below, so
+        // this is the only signal the agent is validating.
+        yield { type: 'status', text: `Checking types in ${edited.length} edited file${edited.length === 1 ? '' : 's'}…` }
         const note = await postEditDiagnostics(edited, { cwd: deps.cwd, sandbox: deps.sandbox })
         // The missing-deps directive latches once per submit (installing takes turns — repeating the
         // reminder on every further write while npm runs would just be noise).
@@ -488,6 +546,70 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
         appendReminder(messages, buildReadLoopNudge(path))
         yield { type: 'status', text: 'Read loop detected — asking the agent to edit instead of re-reading…' }
       }
+      // ADR-072 RE-EDIT BREAKER: the Nth successful edit of the same file — the model is likely thrashing a
+      // file whose problem-source lives elsewhere (a theme token, a shared type). Point it at Grep/Lsp.
+      for (const path of foldReEdit(reEditCounts, toolUses, results)) {
+        tracer.event({ t: 're_edit', turn, path })
+        appendReminder(messages, buildReEditNudge(path))
+        yield { type: 'status', text: 'Repeated edits to one file — suggesting Grep/Lsp to find the source…' }
+      }
+      // IDENTICAL-CALL BREAKER: the same tool with the SAME arguments N times, with no mutation in between.
+      // A mutation makes a repeat productive (re-running the check after a fix), so it clears the counters.
+      if (toolUses.some((tu) => MUTATING.has(tu.name))) repeatCallCounts.clear()
+      for (const tu of toolUses) {
+        let key: string
+        try {
+          key = `${tu.name}:${JSON.stringify(tu.input ?? {})}`
+        } catch {
+          continue // unserializable args (cycles) — can't key it, skip rather than throw mid-turn
+        }
+        const n = (repeatCallCounts.get(key) ?? 0) + 1
+        repeatCallCounts.set(key, n)
+        if (n === REPEAT_CALL_LIMIT) {
+          tracer.event({ t: 'repeat_call', turn, tool: tu.name })
+          appendReminder(
+            messages,
+            `<system-reminder>You have now called ${tu.name} with IDENTICAL arguments ${n} times without changing anything in between. The same call returns the same result — this cannot make progress. Either act on the result you already have (edit a file, run the declared check and read its real error), or take a genuinely different step. Do not repeat that call. Do not reply to this note.</system-reminder>`,
+          )
+          yield { type: 'status', text: `Repeated ${tu.name} call — asking the agent to act on the result…` }
+        }
+      }
+
+      // REPEAT-NARRATION BREAKER: the same opening prose N turns running ⇒ re-deciding, not progressing.
+      // Compared on a normalized prefix (case/whitespace-insensitive) so trivial rewording still counts as a
+      // repeat. Fires once per streak, then resets — a model that breaks out and later genuinely repeats can
+      // trip it again.
+      const narration = text.trim().replace(/\s+/g, ' ').toLowerCase().slice(0, 120)
+      if (narration.length >= 40 && narration === lastNarration) {
+        narrationRepeats++
+        if (narrationRepeats >= NARRATION_REPEAT_LIMIT) {
+          narrationRepeats = 0
+          lastNarration = ''
+          tracer.event({ t: 'narration_loop', turn })
+          appendReminder(
+            messages,
+            '<system-reminder>You have now opened several turns with the SAME sentence — you are re-stating the diagnosis instead of progressing, and the repeated reads are not adding information. STOP restating it. Change strategy: take a DIFFERENT concrete action than the ones already tried (e.g. run the check/build and read its actual error text, grep for the symbol, or make the smallest edit that would prove or disprove your theory). Do not reply to this note.</system-reminder>',
+          )
+          yield { type: 'status', text: 'Repeating itself — asking the agent to change strategy…' }
+        }
+      } else {
+        lastNarration = narration
+        narrationRepeats = 0
+      }
+    }
+
+    // PER-SUBMIT TOOL-CALL CAP: past the budget the model is thrashing, not converging. Fires ONCE per submit
+    // and only nudges — a legitimately huge build must still be able to finish, so this asks for convergence
+    // (or an honest "here's what's blocking") rather than cutting the turn off.
+    toolCallsThisSubmit += toolUses.length
+    if (!toolCapNudged && depth === 0 && toolCallsThisSubmit >= TOOL_CALL_CAP) {
+      toolCapNudged = true
+      tracer.event({ t: 'tool_cap', turn, calls: toolCallsThisSubmit })
+      appendReminder(
+        messages,
+        `<system-reminder>You have made ${toolCallsThisSubmit} tool calls in this single request — far past the point where an approach that is working has converged. Stop exploring and CONVERGE now: finish the smallest complete version of what remains, run the declared check, and end the turn. If something is genuinely blocking you, say plainly what it is and what you tried instead of continuing to probe. Do not reply to this note.</system-reminder>`,
+      )
+      yield { type: 'status', text: 'Very long run — asking the agent to converge…' }
     }
 
     // ADR-058 MID-FLIGHT CHECK NUDGE: the terminal verify gate never fires while the model keeps calling
