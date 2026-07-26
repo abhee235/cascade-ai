@@ -17,6 +17,8 @@ import {
   SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarRail,
+  SidebarTrigger,
 } from '@/components/ui/sidebar'
 import { Button } from '@/components/ui/button'
 
@@ -32,16 +34,35 @@ export function NavSidebar() {
   const { page, navigate, projects, activeId, openProjectPage, deleteProject, connected, theme, toggleTheme, turnActivity } = useStore()
 
   return (
-    <Sidebar>
+    // collapsible="icon" (not the default "offcanvas", which slid the whole rail off-screen leaving NOTHING
+    // clickable): collapsed keeps an icon rail, so every destination stays one click away without re-opening
+    // the sidebar. Labels are hidden by the primitive's group-data-[collapsible=icon] rules; the `tooltip`
+    // prop on each button supplies the name on hover, which is the only affordance left once text is gone.
+    <Sidebar collapsible="icon">
       <SidebarHeader className="gap-2">
-        <div className="flex items-center gap-2 rounded-md px-2 py-1.5">
-          <div className="flex h-6 w-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
+        {/* Brand: the wordmark hides in rail mode, the mark stays as the visual anchor. */}
+        <div className="flex items-center gap-2 rounded-md px-2 py-1.5 group-data-[collapsible=icon]:px-0 group-data-[collapsible=icon]:justify-center">
+          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
             <Sparkles className="h-3.5 w-3.5" />
           </div>
-          <span className="font-semibold tracking-tight">Cascade</span>
+          <span className="font-semibold tracking-tight group-data-[collapsible=icon]:hidden">Cascade</span>
+          {/* The ONLY toggle outside ProjectPage: without it, collapsing on Home/Projects/Chats/Connectors/
+              Settings left no way back — you had to open a project to find a trigger. Sits inline when
+              expanded, drops under the mark in rail mode. */}
+          <SidebarTrigger className="ml-auto text-muted-foreground group-data-[collapsible=icon]:hidden" />
         </div>
-        <Button className="w-full justify-start gap-2" onClick={() => navigate('home')}>
-          <Plus className="h-4 w-4" /> New project
+        <SidebarTrigger className="hidden self-center text-muted-foreground group-data-[collapsible=icon]:flex" />
+        {/* Rail mode shrinks this to a square +. Deliberately 28px, not the nav buttons' 32px: this is the
+            only SOLID-filled control, and a filled block 8px from both walls reads as colliding with them,
+            while the ghost nav buttons only ever paint their 16px icon inside a transparent 32px hit area.
+            Equal geometry, unequal optics — so the fill is inset to match how the others LOOK. */}
+        <Button
+          className="w-full justify-start gap-2 group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:h-7 group-data-[collapsible=icon]:w-7 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0"
+          title="New project"
+          onClick={() => navigate('home')}
+        >
+          <Plus className="h-4 w-4 shrink-0 group-data-[collapsible=icon]:h-4.5 group-data-[collapsible=icon]:w-4.5" />
+          <span className="group-data-[collapsible=icon]:hidden">New project</span>
         </Button>
       </SidebarHeader>
 
@@ -51,7 +72,7 @@ export function NavSidebar() {
             <SidebarMenu>
               {NAV.map((n) => (
                 <SidebarMenuItem key={n.page}>
-                  <SidebarMenuButton isActive={page === n.page} onClick={() => navigate(n.page)}>
+                  <SidebarMenuButton tooltip={n.label} isActive={page === n.page} onClick={() => navigate(n.page)}>
                     <n.icon />
                     <span>{n.label}</span>
                   </SidebarMenuButton>
@@ -73,8 +94,8 @@ export function NavSidebar() {
                 const act = turnActivity?.projectId === p.id ? turnActivity.phase : undefined
                 return (
                   <SidebarMenuItem key={p.id}>
-                    <SidebarMenuButton isActive={page === 'project' && activeId === p.id} onClick={() => openProjectPage(p.id)}>
-                      <Folder />
+                    <SidebarMenuButton tooltip={p.name} isActive={page === 'project' && activeId === p.id} onClick={() => openProjectPage(p.id)}>
+                      <Folder strokeWidth={1.75} />
                       <span className="truncate">{p.name}</span>
                       {act && (
                         <span
@@ -95,18 +116,30 @@ export function NavSidebar() {
       </SidebarContent>
 
       <SidebarFooter>
-        <div className="flex items-center gap-2 px-1">
-          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-sidebar-accent text-xs font-semibold">L</div>
-          <span className="truncate text-sm">local</span>
+        {/* Rail mode: this row would overflow a ~3rem rail, so it stacks — avatar (carrying the connection
+            dot as a corner badge) above the theme toggle. Nothing is lost, just re-laid-out. */}
+        <div className="flex items-center gap-2 px-1 group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:gap-1 group-data-[collapsible=icon]:px-0">
+          <div className="relative shrink-0">
+            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-sidebar-accent text-xs font-semibold">L</div>
+            {/* Expanded shows the dot inline (below); collapsed pins it to the avatar so status survives. */}
+            <span
+              className={cn(
+                'absolute -right-0.5 -bottom-0.5 hidden h-2 w-2 rounded-full ring-2 ring-sidebar group-data-[collapsible=icon]:block',
+                connected ? 'bg-green-500' : 'bg-muted-foreground/40',
+              )}
+            />
+          </div>
+          <span className="truncate text-sm group-data-[collapsible=icon]:hidden">local</span>
           <span
-            className={cn('ml-auto h-2 w-2 shrink-0 rounded-full', connected ? 'bg-green-500' : 'bg-muted-foreground/40')}
+            className={cn('ml-auto h-2 w-2 shrink-0 rounded-full group-data-[collapsible=icon]:hidden', connected ? 'bg-green-500' : 'bg-muted-foreground/40')}
             title={connected ? 'connected' : 'connecting…'}
           />
-          <Button variant="ghost" size="icon-sm" onClick={toggleTheme} title="Toggle theme">
+          <Button variant="ghost" size="icon-sm" onClick={toggleTheme} title={connected ? 'Toggle theme (connected)' : 'Toggle theme (connecting…)'}>
             {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </Button>
         </div>
       </SidebarFooter>
+      <SidebarRail />
     </Sidebar>
   )
 }

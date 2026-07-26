@@ -11,6 +11,9 @@ function fakePage(over: Partial<PageLike> = {}): PageLike {
 		url: () => 'http://localhost:32779/',
 		locator: () => ({ ariaSnapshot: async () => '- banner "Simmer"\n- heading "My Recipes"\n- button "New Recipe"' }),
 		screenshot: async () => Buffer.from('fake-jpeg-bytes'),
+		evaluate: async () => ({ mode: 'PLAYING', ball: { x: 10, y: 20, vx: 4, vy: -4 } }),
+		clickText: async () => undefined,
+		press: async () => undefined,
 		...over,
 	}
 }
@@ -66,6 +69,78 @@ describe('Browser tool (ADR-060)', () => {
 		const over = await tool.call({ op: 'screenshot' }, ctx)
 		expect(over.isError).toBe(true)
 		expect(over.content).toContain('budget')
+		f.mockRestore()
+	})
+})
+
+describe('Browser probe op (ADR-079 — the game-feedback channel)', () => {
+	it('evaluates the expression and returns JSON runtime state', async () => {
+		const f = stubFetch(true)
+		const tool = createBrowserTool({ sandbox: fakeSandbox(), launch: async () => ({ page: fakePage(), close: async () => {} }) })
+		const ctx = {} as never
+		await tool.call({ op: 'open' }, ctx)
+		const r = await tool.call({ op: 'probe', expr: '__DEBUG__.state()' }, ctx)
+		expect(r.isError).toBeFalsy()
+		expect(r.content).toContain('"mode":"PLAYING"')
+		expect(r.content).toContain('"vx":4') // velocities present — the tuning signal
+		f.mockRestore()
+	})
+
+	it('probe without expr / before open → self-correcting errors', async () => {
+		const f = stubFetch(true)
+		const tool = createBrowserTool({ sandbox: fakeSandbox(), launch: async () => ({ page: fakePage(), close: async () => {} }) })
+		const ctx = {} as never
+		const early = await tool.call({ op: 'probe', expr: '1+1' }, ctx)
+		expect(early.isError).toBe(true) // nothing open yet
+		await tool.call({ op: 'open' }, ctx)
+		const noExpr = await tool.call({ op: 'probe' }, ctx)
+		expect(noExpr.isError).toBe(true)
+		expect(noExpr.content).toContain('expr')
+		f.mockRestore()
+	})
+
+	it('a page-side throw (no __DEBUG__) fails with the contract hint, not a crash', async () => {
+		const f = stubFetch(true)
+		const page = fakePage({ evaluate: async () => { throw new Error('__DEBUG__ is not defined') } })
+		const tool = createBrowserTool({ sandbox: fakeSandbox(), launch: async () => ({ page, close: async () => {} }) })
+		const ctx = {} as never
+		await tool.call({ op: 'open' }, ctx)
+		const r = await tool.call({ op: 'probe', expr: '__DEBUG__.state()' }, ctx)
+		expect(r.isError).toBe(true)
+		expect(r.content).toContain('game-dev skill')
+		f.mockRestore()
+	})
+})
+
+describe('Browser hands + probe ergonomics (ADR-079 Phase 0)', () => {
+	it('auto-parenthesizes a bare object-literal probe (the measured eval trap)', async () => {
+		const f = stubFetch(true)
+		let seen = ''
+		const page = fakePage({ evaluate: async (e: string) => { seen = e; return { ok: 1 } } })
+		const tool = createBrowserTool({ sandbox: fakeSandbox(), launch: async () => ({ page, close: async () => {} }) })
+		const ctx = {} as never
+		await tool.call({ op: 'open' }, ctx)
+		await tool.call({ op: 'probe', expr: '{ phase: __DEBUG__.state().mode }' }, ctx)
+		expect(seen.startsWith('(')).toBe(true)
+		expect(seen.endsWith(')')).toBe(true)
+		f.mockRestore()
+	})
+
+	it('click by visible text + press a key', async () => {
+		const f = stubFetch(true)
+		const clicks: string[] = []
+		const keys: string[] = []
+		const page = fakePage({ clickText: async (t: string) => { clicks.push(t) }, press: async (k: string) => { keys.push(k) } })
+		const tool = createBrowserTool({ sandbox: fakeSandbox(), launch: async () => ({ page, close: async () => {} }) })
+		const ctx = {} as never
+		await tool.call({ op: 'open' }, ctx)
+		const c = await tool.call({ op: 'click', target: 'START GAME' }, ctx)
+		expect(c.isError).toBeFalsy()
+		expect(clicks).toEqual(['START GAME'])
+		await tool.call({ op: 'press', target: 'ArrowLeft' }, ctx)
+		expect(keys).toEqual(['ArrowLeft'])
+		const noTarget = await tool.call({ op: 'click' }, ctx)
+		expect(noTarget.isError).toBe(true)
 		f.mockRestore()
 	})
 })

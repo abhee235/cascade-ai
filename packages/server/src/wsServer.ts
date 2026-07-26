@@ -386,6 +386,13 @@ export function handleConnection(
           // if it's the active model, re-apply so the new window takes effect now
           if (manager.currentProvider === msg.provider && manager.currentModel === msg.model) {
             await manager.setModelConfig({ provider: msg.provider, model: msg.model, contextWindow: msg.contextWindow })
+            // REBIND (measured 2026-07-26): setModelConfig disposed every session, but this connection's
+            // `active` still pointed at the stale one — the next submit ran on a ZOMBIE with the OLD window
+            // (user set 64k, meter kept showing 131k). Mirror the setModel handler: reopen + reload.
+            if (activeId) {
+              active = manager.open(activeId)
+              if (activeChatId) loadChat(activeChatId)
+            }
           }
           break
         }
@@ -396,6 +403,11 @@ export function handleConnection(
           // Live-apply to the active model so tweaks take effect on the next turn without a re-switch.
           if (manager.currentProvider === msg.provider && manager.currentModel === msg.model) {
             await manager.setModelConfig({ provider: msg.provider, model: msg.model, ...modelParamsFor(msg.provider, msg.model) })
+            // REBIND — same stale-session zombie as setModelContext above; see that comment.
+            if (activeId) {
+              active = manager.open(activeId)
+              if (activeChatId) loadChat(activeChatId)
+            }
           }
           break
         }
@@ -429,8 +441,12 @@ export function handleConnection(
           // browser never holds the key, and `setModel` needs only provider+model. msg.baseUrl is a fallback for
           // an ad-hoc switch that didn't go through addModel.
           const ep = modelEndpointFor(msg.provider, msg.model)
+          // PERSIST FIRST (measured 2026-07-26: a switch to gpt-5.6-luna was delivered, but setModelConfig's
+          // session disposal blocked on a minutes-long curation side-query and a dev-server restart killed the
+          // handler before this line — the choice silently reverted to the restored ollama selection). The
+          // user's selection is durable the instant they make it; the apply below is best-effort mechanics.
+          setActiveModel({ provider: msg.provider, model: msg.model, baseUrl: ep.baseUrl ?? msg.baseUrl })
           await manager.setModelConfig({ provider: msg.provider, model: msg.model, baseUrl: ep.baseUrl ?? msg.baseUrl, apiKey: ep.apiKey, api: ep.api, ...modelParamsFor(msg.provider, msg.model) })
-          setActiveModel({ provider: msg.provider, model: msg.model, baseUrl: ep.baseUrl ?? msg.baseUrl }) // survive a restart (see boot restore)
           // The switch dropped every cached session; rebuild the active one and reload its history so the
           // conversation continues under the new provider. Then re-announce the active model.
           if (activeId) {

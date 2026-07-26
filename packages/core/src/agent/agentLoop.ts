@@ -107,6 +107,59 @@ function appendReminder(messages: Message[], reminder: string): void {
   messages[messages.length - 1] = { ...last, content: blocks }
 }
 
+// ── Streaming DEGENERATION guard (measured 2026-07-26: 186 seconds of '@@@@…' thinking before the user
+// killed the turn). A degenerate attractor emits one short token forever; the always-on max_tokens backstop
+// is MINUTES away at local decode speed, and nothing else watches the stream. Detection: a 400-char window
+// of generated output containing ≤4 distinct characters is garbage — legit output (code, prose, tables)
+// always exceeds that. Cut the stream immediately, discard the garbage, retry the turn (bounded).
+const DEGEN_WINDOW = 400
+const DEGEN_RUN = 200
+export function isDegenerateTail(out: string): boolean {
+  if (out.length < DEGEN_WINDOW) return false
+  const w = out.slice(-DEGEN_WINDOW)
+  // Two independent signatures, tightened after auditing 123 real turns (zero runs ≥40 in legit output —
+  // but ≤4-distinct alone could false-positive on ASCII game-board art, which the game-dev skill invites):
+  //  (a) the window is down to ≤2 distinct characters (pure padding/echo collapse), or
+  //  (b) ONE character repeats ≥200 consecutively (the '@@@@…' incident: thousands-long single run).
+  if (new Set(w).size <= 2) return true
+  let run = 1
+  for (let i = 1; i < w.length; i++) {
+    run = w[i] === w[i - 1] ? run + 1 : 1
+    if (run >= DEGEN_RUN) return true
+  }
+  return false
+}
+
+// ── SCREENSHOT EVICTION. Honest ledger (introspection 2026-07-26): the original "vision poison" hypothesis
+// was FALSIFIED by the joined data — turns carrying images had a LOWER median prefill (1,962ms vs 2,344ms;
+// prefix caching means images encode once), and the 127/137s outliers carried zero images. The real, modest
+// cost is re-encoding on cache-MISS turns (~4s per image, measured t45 vs t26). So this evicts narrowly:
+// only TOOL-RESULT images (Browser screenshots — their judgment is already extracted into the result text),
+// keeping the latest hot. USER-uploaded images are NEVER touched: a pasted design reference must survive
+// the whole session (evicting it would break replicate-this-design flows for a few seconds of miss savings).
+export function evictStaleImages(messages: Message[]): void {
+  const isToolResultMsg = (m: Message | undefined): boolean =>
+    !!m && typeof m.content !== 'string' && m.content.some((b) => b.type === 'tool_result')
+  let latest = -1
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const c = messages[i]?.content
+    if (isToolResultMsg(messages[i]) && typeof c !== 'string' && c?.some((b) => b.type === 'image')) {
+      latest = i
+      break
+    }
+  }
+  for (let i = 0; i < messages.length; i++) {
+    if (i === latest) continue
+    if (!isToolResultMsg(messages[i])) continue // user-uploaded images are untouchable
+    const c = messages[i]!.content
+    if (typeof c === 'string' || !c.some((b) => b.type === 'image')) continue
+    messages[i] = {
+      ...messages[i]!,
+      content: c.map((b): ContentBlock => (b.type === 'image' ? { type: 'text', text: '[screenshot evicted — viewed in an earlier turn; capture a fresh one if needed]' } : b)),
+    }
+  }
+}
+
 export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncIterable<ActivityEvent> {
   const tracer = deps.tracer ?? NoopTracer
   const registry = deps.registry ?? createRegistry()
@@ -254,6 +307,16 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   // Wire-overhead calibration (ADR-052 companion): real prompt tokens minus our message estimate, EMA'd.
   // Undefined until the backend reports usage once; the static chars/4 overhead estimate is the floor.
   let wireOverhead: number | undefined
+  // ADR-078: live per-turn context growth (real inputTokens deltas) — the constrained compaction trigger
+  // sizes its "N turns of headroom" from the p75 of these, so a fast-growing session compacts earlier.
+  let lastInputTokens: number | undefined
+  let degenCuts = 0 // degeneration-guard retries this submit (bounded — a persistently degenerate backend must not loop forever)
+  const growthSamples: number[] = []
+  const turnGrowthP75 = (): number | undefined => {
+    if (growthSamples.length < 5) return undefined // fallback constant applies until we have signal
+    const s = [...growthSamples].sort((a, b) => a - b)
+    return s[Math.floor(s.length * 0.75)]
+  }
 
   while (true) {
     let text = ''
@@ -275,9 +338,10 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     // Compaction (ADR-012): BEFORE each model call, if history nears the window, mask old tool output and/or
     // summarize the older half. We splice in place so the session's history reference stays valid; the raw
     // transcript + JSONL trace are untouched (you'll see the next model_request shrink).
+    evictStaleImages(messages) // vision tokens are prefill poison — only the newest image stays hot
     if (deps.compact) {
       const tokensBefore = estimateTokens(messages)
-      const { messages: compacted, kind } = await compactIfNeeded(messages, { ...deps.compact, overheadTokens })
+      const { messages: compacted, kind } = await compactIfNeeded(messages, { ...deps.compact, overheadTokens, turnGrowth: turnGrowthP75() })
       if (kind !== 'none') {
         messages.splice(0, messages.length, ...compacted)
         // E1/ADR-040: record which layer fired and what it reclaimed — the eval analyzer counts these to
@@ -342,7 +406,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
             // Reactive overflow: force compaction regardless of the threshold (ADR-039 `force`) — the model just
             // reported the prompt is too large, so waiting for the `auto` gate would just loop.
             const tokensBefore = estimateTokens(messages)
-            const { messages: c, kind } = await compactIfNeeded(messages, { ...deps.compact!, overheadTokens }, { force: true })
+            const { messages: c, kind } = await compactIfNeeded(messages, { ...deps.compact!, overheadTokens, turnGrowth: turnGrowthP75() }, { force: true })
             if (kind !== 'none') {
               messages.splice(0, messages.length, ...c)
               tracer.event({ t: 'compaction', kind, tokensBefore, tokensAfter: estimateTokens(messages), forced: true })
@@ -366,9 +430,11 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
         yield { type: 'status', text: `Large prompt — the model is still reading it (${Math.round(ev.waitedMs / 1000)}s)…` }
       } else if (ev.type === 'thinking_delta') {
         thinking += ev.thinking
+        if (isDegenerateTail(thinking)) break // degeneration guard: stop consuming — cleanup aborts the fetch
         yield { type: 'thinking_delta', thinking: ev.thinking }
       } else if (ev.type === 'text_delta') {
         text += ev.text
+        if (isDegenerateTail(text)) break
         yield { type: 'text_delta', text: ev.text }
       } else if (ev.type === 'tool_use') {
         toolUses.push({ id: ev.id, name: ev.name, input: ev.input, repaired: ev.repaired })
@@ -378,9 +444,33 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
       }
     }
 
+    // Degeneration guard tripped: the tail of the generation is single-token garbage. Discard the whole
+    // attempt (garbage must never enter history — it would poison every later prefill) and re-ask the same
+    // turn, at most twice per submit; past that, surface what happened instead of looping.
+    if ((isDegenerateTail(thinking) || isDegenerateTail(text)) && toolUses.length === 0) {
+      tracer.event({ t: 'degenerate_cut', turn, chars: thinking.length + text.length })
+      if (degenCuts < 2) {
+        degenCuts++
+        yield { type: 'status', text: 'Model output degenerated (repeated-token loop) — cut it and retrying the step…' }
+        text = ''
+        thinking = ''
+        continue // re-ask the SAME turn; nothing was recorded
+      }
+      yield { type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: 'The model repeatedly degenerated into a token loop on this step. Try re-running, simplifying the request, or switching models.' }] } }
+      break
+    }
+
     // Calibrate: the backend just told us the REAL prompt size — remember what the wire adds beyond our
     // message estimate, so the next compaction decision compares against reality, not the chars/4 guess.
-    if (usage?.inputTokens) wireOverhead = measureWireOverhead(wireOverhead, usage.inputTokens, sentEstimate)
+    if (usage?.inputTokens) {
+      wireOverhead = measureWireOverhead(wireOverhead, usage.inputTokens, sentEstimate)
+      // ADR-078: sample per-turn growth (positive, sane deltas only — a compaction shrink isn't "growth").
+      if (lastInputTokens !== undefined) {
+        const d = usage.inputTokens - lastInputTokens
+        if (d > 0 && d < 30_000) growthSamples.push(d)
+      }
+      lastInputTokens = usage.inputTokens
+    }
 
     tracer.event({ t: 'model_response', turn, text, thinking, toolUses, usage })
 

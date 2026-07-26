@@ -8,7 +8,7 @@
 import type { Message } from '../protocol'
 import type { ModelProvider } from '../llm/provider'
 import { completeWithRecovery } from '../llm/resilience'
-import type { CompactionLayer, CompactionPlan } from './compactionPlan'
+import { constrainedAutoThreshold, type CompactionLayer, type CompactionPlan } from './compactionPlan'
 import {
   collapseSuperseded,
   maskObservations,
@@ -50,7 +50,14 @@ export function measureWireOverhead(prev: number | undefined, realInputTokens: n
   return prev === undefined ? measured : Math.round(prev * 0.5 + measured * 0.5)
 }
 
-/** Rough token estimate (chars/4) over serialized content — no tokenizer dependency. */
+/** Rough token estimate (chars/4) over serialized content — no tokenizer dependency.
+ *
+ *  WIRE-ACCURATE (ADR-078 rung 1b): `thinking` blocks are EXCLUDED. Neither wire path ever replays past
+ *  thinking (native `toNativeMessages` sends text only; /v1 never sends reasoning back; measured: replay
+ *  vs strip ≈ 30 tokens either way) — counting it billed phantom tokens the model never sees (~500
+ *  chars/turn × 90 turns ≈ 11k ≈ 8% of a 131k window), firing the compaction trigger early and skewing
+ *  boundary math. The summarize INPUT still includes thinking (serialize() renders it — the model's own
+ *  reasoning improves the summary), so summarize-fit sizing uses estimateTokensWithThinking. */
 export function estimateTokens(messages: Message[]): number {
   let chars = 0
   for (const m of messages) {
@@ -58,12 +65,21 @@ export function estimateTokens(messages: Message[]): number {
     else
       for (const b of m.content) {
         if (b.type === 'text') chars += b.text.length
-        else if (b.type === 'thinking') chars += b.thinking.length
         else if (b.type === 'tool_use') chars += JSON.stringify(b.input ?? {}).length
         else if (b.type === 'tool_result') chars += b.content.length
       }
   }
   return Math.ceil(chars / 4)
+}
+
+/** Token estimate INCLUDING thinking — for sizing things that really do carry it (the summarize side-query
+ *  input, curation slices), never for wire-facing trigger/threshold/boundary math. */
+export function estimateTokensWithThinking(messages: Message[]): number {
+  let chars = 0
+  for (const m of messages) {
+    if (typeof m.content !== 'string') for (const b of m.content) if (b.type === 'thinking') chars += b.thinking.length
+  }
+  return estimateTokens(messages) + Math.ceil(chars / 4)
 }
 
 /** Index splitting [older | recent]: keep the most-recent messages that fit within keepRecentTokens verbatim;
@@ -103,6 +119,36 @@ Write the summary under these headings:
 - User messages — each one in order, briefly.
 - Next — the next action, only if the latest request calls for it; quote the last line of work so it resumes in place.`
 
+// ADR-078 constrained-mode summary prompt. Two deliberate upgrades over COMPACT_SYSTEM: (1) an <analysis>
+// DRAFTING scratchpad the summarizer thinks in, stripped before the summary is used — a quality lever
+// precisely for WEAK local models writing summaries; (2) an explicit FILE LEDGER section — deep compaction's main quality risk is the
+// post-compaction re-read storm (the model re-Reading files it forgot, refilling the window), and the ledger
+// is the antidote.
+const CONSTRAINED_COMPACT_SYSTEM = `You are summarizing the EARLIER part of a coding conversation so it can be replaced by your summary while the recent messages are kept verbatim. Your summary will be the agent's ONLY memory of everything before this point. Reply in plain text only; make no tool calls.
+
+First, draft your reasoning inside an <analysis>...</analysis> block: walk the conversation chronologically and note requests, decisions, files touched, errors and their fixes. This block is DELETED before your summary is used — it is a scratchpad to make the summary better.
+
+Then write the final summary under EXACTLY these headings:
+- Goal — the request and its intent, quoting the user's own words where intent matters.
+- State of the work — what is done, what is half-done, and exactly what was happening when this summary was taken.
+- FILE LEDGER — every file created or modified: path, one-line purpose, key exports/props/functions. Make it complete: the agent will trust it INSTEAD of re-reading files.
+- Decisions and constraints — each decision and WHY, and every rule the user set.
+- Problems and fixes — errors (verbatim where quoted), what fixed them, and user corrections especially.
+- User messages — every one in order, short ones like "ok" and "continue" included.
+- Next — only if the latest request calls for it; quote where work left off.`
+
+/** Strip the <analysis> drafting scratchpad (constrained prompt) from a raw summary before it enters history.
+ *  SALVAGE (measured 2026-07-26: 2 of 2 live summaries silently became `dropped`): a weak summarizer often
+ *  puts EVERYTHING inside the block, or never closes the tag — a bare strip reduces those to '' and the code
+ *  downstream reads "no summary" and discards the whole older region without any error. If stripping empties
+ *  a non-empty summary, the draft IS the best summary we have: return the block's inner content instead. */
+export function stripAnalysisBlock(raw: string): string {
+  const stripped = raw.replace(/<analysis>[\s\S]*?(<\/analysis>|$)/i, '').trim()
+  if (stripped) return stripped
+  const inner = raw.replace(/<\/?analysis>/gi, '').trim()
+  return inner
+}
+
 function serialize(messages: Message[]): string {
   return messages
     .map((m) => {
@@ -131,12 +177,31 @@ async function summarize(older: Message[], deps: CompactDeps): Promise<string> {
   // GUARDED like the main model call (iterate-5: this was a raw complete() — one 300s backend wedge here
   // killed the whole round before the guarded main call was even made). Same policy: retry transients,
   // recycle the backend at ≥2 consecutive failures, reset the budget when the recycle verifies healthy.
+  const system = deps.plan.economics === 'constrained' ? CONSTRAINED_COMPACT_SYSTEM : COMPACT_SYSTEM
+  // BOUNDED INPUT (ADR-078 cold-resume edge): the side-query's own prompt must fit the window it runs in.
+  // A restored history can dwarf the CURRENT model's window (resume a 131k chat on an 8k model) — an
+  // over-budget serialize would be silently FRONT-truncated by Ollama, producing a summary of garbage while
+  // looking successful. Keep the head (task, early decisions) and the tail (recent work) and elide the
+  // middle — the two ends are what the structured summary needs most.
+  const serialized = serialize(older)
+  const budgetChars = Math.max(8_000, (deps.plan.effectiveWindow - 1_500) * 4 - system.length)
+  const input =
+    serialized.length <= budgetChars
+      ? serialized
+      : `${serialized.slice(0, Math.floor(budgetChars * 0.6))}\n\n[... middle of the conversation omitted — it exceeded the summarizer's window. Summarize what IS shown; note the omission in Current work. ...]\n\n${serialized.slice(-Math.floor(budgetChars * 0.35))}`
   const res = await completeWithRecovery(
-    () => deps.provider.complete({ messages: [{ role: 'user', content: serialize(older) }], model: deps.model, system: COMPACT_SYSTEM }, deps.signal),
+    () => deps.provider.complete({ messages: [{ role: 'user', content: input }], model: deps.model, system }, deps.signal),
     { signal: deps.signal, recover: deps.recover, sleep: deps.sleepForTest, onRetry: deps.onRetry },
   )
-  return res.text.trim()
+  return stripAnalysisBlock(res.text.trim())
 }
+
+// ADR-078 circuit breaker: after 3 consecutive summarize failures,
+// stop paying the side-query on AUTO compactions (fall straight to the lossy drop path) until one summarize
+// succeeds. A wedged local backend must not burn 60–120s per turn on a call that keeps dying. Keyed by the
+// plan object (stable per session) so state never leaks across sessions.
+const SUMMARIZE_BREAKER_LIMIT = 3
+const summarizeFailures = new WeakMap<CompactionPlan, number>()
 
 export interface CompactDeps {
   provider: ModelProvider
@@ -157,6 +222,9 @@ export interface CompactDeps {
   onRetry?: (info: { attempt: number; delayMs: number }) => void
   /** Injectable backoff sleep for deterministic tests. */
   sleepForTest?: (ms: number) => Promise<void>
+  /** ADR-078: live-measured per-turn context growth (p75 of real inputTokens deltas, tokens). Feeds the
+   *  constrained-mode trigger so "8 turns of headroom" tracks how fast THIS session actually grows. */
+  turnGrowth?: number
 }
 
 // The pure, no-LLM layers in escalation order, each mapped to the kind it reports. `summarize` is handled
@@ -235,10 +303,17 @@ export async function compactIfNeeded(
 ): Promise<{ messages: Message[]; kind: CompactionKind }> {
   const { plan } = deps
   const force = opts?.force ?? false
+  const constrained = plan.economics === 'constrained'
+  // ADR-078: constrained mode computes its trigger LIVE from measured turn growth (≤ hosted auto by
+  // construction); hosted keeps the fixed-buffer plan.auto untouched. The STOP threshold diverges harder:
+  // hosted stops the moment it's back under the trigger (free the minimum); constrained pushes on to
+  // deepTarget (free ≥45% of the window) so one event buys ~dozens of turns instead of 1–21 (measured).
+  const auto = constrained ? constrainedAutoThreshold(plan, deps.turnGrowth) : plan.auto
+  const stopAt = constrained ? Math.min(plan.deepTarget, auto) : auto
   // The wire prompt = overhead (system + tool schemas + template) + messages; all thresholds compare the SUM.
   const overhead = deps.overheadTokens ?? 0
   const usage = estimateTokens(messages) + overhead
-  if (!force && usage < plan.auto) return { messages, kind: 'none' }
+  if (!force && usage < auto) return { messages, kind: 'none' }
 
   const boundary = olderBoundary(messages, plan.keepRecentTokens)
   if (boundary === 0) return { messages, kind: 'none' } // all fits in the recent window — nothing older to compact
@@ -272,7 +347,7 @@ export async function compactIfNeeded(
       working = next
       kind = step.kind
     }
-    if (!force && estimateTokens(working) + overhead < plan.auto) return { messages: working, kind }
+    if (!force && estimateTokens(working) + overhead < stopAt) return { messages: working, kind }
   }
 
   // ── Heavy layer: LLM summary of the older half, recent kept verbatim. ──
@@ -295,7 +370,7 @@ export async function compactIfNeeded(
       // reclaim once newer work rolls the shield forward. Over hard there is no soft option (see survival above).
       const olderTokens = estimateTokens(older)
       const expectedSummary = Math.min(EXPECTED_SUMMARY_TOKENS, Math.floor(plan.window / 16)) // scale down for tiny windows
-      const canHelp = estimateTokens(working) + overhead - olderTokens + expectedSummary < plan.auto
+      const canHelp = estimateTokens(working) + overhead - olderTokens + expectedSummary < auto
       // PRE-GATE (measured, json-repair-gate): with overhead counted, small-window usage hovers just over
       // `auto` late in a task, and every turn paid a summarize SIDE-QUERY (60–120s each on a local model —
       // two tasks timed out seconds from success). Worse, on a tiny older region the wrapper (task +
@@ -308,8 +383,14 @@ export async function compactIfNeeded(
       // errors, so the reactive-force path can't catch it (the fatal call showed input 8,159 + output 33 =
       // exactly 8,192). Over the ceiling, summarize is mandatory, worth-it or not.
       const stillOverCeiling = estimateTokens(working) + overhead >= ceiling
-      const worthIt = force || stillOverCeiling || olderTokens >= expectedSummary * 3
-      if ((survival || canHelp) && worthIt) {
+      // ADR-078 constrained: summarize is THE strategy, not the fallback — no canHelp/worthIt gating (the
+      // measured failure: cheap layers always shaved just under auto, summarize never fired in 7 events,
+      // and — coupled damage — the ADR-074 curation harvest hanging off onDiscard never ran either).
+      const worthIt = force || stillOverCeiling || constrained || olderTokens >= expectedSummary * 3
+      // Circuit breaker (auto only): 3 consecutive summarize failures ⇒ stop paying the dead side-query;
+      // cheap-layer relief stands, survival/force still breaks through, one success resets the counter.
+      const breakerTripped = (summarizeFailures.get(plan) ?? 0) >= SUMMARIZE_BREAKER_LIMIT && !force && !survival
+      if ((survival || canHelp || constrained) && worthIt && !breakerTripped) {
         if (deps.onDiscard) await deps.onDiscard(older)
         // The ORIGINAL TASK and the LATEST USER INSTRUCTION ride along VERBATIM — never entrusted to the
         // summary. Measured failures: a weak model's summary lost the task statement and its next reply was
@@ -320,12 +401,14 @@ export async function compactIfNeeded(
         let summary: string | undefined
         try {
           summary = await summarize(older, deps)
+          summarizeFailures.set(plan, 0) // breaker resets on success
         } catch {
           // Summarizer unreachable even after retries + recycles. A dead round is worse than a lossy one:
           // fall back to DROPPING the older region, keeping the verbatim task + latest instruction (the
           // two things a summary must never lose anyway). The window is freed either way; the model can
           // re-read files it needs (they're on disk — observations are re-derivable, instructions aren't).
           summary = undefined
+          summarizeFailures.set(plan, (summarizeFailures.get(plan) ?? 0) + 1)
         }
         const summaryMsg: Message = {
           role: 'user',
@@ -334,6 +417,12 @@ export async function compactIfNeeded(
             summary
               ? `[Earlier conversation compacted to save context]\n\n${summary}`
               : '[Earlier conversation dropped to save context — its summary was unavailable. Re-read any file you need; the task above and instruction below are verbatim.]',
+            // ADR-078: after a DEEP compaction the biggest quality risk is the re-read storm — the model
+            // re-Reading files it forgot, refilling the window it just freed. The FILE LEDGER in the summary
+            // exists to be trusted; say so explicitly.
+            constrained && summary
+              ? '[Note] History above was deeply compacted. Trust the FILE LEDGER and summary instead of re-reading files — re-read a file only immediately before editing it.'
+              : '',
             lastInstruction ? `[Latest user instruction — still applies]\n${lastInstruction}` : '',
           ]
             .filter(Boolean)

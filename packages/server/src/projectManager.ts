@@ -421,8 +421,12 @@ export class ProjectManager {
     }
     this.visionOk = await hasVision(this.active.model, this.active.baseUrl, this.active.provider).catch(() => false)
     // Drop cached sessions so the next open() recreates them against the new provider (history reloads).
+    // NOT awaited (2026-07-26): dispose() runs session-end curation — a local-model side-query that can take
+    // minutes — and awaiting it here blocked the entire model switch behind it (a dev restart in that window
+    // lost the switch). dispose() aborts any in-flight turn synchronously at its first line; the slow curation
+    // tail can finish in the background while the new provider takes over.
     for (const p of this.projects.values()) {
-      await p.session?.dispose().catch(() => {})
+      void p.session?.dispose().catch(() => {})
       p.session = undefined
     }
   }

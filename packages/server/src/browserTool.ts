@@ -14,8 +14,10 @@ import type { Tool } from '@cascade/core'
 import type { DockerSandbox } from './dockerSandbox.js'
 
 const inputSchema = z.object({
-	op: z.enum(['open', 'snapshot', 'screenshot']).describe('open = load the app (do this first) · snapshot = accessibility tree as text (structure — cheap, prefer this) · screenshot = image for VISUAL judgment (expensive — budget these).'),
+	op: z.enum(['open', 'snapshot', 'screenshot', 'probe', 'click', 'press']).describe('open = load the app (do this first) · snapshot = accessibility tree as text (structure — cheap, prefer this) · screenshot = image for VISUAL judgment (expensive — budget these) · probe = evaluate a JS expression in the live page and get JSON back (RUNTIME state — games/canvas/dynamic behavior that snapshots cannot see).'),
 	path: z.string().optional().describe('Route to open, e.g. "/" or "/settings". Only with op:"open"; the app origin is fixed.'),
+	expr: z.string().optional().describe('JS expression for op:"probe", evaluated in the page, result JSON-returned. E.g. "__DEBUG__.state()" or "(__DEBUG__.step(60), __DEBUG__.state().ball)". Canvas/game apps expose window.__DEBUG__ (see the game-dev skill).'),
+	target: z.string().optional().describe('For op:"click": visible text of the element (e.g. "START GAME") or a CSS selector. For op:"press": a key name, e.g. "ArrowLeft", "Space", "Enter", "Escape".'),
 })
 
 /** Where the dev server writes its log inside the container (same file PreviewManager tails). */
@@ -23,6 +25,7 @@ const DEV_LOG = '/tmp/cascade-dev.log'
 /** Screenshot budget per session — every image is real vision prefill on a local model. */
 const MAX_SCREENSHOTS = 8
 const SNAPSHOT_MAX_CHARS = 8_000
+const PROBE_MAX_CHARS = 4_000
 
 async function waitForHttp(url: string, timeoutMs: number): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs
@@ -44,6 +47,9 @@ export interface PageLike {
 	url(): string
 	locator(sel: string): { ariaSnapshot(): Promise<string> }
 	screenshot(opts: { type: 'jpeg'; quality: number }): Promise<Buffer>
+	evaluate(expr: string): Promise<unknown>
+	clickText(target: string): Promise<void>
+	press(key: string): Promise<void>
 }
 
 async function launchPage(): Promise<{ page: PageLike; close: () => Promise<void> }> {
@@ -59,7 +65,16 @@ async function launchPage(): Promise<{ page: PageLike; close: () => Promise<void
 		}
 	}
 	if (!browser) throw new Error('No system browser found (tried Edge, Chrome). Install one, or skip browser checks.')
-	const page = (await browser.newPage({ viewport: { width: 1280, height: 800 } })) as unknown as PageLike
+	const raw = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+	const page = raw as unknown as PageLike
+	// The interactive ops (ADR-079 Phase 0 — the missing HANDS: the gametester couldn't click START GAME).
+	// click accepts visible text first (what a model naturally quotes), CSS selector as the fallback.
+	page.clickText = async (target: string) => {
+		const byText = raw.getByText(target, { exact: false }).first()
+		if (await byText.count().then((c: number) => c > 0).catch(() => false)) return byText.click({ timeout: 5_000 })
+		return raw.locator(target).first().click({ timeout: 5_000 })
+	}
+	page.press = (key: string) => raw.keyboard.press(key)
 	return { page, close: () => browser!.close() }
 }
 
@@ -80,7 +95,7 @@ export function createBrowserTool(deps: BrowserToolDeps): Tool {
 	const tool: Tool<z.infer<typeof inputSchema>> = {
 		name: 'Browser',
 		description:
-			'Look at the RUNNING app in a real browser — verify what you built actually renders and works. Use AFTER `npm run build` passes: op:"open" first (starts/loads the live preview), then op:"snapshot" for the accessibility tree (structure: headings, buttons, empty states — cheap text, prefer it), and op:"screenshot" ONLY for visual judgment (colors, layout, imagery — expensive, a few per session). Judge screenshots against the design checklist and FIX what you see.',
+			'Look at the RUNNING app in a real browser — verify what you built actually renders and works. Use AFTER `npm run build` passes: op:"open" first (starts/loads the live preview), then op:"snapshot" for the accessibility tree (structure: headings, buttons, empty states — cheap text, prefer it), and op:"screenshot" ONLY for visual judgment (colors, layout, imagery — expensive, a few per session). Judge screenshots against the design checklist and FIX what you see. For GAMES/canvas/dynamic behavior use op:"probe" — snapshots cannot see a canvas; probe reads the RUNTIME state (window.__DEBUG__) as JSON so you tune with numbers, not guesses.',
 		inputSchema,
 		activitySummary: (input) => `Browser ${input.op}${input.path ? ` ${input.path}` : ''}`,
 		isReadOnly: () => true, // looks at the app; never mutates project files
@@ -116,6 +131,45 @@ export function createBrowserTool(deps: BrowserToolDeps): Tool {
 					const tree = await session.page.locator('body').ariaSnapshot()
 					const cut = tree.length > SNAPSHOT_MAX_CHARS ? `${tree.slice(0, SNAPSHOT_MAX_CHARS)}\n… [truncated]` : tree
 					return { content: `Accessibility snapshot of ${session.page.url()}:\n${cut}` }
+				}
+
+				if (input.op === 'probe') {
+					// ADR-079: the game-feedback channel. A <canvas> is INVISIBLE to accessibility snapshots and a
+					// screenshot is one static frame — measured (Neon Breaker build): 17 Browser calls produced zero
+					// gameplay signal while the model tuned "feel" blind (shipped a projectile 3× too fast). Probe
+					// turns runtime behavior into DATA: evaluate an expression (the game-dev skill mandates a
+					// window.__DEBUG__ contract: state()/events/step(n)/seed()) and reason about numbers instead.
+					if (!input.expr?.trim()) return { content: 'op:"probe" needs `expr` — a JS expression, e.g. "__DEBUG__.state()".', isError: true }
+					try {
+						// Auto-parenthesize a bare object literal: `{a: 1}` evals as a BLOCK STATEMENT and throws
+						// "Unexpected token ':'" (measured: the model's very first probe failed exactly this way).
+						const expr = /^\s*\{/.test(input.expr) ? `(${input.expr})` : input.expr
+						const result = await session.page.evaluate(expr)
+						let json: string
+						try {
+							json = JSON.stringify(result) ?? 'undefined'
+						} catch {
+							json = String(result) // circular / non-serializable — degrade to toString
+						}
+						const cut = json.length > PROBE_MAX_CHARS ? `${json.slice(0, PROBE_MAX_CHARS)}… [truncated]` : json
+						return { content: `probe ${input.expr} →
+${cut}` }
+					} catch (e) {
+						return { content: `probe failed: ${e instanceof Error ? e.message : String(e)}. Is window.__DEBUG__ exposed? (The game-dev skill requires it before gameplay code.)`, isError: true }
+					}
+				}
+
+				if (input.op === 'click') {
+					if (!input.target?.trim()) return { content: 'op:"click" needs `target` — visible text (e.g. "START GAME") or a CSS selector.', isError: true }
+					await session.page.clickText(input.target)
+					await new Promise((r) => setTimeout(r, 300)) // let the app react
+					return { content: `Clicked "${input.target}". Use op:"snapshot" or op:"probe" to observe the result.` }
+				}
+				if (input.op === 'press') {
+					if (!input.target?.trim()) return { content: 'op:"press" needs `target` — a key name like "ArrowLeft", "Space", "Enter".', isError: true }
+					await session.page.press(input.target)
+					await new Promise((r) => setTimeout(r, 150))
+					return { content: `Pressed ${input.target}.` }
 				}
 
 				// screenshot

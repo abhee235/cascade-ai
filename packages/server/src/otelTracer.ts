@@ -307,6 +307,12 @@ export class OtelTracer implements Tracer {
 			case 'degraded_retry':
 				this.mark('degraded response — retried', at, { 'cascade.turn': e.turn })
 				break
+			case 'degenerate_cut':
+				this.mark('cut: degenerate output loop', at, { 'cascade.turn': e.turn, 'cascade.chars': e.chars })
+				break
+			case 'planning_stall':
+				this.mark('nudge: planning stall → execute now', at, { 'cascade.turn': e.turn, 'cascade.idle': e.idle })
+				break
 			case 'max_tokens_cut':
 			this.mark('max-tokens cut — act-now nudge', at, { 'cascade.turn': e.turn })
 			break

@@ -7,6 +7,7 @@
 
 import type { ActivityEvent, ContentBlock, Message } from './protocol'
 import type { ModelProvider } from './llm/provider'
+import { OllamaProvider } from './llm/providers/ollama'
 import { runAgentLoop } from './agent/agentLoop'
 import { gatherProjectContext } from './agent/projectContext'
 import { resolveCheckCommand, type CheckCommand } from './agent/verifyGate'
@@ -71,6 +72,9 @@ export interface SessionOptions {
    *  `keepRecentRatio` is the fraction of the effective window kept verbatim (default 0.25). */
   compactRatio?: number
   keepRecentRatio?: number
+  /** ADR-078: compaction cost model. 'constrained' = KV-wall backends (compact rarely, compact deep);
+   *  'hosted' = stop at the trigger (free the minimum). Omit ⇒ auto: native-Ollama providers are constrained, everything else hosted. */
+  compactEconomics?: 'hosted' | 'constrained'
   /** Resilience tuning (Phase 12): retry/backoff for transient model-call failures. */
   recovery?: { maxRetries?: number; baseDelayMs?: number; maxDelayMs?: number; sleep?: (ms: number) => Promise<void> }
   /** Phase 13.3: execution sandbox. When set (the server injects a per-project Docker sandbox), command
@@ -219,12 +223,17 @@ export function createSession(opts: SessionOptions): CascadeSession {
   // When the caller didn't pin a window, we refine this on the FIRST turn via provider.detectModelLimits
   // (ADR-038: Ollama /api/show num_ctx) — ground truth beats the static map, which mis-sized coding-qwen36 as
   // 32k. `let` so detection can replace it; the tier it carries also sizes the system prompt + tool descriptions.
+  // ADR-078: pick the compaction cost model. A native-Ollama provider means a local KV wall — every prefix
+  // rewrite is a full re-prefill at local speed — so it gets 'constrained' (deep, rare compactions) unless
+  // the caller overrides. Hosted APIs keep the standard 'hosted' economics byte-for-byte.
+  const compactEconomics = opts.compactEconomics ?? (opts.provider instanceof OllamaProvider ? 'constrained' : 'hosted')
   let compactPlan = resolveCompactionPlan({
     model: opts.model,
     contextWindow: opts.contextWindow,
     maxOutputTokens: opts.maxOutputTokens,
     pct: opts.compactRatio,
     keepRecentRatio: opts.keepRecentRatio,
+    economics: compactEconomics,
   })
   let windowDetected = false
   // ADR-038 enforcement: only limits we are CONFIDENT about go on the wire (explicit option or /api/show
@@ -250,6 +259,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
           maxOutputTokens: limits.maxOutputTokens ?? opts.maxOutputTokens,
           pct: opts.compactRatio,
           keepRecentRatio: opts.keepRecentRatio,
+          economics: compactEconomics,
         })
       }
     } catch {
@@ -432,6 +442,11 @@ export function createSession(opts: SessionOptions): CascadeSession {
     },
 
     async dispose() {
+      // Abort any in-flight turn FIRST. Measured zombie (2026-07-26): setModelConfig disposed sessions while
+      // a turn was streaming — the loop kept generating against a torn-down session, the UI's Stop routed to
+      // the REPLACEMENT session, and the live-turn re-attach streamed the unkillable orphan back after every
+      // refresh. A disposed session must have nothing running.
+      inFlight?.abort()
       await curate([...messages]) // session-end curation (awaitable) before teardown
       await hub?.dispose() // close MCP subprocesses — no zombies (Phase 9 pitfall)
     },

@@ -1,3 +1,4 @@
+import type React from 'react'
 // AppLayout.tsx — the shell: the persistent NavSidebar + the active page (lightweight in-store router).
 
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
@@ -18,7 +19,9 @@ export function AppLayout() {
   return (
     // h-svh (not the provider's default min-h-svh) makes the shell a fixed viewport box, so the chat panel
     // and the builder pane each scroll internally instead of growing the whole page.
-    <SidebarProvider className="h-svh overflow-hidden">
+    <SidebarProvider
+      className="h-svh overflow-hidden"
+    >
       <CommandPalette />
       <ThemeDialog />
       <ModelManagerDialog />

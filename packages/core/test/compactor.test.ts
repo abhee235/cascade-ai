@@ -40,6 +40,8 @@ const plan: CompactionPlan = {
   toolResultMaxChars: 2000,
   layers: new Set(['mask', 'summarize']),
   mode: 'layered',
+  economics: 'hosted',
+  deepTarget: 80,
   tier: 'full',
 }
 

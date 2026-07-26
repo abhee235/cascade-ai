@@ -46,6 +46,18 @@ const MAX_TOOL_RESULT_CHARS = 8_000
 /** Fallback window when the model is unknown and no override is set (matches the old ADR-012 default). */
 export const DEFAULT_WINDOW = 8_192
 
+// ── ADR-078: constrained (KV-wall) economics ────────────────────────────────────────────────────────────
+// On a backend where every prefix rewrite costs a FULL re-prefill (local Ollama, hybrid-attention models),
+// the hosted stopping rule ("free the minimum, stop at auto") is inverted economics — measured 2026-07-25:
+// four compactions freed 0.5–6.5% of the window each (one freed 701 tokens), re-triggered after 21/1/6
+// responses, and each cost a 38–45s re-prefill. Constrained mode compacts RARELY and DEEP instead.
+/** Post-compaction usage target: at least this fraction of the window must be FREE after a deep compaction. */
+export const CONSTRAINED_FREE_TARGET = 0.45
+/** Trigger when fewer than ~this many turns of headroom remain (× live-measured per-turn growth). */
+export const CONSTRAINED_TRIGGER_TURNS = 8
+/** Per-turn context growth fallback (tokens) until the session has live samples. Safe direction: high. */
+export const FALLBACK_TURN_GROWTH = 1_200
+
 /**
  * A compaction layer, run in escalation order until the history fits (ADR-039). Cheapest / least-lossy first:
  *   collapse      — clear results of SUPERSEDED reads/searches (dedupe; near-lossless)
@@ -87,6 +99,13 @@ export interface CompactionPlan {
   layers: Set<CompactionLayer>
   /** 'layered' = mask/summarize in place; 'fresh-context' = Ralph-style reset (tiny windows; deferred). */
   mode: 'layered' | 'fresh-context'
+  /** ADR-078: which cost model governs the STOPPING RULE. 'hosted' (default) = free the minimum
+   *  and stop at `auto` (right when a cache break is cheap). 'constrained' = KV-wall backends: compact rarely,
+   *  compact DEEP — run all layers + summarize down to `deepTarget` in ONE event, amortizing the re-prefill. */
+  economics: 'hosted' | 'constrained'
+  /** ADR-078 (constrained only; = auto otherwise): post-compaction usage target — ≥CONSTRAINED_FREE_TARGET of
+   *  the window free after a deep event, floored so tiny windows never target below what keepRecent occupies. */
+  deepTarget: number
   /** Coarse window band (shared with the system-prompt generator, ADR-037): minimal | lean | full. The
    *  thresholds above are continuous, but the tier is recorded for the UI/logs and to keep the prompt in step. */
   tier: WindowTier
@@ -101,6 +120,8 @@ export interface PlanInput {
   pct?: number
   /** Fraction of the effective window kept verbatim (default 0.25). */
   keepRecentRatio?: number
+  /** ADR-078: cost model for the stopping rule. Default 'hosted' — existing behavior, byte-for-byte. */
+  economics?: 'hosted' | 'constrained'
 }
 
 const clamp = (n: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, n))
@@ -130,13 +151,18 @@ export function planCompaction(input: PlanInput): CompactionPlan {
   const warn = Math.floor(Math.max(0, Math.max((pct - WARN_PCT_OFFSET) * window, auto - WARN_BUFFER)))
   const hard = Math.floor(Math.min(window, Math.max(effectiveWindow - HARD_BUFFER, auto + HARD_BUFFER)))
 
+  const keepRecentTokens = Math.floor(effectiveWindow * keepRecentRatio)
+  // ADR-078 deep target: post-compaction usage ≤ (1 − FREE_TARGET)·window, floored so it never demands less
+  // than the verbatim recent region + a summary's worth of room (tiny windows: the floor wins, by design).
+  const deepTarget = Math.max(keepRecentTokens + Math.min(2_000, Math.floor(window / 8)), Math.floor(window * (1 - CONSTRAINED_FREE_TARGET)))
+
   return {
     window,
     effectiveWindow,
     warn,
     auto,
     hard,
-    keepRecentTokens: Math.floor(effectiveWindow * keepRecentRatio),
+    keepRecentTokens,
     keepRecentResults: KEEP_RECENT_RESULTS,
     toolResultMaxChars: clamp(
       Math.floor(window * 4 * TOOL_RESULT_WINDOW_FRACTION),
@@ -145,8 +171,23 @@ export function planCompaction(input: PlanInput): CompactionPlan {
     ),
     layers: new Set<CompactionLayer>(ALL_COMPACTION_LAYERS), // full stack by default; the executor stops early
     mode: 'layered',
+    economics: input.economics ?? 'hosted',
+    deepTarget: (input.economics ?? 'hosted') === 'constrained' ? Math.min(deepTarget, auto) : auto,
     tier: windowTier(window),
   }
+}
+
+/**
+ * ADR-078: the constrained-mode trigger, computed LIVE from measured per-turn growth (the session feeds the
+ * p75 of real `inputTokens` deltas). Fires when fewer than ~CONSTRAINED_TRIGGER_TURNS turns of headroom
+ * remain — early enough that the summarize side-query itself still fits. Clamped to [half the window, the
+ * hosted `auto`]: never later than hosted (the hosted trigger already guarantees wire safety), never degenerate
+ * on tiny windows. Pure; called per compaction check so live growth is always current.
+ */
+export function constrainedAutoThreshold(plan: CompactionPlan, turnGrowth?: number): number {
+  const growth = Math.max(1, turnGrowth ?? FALLBACK_TURN_GROWTH)
+  const calculated = plan.window - Math.max(plan.window - plan.auto, CONSTRAINED_TRIGGER_TURNS * growth)
+  return Math.max(Math.floor(plan.window / 2), Math.min(plan.auto, Math.floor(calculated)))
 }
 
 /** Resolve a plan for a model: window = explicit override → known-model map → safe default. */
@@ -156,6 +197,7 @@ export function resolveCompactionPlan(opts: {
   maxOutputTokens?: number
   pct?: number
   keepRecentRatio?: number
+  economics?: 'hosted' | 'constrained'
 }): CompactionPlan {
   const window = opts.contextWindow ?? contextWindowForModel(opts.model) ?? DEFAULT_WINDOW
   return planCompaction({
@@ -163,5 +205,6 @@ export function resolveCompactionPlan(opts: {
     maxOutputTokens: opts.maxOutputTokens,
     pct: opts.pct,
     keepRecentRatio: opts.keepRecentRatio,
+    economics: opts.economics,
   })
 }
