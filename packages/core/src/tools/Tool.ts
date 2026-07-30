@@ -39,6 +39,10 @@ export interface ToolContext {
   /** Phase 13.3: generic execution capability. When present, command-running tools (Bash) execute HERE
    *  (the server injects a per-project Docker sandbox); when absent, they run on the host. Core is agnostic. */
   sandbox?: Sandbox
+  /** How file paths are confined (ADR-033 + the path-policy change): 'jail' (default — the sandboxed web
+   *  builder refuses outside paths in the tool) vs 'prompt' (the extension — outside paths resolve and the
+   *  permission gate asks), plus any additional allowed roots. Omit ⇒ jail to the project. */
+  pathScope?: import('./projectPath').PathScope
   /** ADR-032: read-before-edit freshness. Read records {content, mtime} here; Edit/Write require an entry
    *  (the file was read) that hasn't gone stale. Session-scoped. Omit ⇒ no freshness enforcement. */
   readFileState?: FileStateCache
@@ -77,8 +81,11 @@ export interface Tool<I = unknown> {
   name: string
   /** What it does + when to use it — the model reads this to decide. Advertised on EVERY request, so it's
    *  paid from the context window each turn. ADR-037: may be a function of the window tier — a 128k model
-   *  affords the rich guidance; an 8k model gets the essentials (same strategy as the system prompt). */
-  description: string | ((tier: import('../llm/contextWindows').WindowTier) => string)
+   *  affords the rich guidance; an 8k model gets the essentials (same strategy as the system prompt).
+   *  The optional second arg is the EXECUTION platform for command tools ('posix' when a sandbox runs the
+   *  commands, else the host) — Bash tailors its shell-syntax guidance to it. Both are stable per session,
+   *  so descriptions stay KV-cache-stable. */
+  description: string | ((tier: import('../llm/contextWindows').WindowTier, exec?: 'win32' | 'posix') => string)
   /** Zod schema for the input: validates the model's args AND is converted to JSON Schema (builtins).
    *  Optional because MCP tools (Phase 9) arrive with raw JSON Schema instead — see `parameters`. */
   inputSchema?: ZodType<I>

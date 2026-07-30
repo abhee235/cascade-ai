@@ -10,9 +10,23 @@
 // then the mode's default for writes (acceptEdits→allow, default→ask). One system serves both the gated
 // extension (mode 'default') and a future sandboxed web frontend (mode 'bypass') without a redesign.
 
+import { isAbsolute, resolve } from 'node:path'
 import type { Tool } from '../tools/Tool'
+import { isAllowedPath, type PathAccess } from '../tools/projectPath'
 import { splitCommandSegments } from './bashClassifier'
 import { findMatchingRule } from './rules'
+
+/** Inputs whose path fields define WHERE a tool acts. Used for the working-directory check below. */
+function pathsOf(input: unknown): string[] {
+  const i = (input ?? {}) as Record<string, unknown>
+  return [i.file_path, i.path].filter((v): v is string => typeof v === 'string' && v.length > 0)
+}
+
+/** Resolve a model-supplied path for the boundary CHECK only (no container-alias re-rooting here — the
+ *  tool does that; an alias path resolves inside the project either way). */
+function resolveMaybe(cwd: string, p: string): string {
+  return isAbsolute(p) ? resolve(p) : resolve(cwd, p)
+}
 
 /** Who sets this: the FRONTEND/deployment, not the model. The extension runs 'default'; a sandboxed
  *  sandboxed web frontend would run 'bypass'. */
@@ -26,6 +40,14 @@ export interface PermissionState {
   allow: Set<string>
   /** Deny rules (same syntax). ADR-035: deny rules outrank every mode, including bypass. */
   deny: Set<string>
+  /** The project root. Present when the frontend uses the 'prompt' path policy (below). */
+  cwd?: string
+  /** Additional working directories treated as inside (SessionOptions.additionalDirectories).
+   *  Approving an outside path may append to this at runtime. */
+  roots?: string[]
+  /** 'jail' (default, sandboxed web builder): tools refuse outside paths themselves. 'prompt' (extension):
+   *  an outside path is APPROVABLE — this gate asks, even for reads and even in acceptEdits. */
+  pathAccess?: PathAccess
   /** ADR-044: the mode to restore when ExitPlanMode is approved. EnterPlanMode saves the current mode here
    *  before switching to 'plan', so a bypass (web) session returns to 'bypass', not 'default'. */
   priorMode?: PermissionMode
@@ -65,6 +87,15 @@ export function checkPermission(tool: Tool, input: unknown, state: PermissionSta
 
   // 2. Explicit ALLOW rules (a remembered "always" for this tool / this path pattern).
   if (findMatchingRule(state.allow, tool.name, input)) return 'allow'
+
+  // 2b. WORKING-DIRECTORY boundary ('prompt' policy only). A path outside the project
+  //     and every additional directory is APPROVABLE, not refused — but it always asks, including for
+  //     READ-ONLY tools and in acceptEdits, because leaving the workspace is the user's call, not the
+  //     mode's. ('jail' frontends never reach here: their tools refuse the path themselves.)
+  if (state.pathAccess === 'prompt' && state.cwd) {
+    const outside = pathsOf(input).filter((p) => !isAllowedPath(state.cwd!, resolveMaybe(state.cwd!, p), state.roots))
+    if (outside.length > 0) return 'ask'
+  }
 
   // 3. CAPABILITY: reads are safe → never interrupt the user for them.
   if (readOnly) return 'allow'

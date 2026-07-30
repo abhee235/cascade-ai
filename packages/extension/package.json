@@ -1,7 +1,7 @@
 {
   "name": "@cascade/extension",
   "displayName": "Cascade",
-  "description": "Cascade — an Ollama-native AI coding agent.",
+  "description": "Cascade — an Ollama-native AI coding agent for VS Code.",
   "version": "0.0.0",
   "private": true,
   "publisher": "cascade-dev",
@@ -16,6 +16,22 @@
   "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
+    "commands": [
+      {
+        "command": "cascade.openModels",
+        "title": "Cascade: Language Models",
+        "icon": "$(chip)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "cascade.openModels",
+          "when": "view == cascade.view",
+          "group": "navigation"
+        }
+      ]
+    },
     "viewsContainers": {
       "activitybar": [
         {
@@ -110,6 +126,54 @@
           "default": 0.25,
           "description": "Fraction of the context window kept as verbatim recent messages during compaction (the rest is summarized)."
         },
+        "cascade.compactEconomics": {
+          "type": "string",
+          "enum": ["auto", "hosted", "constrained"],
+          "default": "auto",
+          "description": "Compaction cost model (ADR-078). auto: native Ollama gets 'constrained' (compact rarely but DEEP — each full re-prefill is expensive on a KV-wall backend), hosted APIs get 'hosted' (incremental). Override only to experiment."
+        },
+        "cascade.maxTurns": {
+          "type": "number",
+          "default": 100,
+          "description": "Max model round-trips per submit before the agent loop stops. The core default (10) suits short chat; real coding tasks need more. 0 = core default."
+        },
+        "cascade.maxOutputTokens": {
+          "type": "number",
+          "default": 0,
+          "description": "Model max output tokens (ADR-039): sizes the compaction summary reserve and is sent to the provider. 0 = backend default."
+        },
+        "cascade.temperature": {
+          "type": "number",
+          "default": -1,
+          "description": "Sampling temperature passed to the provider on every turn (ADR-067). -1 = backend default. For weak local models, match your Modelfile's tuned value."
+        },
+        "cascade.topP": {
+          "type": "number",
+          "default": -1,
+          "description": "Nucleus sampling top-p (ADR-067). -1 = backend default."
+        },
+        "cascade.topK": {
+          "type": "number",
+          "default": 0,
+          "description": "Top-k sampling (ADR-067). 0 = backend default."
+        },
+        "cascade.utilityModel": {
+          "type": "string",
+          "default": "",
+          "description": "Small model for SIDE-QUERIES — compaction summaries and memory curation — so they don't evict the main model's KV cache (e.g. \"qwen3:4b\"; pull it first). Same provider/endpoint as the main model. Empty = side-queries use the main model."
+        },
+        "cascade.additionalDirectories": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Extra absolute directories Cascade may read/write WITHOUT asking, in addition to the workspace. Paths outside the workspace and this list still work — they just prompt for approval each time. Other folders of a multi-root workspace are included automatically."
+        },
+        "cascade.contextFiles": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Workspace-relative files pinned into the system prompt and re-read FRESH each turn (ADR-056) — always present, never compacted (e.g. [\"PLAN.md\", \"docs/CONVENTIONS.md\"]). Keep them small: they cost context every turn."
+        },
         "cascade.checkCommand": {
           "type": "string",
           "default": "",
@@ -150,6 +214,8 @@
   },
   "dependencies": {
     "@cascade/core": "*",
+    "playwright-core": "^1.49.0",
+    "zod": "^4.4.3",
     "@streamdown/code": "^1.1.1",
     "@streamdown/math": "^1.0.2",
     "@streamdown/mermaid": "^1.0.2",

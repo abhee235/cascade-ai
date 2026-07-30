@@ -6,7 +6,7 @@ import fg from 'fast-glob'
 import { readFile } from 'node:fs/promises'
 import { relative } from 'node:path'
 import type { Tool } from '../Tool'
-import { ProjectPathError, resolveInProject } from '../projectPath'
+import { assertPatternInProject, isAllowedPath, ProjectPathError, resolveInProject } from '../projectPath'
 
 const inputSchema = z.object({
   pattern: z.string().describe('Regular expression to search for.'),
@@ -19,7 +19,7 @@ const MAX_MATCHES = 100
 
 export const GrepTool: Tool<z.infer<typeof inputSchema>> = {
   name: 'Grep',
-  description: `Search file CONTENTS with a regular expression, across the project. Use this to find where something appears — a function, symbol, string, or usage. To find files by NAME/path instead, use Glob. Narrow the search with \`path\` (a subdirectory) and \`glob\` (e.g. "**/*.ts"). The pattern is a JavaScript regex and matching is case-sensitive. Returns matches as \`file:line: text\` (capped; node_modules/dist/.git are ignored).`,
+  description: `Search file CONTENTS with a regular expression, across the project. Use this to find where something appears — a function, symbol, string, or usage. To find files by NAME/path instead, use Glob. Narrow the search with \`path\` (a subdirectory) and \`glob\` (e.g. "**/*.ts"). The pattern is a JavaScript REGEX and matching is case-sensitive — escape metacharacters when searching for literal code: to find \`foo(x)\` search \`foo\\(x\\)\`; same for \`. * + ? [ ] { } | $ ^\`. Returns matches as \`file:line: text\` (capped; node_modules/dist/.git are ignored).`,
   inputSchema,
   activitySummary: (input) => `Searching "${input.pattern}"`,
   isReadOnly: () => true,
@@ -35,7 +35,8 @@ export const GrepTool: Tool<z.infer<typeof inputSchema>> = {
 
     let cwd: string
     try {
-      cwd = input.path ? resolveInProject(ctx.cwd, input.path, ctx.sandbox?.root) : ctx.cwd // ADR-033: jail to project
+      if (input.glob) assertPatternInProject(input.glob) // the GLOB FILTER can escape too, not just `path`
+      cwd = input.path ? resolveInProject(ctx.cwd, input.path, ctx.sandbox?.root, ctx.pathScope) : ctx.cwd // ADR-033: jail to project
     } catch (e) {
       if (e instanceof ProjectPathError) return { content: e.message, isError: true }
       throw e
@@ -49,6 +50,9 @@ export const GrepTool: Tool<z.infer<typeof inputSchema>> = {
     } else {
       files = await fg(input.glob ?? '**/*', { cwd, onlyFiles: true, dot: false, ignore: IGNORE, absolute: true })
     }
+    // Defense in depth: never READ a file outside the allowed roots, whatever the glob produced. (A
+    // ripgrep walk can't leave its root; fast-glob can, so we filter.)
+    files = files.filter((f) => isAllowedPath(ctx.cwd, f, ctx.pathScope?.roots))
 
     const out: string[] = []
     for (const file of files) {

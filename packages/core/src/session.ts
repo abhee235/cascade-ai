@@ -103,6 +103,18 @@ export interface SessionOptions {
    *  cwd is MODEL-WRITABLE and untrusted (the server's sandboxed builder projects): hook commands spawn on the
    *  HOST, so a model-written hooks.json would otherwise escalate out of the sandbox at the next open(). */
   loadProjectHooks?: boolean
+  /** How file paths are confined. 'jail' (DEFAULT — the sandboxed web builder): tools REFUSE any path
+   *  outside the project. 'prompt' (the VS Code extension): an outside path is
+   *  approvable — the permission gate asks, even for reads and even in acceptEdits. */
+  pathAccess?: import('./tools/projectPath').PathAccess
+  /** Extra directories treated as inside the workspace (no prompt). Only meaningful with
+   *  `pathAccess: 'prompt'`. */
+  additionalDirectories?: string[]
+  /** Small fast model for SIDE-QUERIES — compaction summaries and memory curation. On a single local GPU
+   *  the side-query otherwise runs on the BUILDER model itself, competing for its KV cache (measured: a
+   *  curation call blocked a model switch for minutes; every constrained-compaction summarize evicts build
+   *  prefix). A co-resident 3–4B handles both jobs. Omit ⇒ side-queries use the main model (unchanged). */
+  utility?: { provider: ModelProvider; model: string }
   /** ADR-055: skill directories, IN ORDER — later dirs shadow earlier ones by name. Pass base (server-owned,
    *  immutable — they live OUTSIDE the project and the Read jail) dirs first and user dirs last. The session
    *  loads them once, advertises a one-line index in the system prompt, and serves bodies via the Skill tool. */
@@ -143,10 +155,17 @@ export function createSession(opts: SessionOptions): CascadeSession {
   // Permission plumbing. `pending` holds, per tool-use id, the resolve() of the promise the scheduler is
   // awaiting. respondPermission(id, …) resolves it — that is the moment the parked loop wakes back up.
   const pending = new Map<string, (d: 'allow' | 'allow-always' | 'deny') => void>()
+  // Path confinement (ADR-033). 'jail' stays the DEFAULT so the sandboxed web builder — whose
+  // project dir is model-writable and which runs `bypass` — keeps its hard refuse. The extension opts into
+  // 'prompt': outside paths become approvable via a working-directory prompt.
+  const pathScope = { roots: opts.additionalDirectories, policy: opts.pathAccess ?? 'jail' } as const
   const state: PermissionState = {
     mode: opts.mode ?? 'default',
     allow: new Set(opts.allow ?? []),
     deny: new Set(opts.deny ?? []),
+    cwd: opts.cwd,
+    roots: opts.additionalDirectories ? [...opts.additionalDirectories] : [],
+    pathAccess: opts.pathAccess ?? 'jail',
   }
   const permission: PermissionController = {
     state,
@@ -285,9 +304,12 @@ export function createSession(opts: SessionOptions): CascadeSession {
   // Event-driven curation (ADR-015): harvest durable facts when context is about to be discarded — at
   // compaction (the older chunk) and at session end. OPT-IN (autoMemory); consolidates (ADD/NOOP), no firehose.
   const autoMemory = opts.autoMemory === true
+  // Side-queries (curation + compaction summaries) route to the UTILITY model when configured — a small
+  // co-resident model that doesn't evict the builder's KV cache. Same behavior otherwise.
+  const side = { provider: opts.utility?.provider ?? opts.provider, model: opts.utility?.model ?? opts.model }
   const curate = (msgs: Message[]) =>
     autoMemory && msgs.length
-      ? curateMemory({ messages: msgs, provider: opts.provider, model: opts.model, archival })
+      ? curateMemory({ messages: msgs, provider: side.provider, model: side.model, archival })
       : Promise.resolve([] as string[])
 
   return {
@@ -343,15 +365,16 @@ export function createSession(opts: SessionOptions): CascadeSession {
           tracer: turnTracer,
           registry,
           archival,
+          pathScope,
           recalled,
           compact: {
-            provider: opts.provider,
-            model: opts.model,
+            provider: side.provider,
+            model: side.model,
             plan: compactPlan,
             signal: controller.signal,
             // WATCHDOG (iterate-5): the summarize call gets the SAME recycle hook as the main model call —
             // an unguarded summarize was how a wedged backend killed whole rounds.
-            recover: opts.provider.recover ? () => opts.provider.recover!(opts.model) : undefined,
+            recover: side.provider.recover ? () => side.provider.recover!(side.model) : undefined,
             // Self-heal visibility (iterate-7): summarize retries land in the trace like the loop's own.
             onRetry: (info) => tracer.event({ t: 'error', message: `recover(compact summarize) attempt ${info.attempt}, wait ${info.delayMs}ms` }),
             // Coupled curation: harvest durable facts from the OLDER messages right before they're summarized away.

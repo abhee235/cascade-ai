@@ -5,6 +5,12 @@ import * as esbuild from 'esbuild'
 
 const watch = process.argv.includes('--watch')
 
+// Build stamp baked into BOTH bundles. The host sends its stamp to the webview on connect; the webview
+// compares with its own and shows a "stale host — restart the debug session" banner on mismatch. This
+// exists because a webview-panel reload loads fresh webview.js while the extension host keeps running the
+// OLD extension.js from memory — an invisible split that cost a debugging session to identify.
+const buildStamp = JSON.stringify(new Date().toISOString())
+
 /** @type {import('esbuild').BuildOptions} */
 const hostOptions = {
   entryPoints: ['src/extension.ts'],
@@ -13,7 +19,10 @@ const hostOptions = {
   platform: 'node',
   format: 'cjs',
   target: 'node18',
-  external: ['vscode'], // provided by the VS Code runtime
+  // vscode: provided by the VS Code runtime. playwright-core: lazy-imported by the Browser tool and
+  // full of dynamic requires — must stay a real node_modules resolve, never bundled.
+  external: ['vscode', 'playwright-core'],
+  define: { __CASCADE_BUILD__: buildStamp },
   sourcemap: true,
   logLevel: 'info',
 }
@@ -37,6 +46,7 @@ const webviewOptions = {
   format: 'iife',
   target: 'es2022',
   jsx: 'automatic',
+  define: { __CASCADE_BUILD__: buildStamp },
   sourcemap: true,
   logLevel: 'info',
 }

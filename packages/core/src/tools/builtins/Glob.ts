@@ -4,7 +4,7 @@
 import { z } from 'zod'
 import fg from 'fast-glob'
 import type { Tool } from '../Tool'
-import { ProjectPathError, resolveInProject } from '../projectPath'
+import { assertPatternInProject, displayPath, isAllowedPath, ProjectPathError, resolveInProject } from '../projectPath'
 
 const inputSchema = z.object({
   pattern: z.string().describe('Glob pattern, e.g. "**/*.ts" or "src/**/*.tsx".'),
@@ -27,12 +27,16 @@ export const GlobTool: Tool<z.infer<typeof inputSchema>> = {
   async call(input, ctx) {
     let cwd: string
     try {
-      cwd = input.path ? resolveInProject(ctx.cwd, input.path, ctx.sandbox?.root) : ctx.cwd // ADR-033: jail to project
+      assertPatternInProject(input.pattern) // the PATTERN can escape too, not just `path`
+      cwd = input.path ? resolveInProject(ctx.cwd, input.path, ctx.sandbox?.root, ctx.pathScope) : ctx.cwd // ADR-033: jail to project
     } catch (e) {
       if (e instanceof ProjectPathError) return { content: e.message, isError: true }
       throw e
     }
-    const files = await fg(input.pattern, { cwd, onlyFiles: true, dot: false, ignore: IGNORE })
+    // Match absolutely, then keep only what is genuinely inside the project (defense in depth), and report
+    // paths relative to the PROJECT ROOT so the model can feed them straight back to Read/Edit.
+    const matched = await fg(input.pattern, { cwd, onlyFiles: true, dot: false, ignore: IGNORE, absolute: true })
+    const files = matched.filter((f) => isAllowedPath(ctx.cwd, f, ctx.pathScope?.roots)).map((f) => displayPath(ctx.cwd, f))
     if (files.length === 0) return { content: 'No files matched.' }
     const shown = files.slice(0, MAX)
     const more = files.length > MAX ? `\n…(${files.length - MAX} more)` : ''

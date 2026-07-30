@@ -2,7 +2,7 @@
 // and expose top_k only where the API does. Match is most-specific-substring-first; unknown ⇒ default ceiling.
 
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_LIMITS, limitsFor, specCapabilities } from '../src/modelSpecs'
+import { DEFAULT_LIMITS, limitsFor, specCapabilities } from '@cascade/core'
 
 describe('limitsFor (ADR-067)', () => {
 	it('resolves a hosted OpenAI model to its official ceilings, no top_k', () => {

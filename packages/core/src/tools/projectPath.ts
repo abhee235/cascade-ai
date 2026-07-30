@@ -45,15 +45,35 @@ function isInside(root: string, abs: string): boolean {
  *  - anything still outside the project         → throws ProjectPathError (the host is never touched)
  *  `sandboxRoot` is the path the project is mounted at inside the sandbox (e.g. '/workspace'); pass
  *  `ctx.sandbox?.root`. */
-export function resolveInProject(cwd: string, filePath: string, sandboxRoot?: string): string {
+/** How a frontend confines file paths (ADR-033 + the 2026-07-28 parity change):
+ *  - 'jail'   (DEFAULT): a path outside the project is REFUSED by the tool. Required by the sandboxed web
+ *    builder — its project dir is model-writable and it runs `bypass`, so the gate would never object.
+ *  - 'prompt' (the VS Code extension): outside paths RESOLVE, and the permission gate
+ *    asks the user to approve them. `roots` widens the no-prompt area (cwd + additionalDirectories). */
+export type PathAccess = 'jail' | 'prompt'
+
+export interface PathScope {
+  /** Extra directories treated as inside (no prompt). The project root is always implicitly included. */
+  roots?: string[]
+  policy?: PathAccess
+}
+
+/** True when `abs` is inside the project root or any additional allowed root. */
+export function isAllowedPath(cwd: string, abs: string, roots?: string[]): boolean {
+  if (isInside(resolve(cwd), abs)) return true
+  return (roots ?? []).some((r) => isInside(resolve(r), abs))
+}
+
+export function resolveInProject(cwd: string, filePath: string, sandboxRoot?: string, scope?: PathScope): string {
   const root = resolve(cwd)
   const raw = filePath.trim()
 
-  // (A) An absolute path that already lands inside the project → accept it directly. Done first so a host cwd
-  //     that happens to live under an alias (e.g. cwd === '/app/proj') is never double-rooted by step (B).
+  // (A) An absolute path that already lands inside the project (or an additional allowed root) → accept it
+  //     directly. Done first so a host cwd that happens to live under an alias (e.g. cwd === '/app/proj')
+  //     is never double-rooted by step (B).
   if (isAbsolute(raw)) {
     const absHost = resolve(raw)
-    if (isInside(root, absHost)) return absHost
+    if (isAllowedPath(root, absHost, scope?.roots)) return absHost
   }
 
   // (B) Strip a container-root alias prefix so "/app/plan2.txt" or "/workspace/src/x" becomes project-relative.
@@ -85,8 +105,27 @@ export function resolveInProject(cwd: string, filePath: string, sandboxRoot?: st
   // (C) Resolve against the project root and confine. An absolute leftover (a real host path or an unknown
   //     root) that isn't inside the project escapes → reject.
   const abs = isAbsolute(rel) ? resolve(rel) : resolve(root, rel)
-  if (!isInside(root, abs)) throw new ProjectPathError(filePath)
-  return abs
+  if (isAllowedPath(root, abs, scope?.roots)) return abs
+  // Outside every allowed root. 'jail' refuses here (the tool never touches the host); 'prompt' hands the
+  // path back and the PERMISSION GATE becomes the enforcement point.
+  if (scope?.policy === 'prompt') return abs
+  throw new ProjectPathError(filePath)
+}
+
+/** Reject a glob PATTERN that can escape the project. `resolveInProject` jails the `path` OPTION, but the
+ *  pattern itself goes straight to fast-glob — measured (2026-07-28 jail audit): `Glob {pattern:"../*.txt"}`
+ *  listed files outside the root and `Grep {glob:"../*.txt"}` printed their CONTENTS. Absolute patterns are
+ *  refused for the same reason (fast-glob honors them regardless of `cwd`). */
+export function assertPatternInProject(pattern: string): void {
+  const norm = pattern.replace(/\\/g, '/')
+  const escapes = norm === '..' || norm.startsWith('../') || norm.includes('/../') || norm.endsWith('/..')
+  if (escapes || isAbsolute(pattern) || norm.startsWith('/')) throw new ProjectPathError(pattern)
+}
+
+/** True when `abs` lives inside the project root — exported so match lists can be filtered as defense in
+ *  depth (symlinks, future glob syntaxes) even after the pattern check passes. */
+export function isInsideProject(root: string, abs: string): boolean {
+  return isInside(resolve(root), resolve(abs))
 }
 
 /** A confined absolute path rendered as a clean project-relative string (forward slashes) for the UI card —

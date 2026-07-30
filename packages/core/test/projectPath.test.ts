@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { ProjectPathError, resolveInProject } from '../src/tools/projectPath'
+import { assertPatternInProject, isInsideProject, ProjectPathError, resolveInProject } from '../src/tools/projectPath'
 
 const cwd = mkdtempSync(join(tmpdir(), 'projpath-'))
 mkdirSync(join(cwd, 'src', 'components'), { recursive: true })
@@ -34,5 +34,60 @@ describe('resolveInProject — bare-absolute re-rooting (B2)', () => {
 	it('the container aliases still work alongside (B2)', () => {
 		expect(resolveInProject(cwd, '/workspace/src/App.tsx')).toBe(resolve(cwd, 'src/App.tsx'))
 		expect(resolveInProject(cwd, '/app/src/App.tsx')).toBe(resolve(cwd, 'src/App.tsx'))
+	})
+})
+
+// ── Glob/Grep PATTERN escapes (2026-07-28 jail audit) ────────────────────────────────────────────────
+// Measured hole: `resolveInProject` jails the `path` OPTION, but the pattern went straight to fast-glob —
+// `Glob {pattern:"../*.txt"}` listed files outside the root and `Grep {glob:"../*.txt"}` printed their
+// CONTENTS. Both tools now assert the pattern AND filter results to the project.
+describe('assertPatternInProject — a glob pattern must not escape the project', () => {
+	it('rejects parent traversal in every position', () => {
+		for (const p of ['..', '../*.txt', '../**/*.ts', 'src/../../etc/*', 'a/..', '..\\windows\\*']) {
+			expect(() => assertPatternInProject(p), p).toThrow(ProjectPathError)
+		}
+	})
+	it('rejects absolute patterns (fast-glob honours them regardless of cwd)', () => {
+		expect(() => assertPatternInProject('/etc/*')).toThrow(ProjectPathError)
+		// Drive-letter absolutes are only absolute ON Windows — assert them there.
+		if (process.platform === 'win32') expect(() => assertPatternInProject('C:\\Users\\**')).toThrow(ProjectPathError)
+	})
+	it('allows ordinary project patterns, including dotted names', () => {
+		for (const p of ['**/*.ts', 'src/**/*.tsx', 'package.json', 'src/a..b/*.ts', '**/*.d.ts']) {
+			expect(() => assertPatternInProject(p), p).not.toThrow()
+		}
+	})
+})
+
+describe('isInsideProject — result filtering (defense in depth)', () => {
+	it('accepts the root and descendants, rejects siblings/parents (real temp paths)', () => {
+		const base = mkdtempSync(join(tmpdir(), 'inside-'))
+		const root = join(base, 'proj')
+		expect(isInsideProject(root, root)).toBe(true)
+		expect(isInsideProject(root, join(root, 'src', 'a.ts'))).toBe(true)
+		expect(isInsideProject(root, join(base, 'proj-evil', 'a.ts'))).toBe(false) // prefix-sibling, not a child
+		expect(isInsideProject(root, join(base, 'SECRET.txt'))).toBe(false)
+		rmSync(base, { recursive: true, force: true })
+	})
+})
+
+// ── Path policy: 'jail' (web builder) vs 'prompt' (extension) ────────────────────────────────────────
+describe('pathAccess policy', () => {
+	it("jail (DEFAULT) refuses an outside path — the sandboxed builder's guarantee is unchanged", () => {
+		expect(() => resolveInProject(cwd, '../outside.txt')).toThrow(ProjectPathError)
+		expect(() => resolveInProject(cwd, '../outside.txt', undefined, { policy: 'jail' })).toThrow(ProjectPathError)
+	})
+
+	it('prompt RESOLVES an outside path (the permission gate becomes the enforcement point)', () => {
+		const abs = resolveInProject(cwd, '../outside.txt', undefined, { policy: 'prompt' })
+		expect(abs.endsWith('outside.txt')).toBe(true)
+	})
+
+	it('additional roots are treated as inside under EITHER policy (--add-dir)', () => {
+		const extra = mkdtempSync(join(tmpdir(), 'extra-'))
+		const target = join(extra, 'notes.md')
+		expect(resolveInProject(cwd, target, undefined, { roots: [extra] })).toBe(resolve(target))
+		expect(isInsideProject(cwd, target)).toBe(false) // …and still outside the project proper
+		rmSync(extra, { recursive: true, force: true })
 	})
 })

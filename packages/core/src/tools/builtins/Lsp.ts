@@ -35,7 +35,7 @@ export const LspTool: Tool<z.infer<typeof inputSchema>> = {
     // Confine the file to the project (ADR-033) and get a project-relative path for the LanguageService.
     let abspath: string
     try {
-      abspath = resolveInProject(ctx.cwd, input.file, ctx.sandbox?.root)
+      abspath = resolveInProject(ctx.cwd, input.file, ctx.sandbox?.root, ctx.pathScope)
     } catch (e) {
       if (e instanceof ProjectPathError) return { content: e.message, isError: true }
       throw e

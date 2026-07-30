@@ -28,7 +28,7 @@ export type { Tracer, TraceEvent } from './observability/tracer'
 // MCP (ADR-014): register servers; the real stdio adapter is sdkConnect (frontends inject it).
 export { McpHub } from './mcp/mcpHub'
 export type { McpServerConfig, McpConnect, McpClient, McpStatus, McpServerStatus } from './mcp/mcpHub'
-export { sdkConnect } from './mcp/sdkConnect'
+export { sdkConnect, makeSdkConnect } from './mcp/sdkConnect'
 export { loadMcpServers, MCP_CONFIG_FILE } from './mcp/loadMcpConfig'
 // Memory (ADR-015): durable cross-session core memory, injected into the system prompt.
 export {
@@ -61,3 +61,7 @@ export { scopeToolsByGrants } from './tools/toolGrants'
 export type { Tool, ToolResult, ToolContext } from './tools/Tool' // ADR-060: server-authored extra tools (Browser)
 export { loadAgentDefs, agentChildInstructions } from './agent/agentDefs'
 export type { AgentDef } from './agent/agentDefs'
+
+// Model specs (ADR-067): per-model official limits + hosted capabilities — shared by every model manager
+// UI (web server AND the extension) so they agree on what a model supports.
+export { DEFAULT_LIMITS, limitsFor, MODEL_SPECS, specCapabilities, type ModelLimits } from './llm/modelSpecs'

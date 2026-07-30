@@ -106,3 +106,28 @@
 }
 @keyframes cascade-blink { 50% { opacity: 0; } }
 .cascade-caret { animation: cascade-blink 1s step-end infinite; }
+
+/* ── Composer chrome (the chips + upward menus): interactive states that inline styles can't do. ── */
+.cascade-chip {
+  transition: background 0.1s ease, border-color 0.1s ease;
+}
+.cascade-chip:hover {
+  background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.08));
+}
+.cascade-chip:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+.cascade-menu-item:hover {
+  background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.08));
+}
+.cascade-menu-item:active {
+  background: var(--vscode-list-activeSelectionBackground, rgba(255, 255, 255, 0.12));
+}
+.cascade-icon-action:hover {
+  background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.08));
+}
+/* The composer box lights up its border when the textarea inside has focus. */
+.cascade-composer-box:focus-within {
+  border-color: var(--vscode-focusBorder) !important;
+}

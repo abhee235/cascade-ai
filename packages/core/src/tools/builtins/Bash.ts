@@ -22,7 +22,26 @@ const inputSchema = z.object({
 // git-safety protocol, tool-preference, quoting, interactivity, and parallelism, condensed
 // for a local model and Cascade's sandbox. Descriptions are advertised EVERY request, so like the system prompt
 // they are TIER-SIZED (the description is a function of the window tier — toolRegistry.descriptionOf).
-const BASH_DESCRIPTION_FULL = `Run a shell command in the project and return its combined stdout/stderr. Use it for real shell work — building, running tests, installing dependencies, git, and running scripts.
+//
+// PLATFORM-AWARE (per-shell guidance): the EXECUTION TARGET decides the syntax —
+// a Docker sandbox always runs POSIX sh regardless of host; the host path is cmd.exe on Windows and /bin/sh
+// elsewhere. The registry passes that target (`exec`) into the description fn (ADR-037 extension). Measured
+// (Orbit build, 2026-07-27): the model's FIRST Bash call was `mkdir -p …`, a bash-ism that fails on cmd.exe;
+// it burned a recovery turn discovering the shell by trial. Tell it up front. Stable per session, so the
+// description stays cache-stable.
+type ExecPlatform = 'win32' | 'posix'
+const shellNoteFull = (exec: ExecPlatform): string =>
+  exec === 'win32'
+    ? `- Commands run via Windows cmd.exe, NOT bash. Use Windows syntax: \`mkdir a\\b\` (no -p; it creates parents), \`2>nul\` (not /dev/null), \`rmdir /s /q\` (not rm -rf), \`copy\`/\`move\`, \`%VAR%\`. No bash-isms: no \`export\`, no \`$( )\`, no heredocs, no single-quoted arguments (use double quotes).
+- A dev server or watcher started here BLOCKS until the timeout kills it — this tool cannot host long-running processes. Start it detached instead: \`start /b cmd /c "npm run dev > dev.log 2>&1"\`, then verify with \`curl http://localhost:<port>\` and Read dev.log for errors.`
+    : `- Commands run via /bin/sh. Quote arguments containing special characters ($, backticks, parentheses, ;, |, &, !): single quotes '…' pass text literally (but cannot contain a literal single quote); prefer double quotes with inner \\" escaping when unsure. For multi-line text use a heredoc.
+- A dev server or watcher started here BLOCKS until the timeout kills it — this tool cannot host long-running processes. Start it detached instead: \`nohup npm run dev > dev.log 2>&1 &\`, then verify with \`curl http://localhost:<port>\` and Read dev.log for errors.`
+const shellNoteLean = (exec: ExecPlatform): string =>
+  exec === 'win32'
+    ? ` Windows cmd.exe syntax (mkdir without -p, 2>nul, no bash-isms, double quotes). Dev servers BLOCK — start detached: start /b cmd /c "npm run dev > dev.log 2>&1".`
+    : ` Runs via /bin/sh — quote special characters. Dev servers BLOCK — start detached: nohup npm run dev > dev.log 2>&1 &.`
+
+const descriptionFull = (exec: ExecPlatform) => `Run a shell command in the project and return its combined stdout/stderr. Use it for real shell work — building, running tests, installing dependencies, git, and running scripts.
 
 Prefer the dedicated tools over Bash so the user can review your work:
 - Read a file with Read (not cat/head/tail); change one with Edit (not sed/awk); create one with Write (not echo > or heredoc).
@@ -30,6 +49,7 @@ Prefer the dedicated tools over Bash so the user can review your work:
 Reserve Bash for commands that genuinely need a shell.
 
 Execution notes:
+${shellNoteFull(exec)}
 - The working directory persists between calls, but shell state (env vars, cd) does NOT — prefer absolute or project-relative paths over \`cd\`. Quote paths that contain spaces.
 - Do NOT run interactive commands (they hang): nothing that waits for input, such as \`git add -i\` or \`git rebase -i\`.
 - Multiple commands: if independent, send several Bash calls in ONE message (they run in parallel); if they depend on each other, chain them with \`&&\` in a single call. Don't separate commands with newlines.
@@ -42,13 +62,17 @@ Git safety (only when the user asks you to commit):
 - Stage specific files by name rather than \`git add -A\`, to avoid committing secrets (.env) or junk.`
 
 // lean (32k/64k): every load-bearing rule, one line each — no elaboration.
-const BASH_DESCRIPTION_LEAN = `Run a shell command (build, test, install, git, scripts); returns stdout+stderr. Prefer the dedicated tools: Read (not cat), Edit (not sed), Write (not echo>), Glob (not find), Grep (not grep/rg). No interactive commands (they hang). Independent commands: separate parallel calls; dependent: chain with &&. Shell state doesn't persist between calls — avoid cd. Times out after 120s (pass a larger \`timeout\` in ms, max 600000, for slow commands). Long output keeps the start+end (middle dropped). Git: only commit when asked; new commits (no --amend); no destructive commands (push --force, reset --hard) or --no-verify unless explicitly asked; stage files by name.`
+const descriptionLean = (exec: ExecPlatform) => `Run a shell command (build, test, install, git, scripts); returns stdout+stderr.${shellNoteLean(exec)} Prefer the dedicated tools: Read (not cat), Edit (not sed), Write (not echo>), Glob (not find), Grep (not grep/rg). No interactive commands (they hang). Independent commands: separate parallel calls; dependent: chain with &&. Shell state doesn't persist between calls — avoid cd. Times out after 120s (pass a larger \`timeout\` in ms, max 600000, for slow commands). Long output keeps the start+end (middle dropped). Git: only commit when asked; new commits (no --amend); no destructive commands (push --force, reset --hard) or --no-verify unless explicitly asked; stage files by name.`
 
 // minimal (<24k): the two rules that prevent real damage.
 const BASH_DESCRIPTION_MINIMAL = `Run a shell command (build/test/git); returns output. Prefer Read/Edit/Write/Glob/Grep for file work. No interactive commands. Git: only commit when asked; never destructive commands (--force, reset --hard, --no-verify) unless explicitly asked.`
 
-const bashDescription = (tier: 'minimal' | 'lean' | 'full'): string =>
-  tier === 'full' ? BASH_DESCRIPTION_FULL : tier === 'lean' ? BASH_DESCRIPTION_LEAN : BASH_DESCRIPTION_MINIMAL
+const bashDescription = (tier: 'minimal' | 'lean' | 'full', exec?: ExecPlatform): string => {
+  // Default to the HOST platform when the caller doesn't say (standalone registry use); the loop passes
+  // the real execution target (sandbox ⇒ posix).
+  const e: ExecPlatform = exec ?? (process.platform === 'win32' ? 'win32' : 'posix')
+  return tier === 'full' ? descriptionFull(e) : tier === 'lean' ? descriptionLean(e) : BASH_DESCRIPTION_MINIMAL
+}
 
 // Conservative heuristic: read-only ONLY if every piped/chained segment leads with a known safe command.
 // Anything unrecognized is treated as a mutation (fail-safe) — the read-only flag is input-dependent.

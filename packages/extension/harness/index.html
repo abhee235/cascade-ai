@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8" />
+	<title>Cascade webview harness</title>
+	<!-- Smoke-test the REAL webview bundle in a browser: from packages/extension run
+	     `python -m http.server 5299` then open http://localhost:5299/harness/ and drive it (or point
+	     Playwright at it). acquireVsCodeApi is mocked; window.__sent records everything the UI posts. -->
+	<link rel="stylesheet" href="/dist/webview.css" />
+	<style>
+	:root {
+		--vscode-font-family: 'Segoe UI', system-ui, sans-serif;
+		--vscode-font-size: 13px;
+		--vscode-editor-font-family: Consolas, 'Courier New', monospace;
+		--vscode-foreground: #cccccc;
+		--vscode-editor-background: #1e1e1e;
+		--vscode-editorWidget-background: #252526;
+		--vscode-input-background: #3c3c3c;
+		--vscode-input-foreground: #cccccc;
+		--vscode-input-border: #3c3c3c;
+		--vscode-panel-border: #454545;
+		--vscode-widget-border: #454545;
+		--vscode-button-background: #0e639c;
+		--vscode-button-foreground: #ffffff;
+		--vscode-button-secondaryBackground: #3a3d41;
+		--vscode-button-secondaryForeground: #cccccc;
+		--vscode-badge-background: #4d4d4d;
+		--vscode-badge-foreground: #ffffff;
+		--vscode-list-hoverBackground: #2a2d2e;
+		--vscode-list-activeSelectionBackground: #094771;
+		--vscode-focusBorder: #007fd4;
+		--vscode-textLink-foreground: #3794ff;
+		--vscode-errorForeground: #f48771;
+		--vscode-charts-green: #89d185;
+		--vscode-charts-yellow: #cca700;
+		--vscode-disabledForeground: #888888;
+		--vscode-dropdown-background: #3c3c3c;
+		--vscode-dropdown-foreground: #f0f0f0;
+		--vscode-dropdown-border: #3c3c3c;
+		--vscode-inputValidation-warningBackground: #352a05;
+		--vscode-inputValidation-warningBorder: #b89500;
+		--vscode-textCodeBlock-background: #0a0a0a;
+		--vscode-progressBar-background: #0e70c0;
+		--vscode-checkbox-background: #3c3c3c;
+		--vscode-checkbox-border: #6b6b6b;
+		--vscode-editor-font-size: 13px;
+	}
+body { max-width: 420px; height: 100vh; margin: 0; background: #1e1e1e; }</style>
+</head>
+<body class="vscode-dark">
+	<div id="root"></div>
+	<script>
+		// ── Mocked VS Code API + fake HOST ─────────────────────────────────────────
+		window.__sent = []
+		const reply = (data) => setTimeout(() => window.postMessage(data, '*'), 30)
+		const CATALOG = [
+			{ name: 'qwen36-agentic:latest', size: '25.4 GB' },
+			{ name: 'qwen3-coder:30b', size: '18.6 GB' },
+			{ name: 'qwen3:4b', size: '2.6 GB' },
+			{ name: 'nomic-embed-text:latest', size: '0.3 GB' },
+		]
+		const SETTINGS = {
+			provider: 'ollama', model: 'qwen36-agentic:latest', baseUrl: '', apiKeySet: false,
+			utilityModel: 'qwen3:4b', permissionMode: 'default',
+			contextWindow: 0, maxOutputTokens: 0, temperature: -1, topP: -1, topK: 0,
+		}
+		let HOST_BUILD = 'unknown'
+		fetch('/dist/webview.js').then(r => r.text()).then(t => { const m = t.match(/"(20\d\d-\d\d-\d\dT[\d:.]+Z)"/); if (m) HOST_BUILD = m[1] })
+		window.acquireVsCodeApi = () => ({
+			postMessage(msg) {
+				window.__sent.push(msg)
+				if (window.__sent.length === 1) reply({ type: 'hostInfo', build: HOST_BUILD })
+				if (msg.type === 'models') reply({ type: 'modelsData', settings: SETTINGS, catalog: CATALOG, info: { capabilities: ['tools', 'thinking', 'vision'], contextWindow: 131072, archMax: 262144 } })
+				if (msg.type === 'chats') {
+					reply({ type: 'chatsData', chats: [
+						{ id: 'c1', title: 'Build "Orbit" — a 3D product landing page', updatedAt: new Date().toISOString() },
+						{ id: 'c2', title: 'Fix the login bug', updatedAt: new Date().toISOString() },
+					], activeId: 'c1' })
+					reply({ type: 'chatRestored', items: [
+						{ kind: 'user', text: 'Build "Orbit" — a 3D product landing page' },
+						{ kind: 'tool', id: 't1', name: 'Write', summary: 'src/App.tsx', status: 'ok', preview: 'wrote 120 lines' },
+						{ kind: 'assistant', text: 'Scaffolded the app and wrote the hero section. Building next.' },
+					] })
+				}
+				if (msg.type === 'skills') reply({ type: 'skillsData', skills: [{ name: 'new-app', description: 'Workflow for building a NEW application from scratch' }] })
+				if (msg.type === 'setModelConfig') {
+					Object.assign(SETTINGS, msg.patch)
+					reply({ type: 'modelsData', settings: { ...SETTINGS }, catalog: CATALOG, info: { capabilities: ['tools'], contextWindow: 131072 } })
+				}
+			},
+		})
+	</script>
+	<script src="/dist/webview.js"></script>
+</body>
+</html>

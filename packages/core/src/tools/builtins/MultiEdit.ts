@@ -43,7 +43,7 @@ export const MultiEditTool: Tool<z.infer<typeof inputSchema>> = {
   async call(input, ctx) {
     let path: string
     try {
-      path = resolveInProject(ctx.cwd, input.file_path, ctx.sandbox?.root) // ADR-033: jail to the project root
+      path = resolveInProject(ctx.cwd, input.file_path, ctx.sandbox?.root, ctx.pathScope) // ADR-033: jail to the project root
     } catch (e) {
       if (e instanceof ProjectPathError) return { content: e.message, isError: true }
       throw e

@@ -15,9 +15,16 @@ Smoke:
 - [ ] 1. Browser {op:"open"}                     — loads the app (starts the dev server if needed)
 - [ ] 2. Browser {op:"snapshot"}                 — READ the tree: are the nav, headings, lists, buttons there?
 - [ ] 3. For EACH key route (/, and every main view in PLAN.md): Browser {op:"open", path:"/route"} then snapshot
-- [ ] 4. Browser {op:"screenshot"}               — LOOK at it against the design checklist below
-- [ ] 5. Fix what you saw; build; re-check the one thing you fixed
+- [ ] 4. Browser {op:"audit"}                    — scrolls the WHOLE page: catches sections stuck invisible + console errors
+- [ ] 5. Browser {op:"screenshot"}               — LOOK at it against the design checklist below
+- [ ] 6. Fix what you saw; build; re-check the one thing you fixed
 ```
+
+**Why audit is mandatory:** a scroll-reveal animation (IntersectionObserver / `whileInView`) that never
+fires leaves whole sections — pricing, specs, CTA — permanently at `opacity: 0`. The code compiles, the
+top-of-page screenshot looks fine, and real visitors see blank page. This exact bug shipped three builds
+in a row before audit existed. `audit` FAILING means fix the reveal (or remove it — static content beats
+invisible content) and re-run until it passes.
 
 ## Is it actually RUNNING? — check before you judge the look
 

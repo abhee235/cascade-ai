@@ -14,7 +14,7 @@ import type { Tool } from '@cascade/core'
 import type { DockerSandbox } from './dockerSandbox.js'
 
 const inputSchema = z.object({
-	op: z.enum(['open', 'snapshot', 'screenshot', 'probe', 'click', 'press']).describe('open = load the app (do this first) · snapshot = accessibility tree as text (structure — cheap, prefer this) · screenshot = image for VISUAL judgment (expensive — budget these) · probe = evaluate a JS expression in the live page and get JSON back (RUNTIME state — games/canvas/dynamic behavior that snapshots cannot see).'),
+	op: z.enum(['open', 'snapshot', 'screenshot', 'probe', 'click', 'press', 'audit']).describe('open = load the app (do this first) · snapshot = accessibility tree as text (structure — cheap, prefer this) · screenshot = image for VISUAL judgment (expensive — budget these) · probe = evaluate a JS expression in the live page and get JSON back (RUNTIME state — games/canvas/dynamic behavior that snapshots cannot see) · audit = scroll the WHOLE page and report content stuck invisible (opacity 0) + console errors. ALWAYS run audit before declaring the page done.'),
 	path: z.string().optional().describe('Route to open, e.g. "/" or "/settings". Only with op:"open"; the app origin is fixed.'),
 	expr: z.string().optional().describe('JS expression for op:"probe", evaluated in the page, result JSON-returned. E.g. "__DEBUG__.state()" or "(__DEBUG__.step(60), __DEBUG__.state().ball)". Canvas/game apps expose window.__DEBUG__ (see the game-dev skill).'),
 	target: z.string().optional().describe('For op:"click": visible text of the element (e.g. "START GAME") or a CSS selector. For op:"press": a key name, e.g. "ArrowLeft", "Space", "Enter", "Escape".'),
@@ -50,7 +50,37 @@ export interface PageLike {
 	evaluate(expr: string): Promise<unknown>
 	clickText(target: string): Promise<void>
 	press(key: string): Promise<void>
+	/** Console error lines collected since open (wired by launchPage; optional for test fakes). */
+	consoleErrors?(): string[]
 }
+
+/** The in-page audit (measured, 2026-07-27: THREE consecutive Orbit builds shipped scroll-reveal sections
+ *  permanently stuck at opacity:0 — invisible in code review and in top-of-page screenshots). Scroll the
+ *  full page in viewport steps; at each step count text elements whose own/ancestor computed opacity is 0
+ *  and sample their text. One evaluate call — no round-trips. */
+const AUDIT_EXPR = `(async () => {
+	const H = document.body.scrollHeight, V = window.innerHeight
+	const stuck = new Map(), steps = []
+	for (let y = 0; y <= H - V + 1; y += Math.max(400, V - 200)) {
+		window.scrollTo(0, y)
+		await new Promise(r => setTimeout(r, 700))
+		let vis = 0, bad = 0
+		for (const el of document.querySelectorAll('h1,h2,h3,h4,p,li,a,button')) {
+			const r = el.getBoundingClientRect()
+			if (r.bottom < 0 || r.top > V || !el.textContent.trim()) continue
+			let n = el, hidden = false
+			for (let i = 0; i < 5 && n; i++) {
+				if (getComputedStyle(n).opacity === '0') { hidden = true; break }
+				n = n.parentElement
+			}
+			if (hidden) { bad++; const t = el.textContent.trim().slice(0, 50); if (stuck.size < 12) stuck.set(t, y) }
+			else vis++
+		}
+		steps.push({ y, visible: vis, invisible: bad })
+	}
+	window.scrollTo(0, 0)
+	return { pageHeight: H, steps, stuckSamples: [...stuck.keys()] }
+})()`
 
 async function launchPage(): Promise<{ page: PageLike; close: () => Promise<void> }> {
 	const { chromium } = await import('playwright-core')
@@ -66,6 +96,11 @@ async function launchPage(): Promise<{ page: PageLike; close: () => Promise<void
 	}
 	if (!browser) throw new Error('No system browser found (tried Edge, Chrome). Install one, or skip browser checks.')
 	const raw = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+	const errors: string[] = []
+	raw.on('console', (m) => {
+		if (m.type() === 'error') errors.push(m.text().slice(0, 300))
+	})
+	raw.on('pageerror', (e) => errors.push(String(e).slice(0, 300)))
 	const page = raw as unknown as PageLike
 	// The interactive ops (ADR-079 Phase 0 — the missing HANDS: the gametester couldn't click START GAME).
 	// click accepts visible text first (what a model naturally quotes), CSS selector as the fallback.
@@ -75,6 +110,7 @@ async function launchPage(): Promise<{ page: PageLike; close: () => Promise<void
 		return raw.locator(target).first().click({ timeout: 5_000 })
 	}
 	page.press = (key: string) => raw.keyboard.press(key)
+	page.consoleErrors = () => errors
 	return { page, close: () => browser!.close() }
 }
 
@@ -95,7 +131,7 @@ export function createBrowserTool(deps: BrowserToolDeps): Tool {
 	const tool: Tool<z.infer<typeof inputSchema>> = {
 		name: 'Browser',
 		description:
-			'Look at the RUNNING app in a real browser — verify what you built actually renders and works. Use AFTER `npm run build` passes: op:"open" first (starts/loads the live preview), then op:"snapshot" for the accessibility tree (structure: headings, buttons, empty states — cheap text, prefer it), and op:"screenshot" ONLY for visual judgment (colors, layout, imagery — expensive, a few per session). Judge screenshots against the design checklist and FIX what you see. For GAMES/canvas/dynamic behavior use op:"probe" — snapshots cannot see a canvas; probe reads the RUNTIME state (window.__DEBUG__) as JSON so you tune with numbers, not guesses.',
+			'Look at the RUNNING app in a real browser — verify what you built actually renders and works. Use AFTER `npm run build` passes: op:"open" first (starts/loads the live preview), then op:"snapshot" for the accessibility tree (structure: headings, buttons, empty states — cheap text, prefer it), and op:"screenshot" ONLY for visual judgment (colors, layout, imagery — expensive, a few per session). Judge screenshots against the design checklist and FIX what you see. For GAMES/canvas/dynamic behavior use op:"probe" — snapshots cannot see a canvas; probe reads the RUNTIME state (window.__DEBUG__) as JSON so you tune with numbers, not guesses. Before declaring the page done, ALWAYS run op:"audit" — it scrolls the whole page and catches content stuck invisible (a scroll-reveal that never fires leaves sections at opacity 0) plus console errors.',
 		inputSchema,
 		activitySummary: (input) => `Browser ${input.op}${input.path ? ` ${input.path}` : ''}`,
 		isReadOnly: () => true, // looks at the app; never mutates project files
@@ -170,6 +206,28 @@ ${cut}` }
 					await session.page.press(input.target)
 					await new Promise((r) => setTimeout(r, 150))
 					return { content: `Pressed ${input.target}.` }
+				}
+
+				if (input.op === 'audit') {
+					const report = (await session.page.evaluate(AUDIT_EXPR)) as {
+						pageHeight: number
+						steps: { y: number; visible: number; invisible: number }[]
+						stuckSamples: string[]
+					}
+					const errs = session.page.consoleErrors?.() ?? []
+					const totalStuck = report.steps.reduce((a, s) => a + s.invisible, 0)
+					const lines = [
+						`Full-page audit of ${session.page.url()} (height ${report.pageHeight}px):`,
+						...report.steps.map((s) => `  scroll ${s.y}px → ${s.visible} visible, ${s.invisible} INVISIBLE text elements`),
+					]
+					if (totalStuck > 0) {
+						lines.push(
+							`FAIL: ${totalStuck} content elements are stuck at opacity 0 after scrolling — real visitors see blank sections. Usual cause: a scroll-reveal (IntersectionObserver / whileInView) that never fires. Samples: ${report.stuckSamples.map((s) => JSON.stringify(s)).join(', ')}. Fix the reveal (or remove it) and re-run audit.`,
+						)
+					}
+					if (errs.length) lines.push(`Console errors (${errs.length}): ${errs.slice(0, 5).join(' | ')}`)
+					if (totalStuck === 0 && errs.length === 0) lines.push('PASS: all content renders while scrolling; no console errors.')
+					return { content: lines.join('\n'), isError: totalStuck > 0 }
 				}
 
 				// screenshot

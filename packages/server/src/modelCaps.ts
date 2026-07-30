@@ -9,7 +9,7 @@
 // hands the model a tool that errors on every screenshot.
 
 import { archContextLength, ARCH_FALLBACK_CAP } from '@cascade/core'
-import { limitsFor, type ModelLimits, specCapabilities } from './modelSpecs.js'
+import { limitsFor, type ModelLimits, specCapabilities } from '@cascade/core'
 
 const cache = new Map<string, string[]>()
 

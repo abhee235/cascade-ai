@@ -96,7 +96,7 @@ function TodoList({ items }: { items: Todo[] }) {
 
 // Transcript items: user/assistant messages and tool cards, interleaved in order.
 type Item =
-  | { kind: 'user'; text: string }
+  | { kind: 'user'; text: string; images?: string[] }
   | { kind: 'assistant'; text: string; thinking?: string }
   | { kind: 'tool'; id: string; name: string; summary: string; status: 'running' | 'ok' | 'error'; preview?: string; display?: ToolDisplay }
   | { kind: 'memory'; text: string }
@@ -190,6 +190,7 @@ function compactedLabel(kind: string): string {
     case 'microcompacted': return 'cleared old tool results'
     case 'snipped': return 'snipped large tool inputs'
     case 'summarized': return 'summarized older turns'
+    case 'dropped': return 'dropped older turns (summarizer unavailable; task preserved)'
     default: return 'compacted context'
   }
 }
@@ -209,7 +210,45 @@ const toolIcon = (s: 'running' | 'ok' | 'error') => (s === 'running' ? '⏳' : s
 const COMMANDS = [
   { cmd: '/mcp', desc: 'Manage MCP servers' },
   { cmd: '/memory', desc: 'View & manage memory (core + archival)' },
+  { cmd: '/models', desc: 'Model manager — provider, model, sampling, context window' },
 ]
+
+// Model manager payloads (host mirrors: postModels / setModelConfig).
+type ModelSettings = {
+  provider: string
+  model: string
+  baseUrl: string
+  apiKeySet: boolean
+  utilityModel: string
+  permissionMode: string
+  contextWindow: number
+  maxOutputTokens: number
+  temperature: number
+  topP: number
+  topK: number
+}
+type EnabledModel = { provider: string; model: string; contextWindow?: number }
+type ModelsData = {
+  settings: ModelSettings
+  /** The CURATED enabled models (ADR-067) — spans providers; this is what the dropdown lists. */
+  enabled: EnabledModel[]
+  info?: { capabilities: string[]; contextWindow?: number; archMax?: number }
+  error?: string
+}
+
+// Extension-local host events (chat persistence + user-invocable skills) riding the same postMessage
+// channel as core ActivityEvents — mirrors the host's HostMessage union.
+type ChatMeta = { id: string; title: string; updatedAt: string }
+type HostEvent =
+  | ActivityEvent
+  | { type: 'chatsData'; chats: ChatMeta[]; activeId: string }
+  | { type: 'chatRestored'; items: Item[] }
+  | { type: 'skillsData'; skills: { name: string; description: string }[] }
+  | ({ type: 'modelsData' } & ModelsData)
+  | { type: 'hostInfo'; build: string }
+
+// Baked in by esbuild `define` — this webview bundle's build time (compared against the host's).
+declare const __CASCADE_BUILD__: string
 const mcpIcon = (s: string) => (s === 'ready' ? '●' : s === 'connecting' ? '◌' : s === 'failed' ? '✗' : '○')
 const mcpColor = (s: string) =>
   s === 'ready'
@@ -233,7 +272,35 @@ export function App() {
   const [memQuery, setMemQuery] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [input, setInput] = useState('')
+  // ADR-039: live context occupancy after each model call — how full the window is RIGHT NOW, and the
+  // threshold compaction fires at. Persists between turns (it describes the session, not one turn).
+  const [ctx, setCtx] = useState<{ used: number; window: number; auto: number } | null>(null)
+  // Images attached to the NEXT submit (pasted into the composer), as data URIs. M11 multimodal turns.
+  const [attached, setAttached] = useState<string[]>([])
+  // Chat persistence + user-invocable skills (host-local protocol).
+  const [chats, setChats] = useState<ChatMeta[]>([])
+  const [activeChatId, setActiveChatId] = useState<string | null>(null)
+  const [skillCmds, setSkillCmds] = useState<{ name: string; description: string }[]>([])
+  // Model snapshot for the composer chip + dropdown (the Language Models panel lives in the editor area).
+  const [modelData, setModelData] = useState<ModelsData | null>(null)
+  const [modelMenu, setModelMenu] = useState(false)
+  const [modeMenu, setModeMenu] = useState(false)
+  // Stale-host detection: set from the host's hostInfo handshake; mismatch = restart needed. The
+  // "no response" verdict waits out a grace period so a slow activation never flashes a false banner.
+  const [hostBuild, setHostBuild] = useState<string | null>(null)
+  const [handshakeTimedOut, setHandshakeTimedOut] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
+
+  // On mount: handshake first (the listener above is attached, so the reply cannot be dropped), then
+  // restore the active chat, fetch skills for the / menu, and the model snapshot (composer chip).
+  useEffect(() => {
+    vscode.postMessage({ type: 'hello' })
+    vscode.postMessage({ type: 'chats' })
+    vscode.postMessage({ type: 'skills' })
+    vscode.postMessage({ type: 'models' })
+    const t = setTimeout(() => setHandshakeTimedOut(true), 4000)
+    return () => clearTimeout(t)
+  }, [])
 
   // Poll for live status while any server is still connecting (so the overlay updates without a manual Refresh).
   const polling = !!mcp && mcp.some((s) => s.status === 'connecting')
@@ -257,9 +324,29 @@ export function App() {
   }, [mcp, mem])
 
   useEffect(() => {
-    function onMessage(e: MessageEvent<ActivityEvent>) {
+    function onMessage(e: MessageEvent<HostEvent>) {
       const event = e.data
       switch (event.type) {
+        case 'chatsData':
+          setChats(event.chats)
+          setActiveChatId(event.activeId)
+          break
+        case 'chatRestored':
+          // A restored transcript replaces the local one wholesale (mount, chat switch, new chat).
+          setItems(event.items)
+          setStreaming(null)
+          setStatus(null)
+          setRecovering(null)
+          break
+        case 'skillsData':
+          setSkillCmds(event.skills)
+          break
+        case 'modelsData':
+          setModelData({ settings: event.settings, enabled: event.enabled ?? [], info: event.info, error: event.error })
+          break
+        case 'hostInfo':
+          setHostBuild(event.build)
+          break
         case 'status':
           setStatus(event.text)
           setRecovering(null) // a new "Thinking…" means we're past the retry
@@ -336,6 +423,15 @@ export function App() {
             { kind: 'compacted', text: compactedLabel(event.kind) },
           ])
           break
+        case 'context':
+          // Live occupancy for the meter above the composer.
+          setCtx({ used: event.used, window: event.window, auto: event.auto })
+          break
+        case 'step':
+          // Prefill is starting — the dead-air phase on local models. Show SOMETHING until the first
+          // delta, but never overwrite a real status (and only turnDone clears the working state).
+          setStatus((s) => s ?? 'Reading context…')
+          break
         case 'mcpStatus':
           setMcp(event.servers)
           break
@@ -352,13 +448,26 @@ export function App() {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [items, streaming, status])
 
-  // Slash commands (the `/` menu). Add more here as the app grows.
-  const slashMatches = input.startsWith('/') ? COMMANDS.filter((c) => c.cmd.startsWith(input.trim())) : []
+  // Slash commands (a `/` menu): builtins + every loaded SKILL (user-invocable as
+  // /<skill-name>). Skills take arguments after the name, so selecting one inserts
+  // "/name " for the user to finish, while builtins run immediately.
+  const allCommands = [
+    ...COMMANDS.map((c) => ({ ...c, kind: 'builtin' as const })),
+    ...skillCmds.map((s) => ({ cmd: `/${s.name}`, desc: s.description, kind: 'skill' as const })),
+  ]
+  const slashToken = input.startsWith('/') ? input.trim().split(/\s+/)[0] : ''
+  const slashMatches = slashToken && !input.trim().includes(' ') ? allCommands.filter((c) => c.cmd.startsWith(slashToken)) : []
 
   function runCommand(cmd: string) {
     setInput('')
     if (cmd === '/mcp') vscode.postMessage({ type: 'mcp', action: 'list' }) // opens the overlay (mcpStatus reply)
     if (cmd === '/memory') vscode.postMessage({ type: 'memoryView', action: 'list' }) // opens the memory overlay
+    if (cmd === '/models') vscode.postMessage({ type: 'openModelsPanel' }) // the Language Models editor tab
+  }
+
+  function pickSlash(c: (typeof allCommands)[number]) {
+    if (c.kind === 'builtin') return runCommand(c.cmd)
+    setInput(`${c.cmd} `) // skill: let the user type arguments, Enter sends
   }
 
   function memAction(action: 'list' | 'search' | 'forget', extra?: { query?: string; id?: string }) {
@@ -367,18 +476,54 @@ export function App() {
 
   function send() {
     const text = input.trim()
-    if (!text) return
+    if (!text && attached.length === 0) return
     if (text.startsWith('/')) {
-      // Run the exact command, or the single remaining suggestion if the user typed a prefix.
-      const exact = COMMANDS.find((c) => c.cmd === text)
-      if (exact) return runCommand(exact.cmd)
-      if (slashMatches.length === 1) return runCommand(slashMatches[0].cmd)
+      const token = text.split(/\s+/)[0]
+      const args = text.slice(token.length).trim()
+      // Exact builtin runs; exact skill submits the playbook turn with any trailing arguments.
+      const exact = allCommands.find((c) => c.cmd === token)
+      if (exact?.kind === 'builtin') return runCommand(exact.cmd)
+      if (exact?.kind === 'skill') {
+        setItems((it) => [...it, { kind: 'user', text }]) // show "/name args" as the user's turn
+        setInput('')
+        setBusy(true)
+        vscode.postMessage({ type: 'runSkill', name: exact.cmd.slice(1), args: args || undefined })
+        return
+      }
+      if (slashMatches.length === 1) return pickSlash(slashMatches[0])
       return // unknown/ambiguous slash input — do nothing (the menu is showing options)
     }
-    setItems((it) => [...it, { kind: 'user', text }])
+    const images = attached.length ? attached : undefined
+    setItems((it) => [...it, { kind: 'user', text, images }])
     setInput('')
+    setAttached([])
     setBusy(true)
-    vscode.postMessage({ type: 'submit', text })
+    vscode.postMessage({ type: 'submit', text, images })
+  }
+
+  const fileRef = useRef<HTMLInputElement>(null)
+  /** The [+] button: pick image files → attach to the next turn (same path as paste). */
+  function onFilePick(e: React.ChangeEvent<HTMLInputElement>) {
+    for (const file of Array.from(e.target.files ?? [])) {
+      const reader = new FileReader()
+      reader.onload = () => setAttached((a) => [...a, String(reader.result)])
+      reader.readAsDataURL(file)
+    }
+    e.target.value = '' // same file can be picked again later
+  }
+
+  /** Paste an image into the composer → attach it to the next turn (vision models). */
+  function onPaste(e: React.ClipboardEvent) {
+    const imgs = Array.from(e.clipboardData.items).filter((i) => i.type.startsWith('image/'))
+    if (imgs.length === 0) return
+    e.preventDefault()
+    for (const item of imgs) {
+      const file = item.getAsFile()
+      if (!file) continue
+      const reader = new FileReader()
+      reader.onload = () => setAttached((a) => [...a, String(reader.result)])
+      reader.readAsDataURL(file)
+    }
   }
 
   function mcpAction(action: 'list' | 'connect' | 'disconnect', server?: string) {
@@ -421,6 +566,8 @@ export function App() {
     setPrompt(null)
     setQuestion(null)
     setBusy(false)
+    setCtx(null) // a fresh conversation has no occupancy yet
+    setAttached([])
     vscode.postMessage({ type: 'reset' })
   }
 
@@ -562,11 +709,49 @@ export function App() {
           </div>
         </div>
       )}
+      {(hostBuild !== null ? hostBuild !== __CASCADE_BUILD__ : handshakeTimedOut) && (
+        // The invisible failure made visible: either the host never answered the handshake within the
+        // grace period (stale host that predates it) or its build differs from this webview bundle's.
+        <div style={styles.staleBanner}>
+          ⚠ Extension host {hostBuild === null ? 'did not answer the handshake (older build?)' : `build ${hostBuild.slice(11, 19)} ≠ UI build ${__CASCADE_BUILD__.slice(11, 19)}`}.
+          Stop the debug session fully (Shift+F5) and press F5 again — a window/panel reload is not enough.
+        </div>
+      )}
       <div style={styles.header}>
-        <span style={styles.title}>Cascade</span>
-        <button style={styles.newChat} onClick={newChat}>
-          + New chat
-        </button>
+        <span style={styles.title} title={`UI build ${__CASCADE_BUILD__}${hostBuild ? ` · host build ${hostBuild}` : ''}`}>
+          Cascade
+        </span>
+        {chats.length > 0 && (
+          <select
+            style={styles.chatPicker}
+            value={activeChatId ?? ''}
+            disabled={busy}
+            onChange={(e) => e.target.value && vscode.postMessage({ type: 'chatSwitch', id: e.target.value })}
+            title="Switch chat (history is saved per workspace)"
+          >
+            {activeChatId && !chats.some((c) => c.id === activeChatId) && <option value={activeChatId}>(new chat)</option>}
+            {chats.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.title}
+              </option>
+            ))}
+          </select>
+        )}
+        <div style={styles.headerRight}>
+          {activeChatId && chats.some((c) => c.id === activeChatId) && (
+            <button
+              style={styles.newChat}
+              title="Delete this chat"
+              disabled={busy}
+              onClick={() => vscode.postMessage({ type: 'chatDelete', id: activeChatId })}
+            >
+              🗑
+            </button>
+          )}
+          <button style={styles.newChat} onClick={newChat}>
+            + New chat
+          </button>
+        </div>
       </div>
       <div style={styles.transcript}>
         {items.map((it, i) =>
@@ -639,7 +824,16 @@ export function App() {
                   <Md>{it.text}</Md>
                 </div>
               ) : (
-                <div style={styles.text}>{it.text}</div>
+                <>
+                  {it.images && it.images.length > 0 && (
+                    <div style={styles.userImgs}>
+                      {it.images.map((u, ix) => (
+                        <img key={ix} src={u} style={styles.userImg} alt="attached" />
+                      ))}
+                    </div>
+                  )}
+                  <div style={styles.text}>{it.text}</div>
+                </>
               )}
             </div>
           ),
@@ -687,7 +881,7 @@ export function App() {
             <span>
               {recovering.reason === 'overflow'
                 ? 'Context too large — compacting and retrying…'
-                : "Can't reach the model (Ollama) — reconnecting…"}{' '}
+                : `Can't reach ${modelData ? `${modelData.settings.provider} (${modelData.settings.model})` : 'the model backend'} — retrying…`}{' '}
               <span style={styles.recoverAttempt}>attempt {recovering.attempt}</span>
             </span>
           </div>
@@ -699,39 +893,161 @@ export function App() {
         )}
         <div ref={endRef} />
       </div>
-      <div style={styles.composer}>
+      {ctx && (
+        // ADR-039 context meter — a hairline above the composer (mirrors the web app's ContextMeter).
+        // Color grades against the AUTO-COMPACT threshold, not the raw window: amber at 80% of the
+        // trigger, red past it. Hover for exact numbers.
+        <div
+          style={styles.ctxBar}
+          title={`Context: ${ctx.used.toLocaleString()} / ${ctx.window.toLocaleString()} tokens (${Math.round((ctx.used / ctx.window) * 100)}%) — compacts at ${ctx.auto.toLocaleString()}`}
+        >
+          <div
+            style={{
+              ...styles.ctxFill,
+              width: `${Math.min(100, (ctx.used / ctx.window) * 100)}%`,
+              background:
+                ctx.used >= ctx.auto
+                  ? 'var(--vscode-errorForeground, #c33)'
+                  : ctx.used >= ctx.auto * 0.8
+                    ? 'var(--vscode-charts-yellow, #cc3)'
+                    : 'var(--vscode-progressBar-background, var(--vscode-button-background))',
+            }}
+          />
+        </div>
+      )}
+      {attached.length > 0 && (
+        <div style={styles.attachRow}>
+          {attached.map((u, i) => (
+            <span key={i} style={styles.attachChip}>
+              <img src={u} style={styles.attachImg} alt="attachment" />
+              <button style={styles.attachRemove} title="Remove" onClick={() => setAttached((a) => a.filter((_x, ix) => ix !== i))}>
+                ✕
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div style={{ ...styles.composerWrap, ...(ctx ? { borderTop: 'none' } : undefined) }}>
         {slashMatches.length > 0 && (
           <div style={styles.slashMenu}>
             {slashMatches.map((c) => (
-              <button key={c.cmd} style={styles.slashItem} onClick={() => runCommand(c.cmd)}>
+              <button key={c.cmd} style={styles.slashItem} onClick={() => pickSlash(c)}>
                 <span style={styles.slashCmd}>{c.cmd}</span>
                 <span style={styles.slashDesc}>{c.desc}</span>
               </button>
             ))}
           </div>
         )}
-        <textarea
-          style={styles.input}
-          value={input}
-          placeholder="Ask Cascade…  (type / for commands)"
-          rows={2}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              send()
-            }
-          }}
-        />
-        {busy ? (
-          <button style={{ ...styles.send, ...styles.stop }} onClick={stop}>
-            ■ Stop
-          </button>
-        ) : (
-          <button style={styles.send} onClick={send}>
-            Send
-          </button>
-        )}
+        <div className="cascade-composer-box" style={styles.composerBox}>
+          <textarea
+            style={styles.inputBare}
+            value={input}
+            placeholder="Ask Cascade…  (type / for commands, paste images)"
+            rows={2}
+            onChange={(e) => setInput(e.target.value)}
+            onPaste={onPaste}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                send()
+              }
+            }}
+          />
+          <div style={styles.composerRow}>
+            <button className="cascade-icon-action" style={styles.iconAction} title="Attach image" onClick={() => fileRef.current?.click()}>
+              +
+            </button>
+            <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={onFilePick} />
+            <div style={{ position: 'relative', minWidth: 0 }}>
+              {modelMenu && (
+                <>
+                  <div style={styles.menuBackdrop} onClick={() => setModelMenu(false)} />
+                  <div style={styles.modelMenu}>
+                    {(modelData?.enabled ?? []).map((m) => {
+                      const active = m.model === modelData?.settings.model && m.provider === modelData?.settings.provider
+                      return (
+                        <button
+                          key={`${m.provider}/${m.model}`}
+                          className="cascade-menu-item" style={{ ...styles.modelMenuItem, fontWeight: active ? 700 : 400 }}
+                          onClick={() => {
+                            setModelMenu(false)
+                            if (!active) vscode.postMessage({ type: 'activateModel', provider: m.provider, model: m.model })
+                          }}
+                        >
+                          <span style={styles.menuProvider}>{m.provider}</span>
+                          <span style={styles.mmCatName}>
+                            {active ? '✓ ' : ''}
+                            {m.model}
+                          </span>
+                          {m.contextWindow ? <span style={styles.mmCatSize}>{Math.round(m.contextWindow / 1000)}k</span> : null}
+                        </button>
+                      )
+                    })}
+                    {(modelData?.enabled?.length ?? 0) > 0 && <div style={styles.menuDivider} />}
+                    <button
+                      className="cascade-menu-item"
+                      style={styles.modelMenuItem}
+                      onClick={() => {
+                        setModelMenu(false)
+                        runCommand('/models')
+                      }}
+                    >
+                      ⊞ Language models…
+                    </button>
+                    <button
+                      className="cascade-menu-item"
+                      style={styles.modelMenuItem}
+                      onClick={() => {
+                        setModelMenu(false)
+                        vscode.postMessage({ type: 'openSettings' })
+                      }}
+                    >
+                      ⚙ Cascade settings…
+                    </button>
+                  </div>
+                </>
+              )}
+              <button className="cascade-chip" style={styles.modelChip} title="Switch model" onClick={() => setModelMenu((o) => !o)}>
+                {modelData?.settings.model || '⚙ models'} ▾
+              </button>
+            </div>
+            <div style={{ position: 'relative' }}>
+              {modeMenu && (
+                <>
+                  <div style={styles.menuBackdrop} onClick={() => setModeMenu(false)} />
+                  <div style={styles.modelMenu}>
+                    {(['default', 'acceptEdits', 'plan', 'bypass'] as const).map((m) => (
+                      <button
+                        key={m}
+                        className="cascade-menu-item" style={{ ...styles.modelMenuItem, fontWeight: m === modelData?.settings.permissionMode ? 700 : 400 }}
+                        onClick={() => {
+                          setModeMenu(false)
+                          vscode.postMessage({ type: 'setModelConfig', patch: { permissionMode: m } })
+                        }}
+                      >
+                        {m === modelData?.settings.permissionMode ? '✓ ' : ''}
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+              <button className="cascade-chip" style={styles.modelChip} title="Permission mode (how tool calls are approved)" onClick={() => setModeMenu((o) => !o)}>
+                🛡 {modelData?.settings.permissionMode ?? 'default'} ▾
+              </button>
+            </div>
+            <span style={{ flex: 1 }} />
+            {busy ? (
+              <button style={{ ...styles.send, ...styles.stop }} onClick={stop}>
+                ■ Stop
+              </button>
+            ) : (
+              <button style={styles.send} onClick={send}>
+                Send
+              </button>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -762,6 +1078,140 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '2px 8px',
     fontSize: 11,
     cursor: 'pointer',
+  },
+  headerRight: { display: 'flex', gap: 6, alignItems: 'center' },
+  staleBanner: {
+    padding: '6px 12px',
+    fontSize: 11.5,
+    lineHeight: 1.5,
+    color: 'var(--vscode-inputValidation-warningForeground, var(--vscode-foreground))',
+    background: 'var(--vscode-inputValidation-warningBackground, rgba(255,200,0,0.12))',
+    borderBottom: '1px solid var(--vscode-inputValidation-warningBorder, var(--vscode-panel-border))',
+  },
+  modelChip: {
+    background: 'var(--vscode-badge-background, rgba(255,255,255,0.08))',
+    color: 'var(--vscode-badge-foreground, inherit)',
+    border: 'none',
+    borderRadius: 9,
+    padding: '2px 8px',
+    fontSize: 10.5,
+    fontFamily: 'var(--vscode-editor-font-family, monospace)',
+    cursor: 'pointer',
+    maxWidth: 160,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  // Model manager form
+  mmRow: { display: 'flex', alignItems: 'center', gap: 8, margin: '6px 0' },
+  mmLabel: { width: 92, flexShrink: 0, fontSize: 11, opacity: 0.75 },
+  mmInput: {
+    flex: 1,
+    minWidth: 0,
+    background: 'var(--vscode-input-background)',
+    color: 'var(--vscode-input-foreground)',
+    border: '1px solid var(--vscode-input-border, var(--vscode-panel-border))',
+    borderRadius: 4,
+    padding: '4px 8px',
+    fontFamily: 'inherit',
+    fontSize: 12,
+  },
+  mmGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 10px', margin: '8px 0' },
+  // The boxed composer (screenshot-2 layout): textarea on top, action row underneath, one border around.
+  composerWrap: { position: 'relative', padding: 8, borderTop: '1px solid var(--vscode-panel-border)' },
+  composerBox: {
+    display: 'flex',
+    flexDirection: 'column',
+    background: 'var(--vscode-input-background)',
+    border: '1px solid var(--vscode-input-border, var(--vscode-panel-border))',
+    borderRadius: 6,
+    padding: 6,
+  },
+  inputBare: {
+    resize: 'none',
+    background: 'transparent',
+    color: 'var(--vscode-input-foreground)',
+    border: 'none',
+    outline: 'none',
+    padding: '2px 4px 6px',
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+  },
+  composerRow: { display: 'flex', alignItems: 'center', gap: 6, paddingTop: 4, borderTop: '1px solid var(--vscode-panel-border)' },
+  iconAction: {
+    background: 'transparent',
+    color: 'var(--vscode-foreground)',
+    border: '1px solid var(--vscode-panel-border)',
+    borderRadius: 4,
+    width: 22,
+    height: 22,
+    lineHeight: '18px',
+    fontSize: 14,
+    cursor: 'pointer',
+    padding: 0,
+  },
+  menuBackdrop: { position: 'fixed', inset: 0, zIndex: 15 },
+  modelMenu: {
+    position: 'absolute',
+    bottom: 'calc(100% + 4px)',
+    left: 0,
+    zIndex: 20,
+    minWidth: 230,
+    maxWidth: 320,
+    maxHeight: 260,
+    overflowY: 'auto',
+    background: 'var(--vscode-editorWidget-background)',
+    border: '1px solid var(--vscode-widget-border, var(--vscode-panel-border))',
+    borderRadius: 6,
+    boxShadow: '0 4px 16px rgba(0,0,0,0.35)',
+    padding: 4,
+  },
+  modelMenuItem: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    gap: 8,
+    padding: '5px 8px',
+    background: 'transparent',
+    border: 'none',
+    borderRadius: 4,
+    color: 'var(--vscode-foreground)',
+    cursor: 'pointer',
+    textAlign: 'left',
+    fontSize: 12,
+  },
+  menuDivider: { height: 1, background: 'var(--vscode-panel-border)', margin: '4px 2px' },
+  menuProvider: { minWidth: 52, fontSize: 10.5, opacity: 0.6, flexShrink: 0 },
+  mmCatalog: {
+    maxHeight: 140,
+    overflowY: 'auto',
+    border: '1px solid var(--vscode-panel-border)',
+    borderRadius: 6,
+    padding: '2px 8px',
+    margin: '2px 0 6px',
+  },
+  mmCatRow: { display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0', borderBottom: '1px solid var(--vscode-panel-border)' },
+  mmCatName: { flex: 1, minWidth: 0, fontFamily: 'var(--vscode-editor-font-family, monospace)', fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  mmCatSize: { opacity: 0.55 },
+  mmCell: { display: 'flex', alignItems: 'center', gap: 6 },
+  mmInfo: {
+    margin: '8px 0 2px',
+    padding: '6px 8px',
+    fontSize: 11.5,
+    opacity: 0.8,
+    background: 'var(--vscode-textCodeBlock-background, rgba(0,0,0,0.2))',
+    borderRadius: 4,
+  },
+  chatPicker: {
+    flex: 1,
+    minWidth: 0,
+    margin: '0 8px',
+    background: 'var(--vscode-dropdown-background, var(--vscode-input-background))',
+    color: 'var(--vscode-dropdown-foreground, var(--vscode-foreground))',
+    border: '1px solid var(--vscode-dropdown-border, var(--vscode-panel-border))',
+    borderRadius: 4,
+    padding: '2px 4px',
+    fontSize: 11,
   },
   transcript: { flex: 1, overflowY: 'auto', padding: '8px 12px' },
   bubble: { margin: '8px 0', padding: '8px 11px', borderRadius: 8 },
@@ -991,6 +1441,38 @@ const styles: Record<string, React.CSSProperties> = {
     background: 'var(--vscode-diffEditor-removedTextBackground, rgba(200,0,0,0.10))',
   },
   diffCtx: { whiteSpace: 'pre-wrap', padding: '0 10px', opacity: 0.65 },
+  // Context meter (ADR-039): the hairline separator above the composer doubles as an occupancy bar.
+  ctxBar: { height: 3, background: 'var(--vscode-panel-border)', cursor: 'default' },
+  ctxFill: { height: '100%', transition: 'width 0.4s ease' },
+  // Pending image attachments (pasted into the composer, sent with the next turn).
+  attachRow: { display: 'flex', gap: 6, padding: '6px 8px 0', flexWrap: 'wrap' },
+  attachChip: { position: 'relative', display: 'inline-block' },
+  attachImg: {
+    width: 44,
+    height: 44,
+    objectFit: 'cover',
+    borderRadius: 4,
+    border: '1px solid var(--vscode-panel-border)',
+    display: 'block',
+  },
+  attachRemove: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    width: 15,
+    height: 15,
+    lineHeight: '13px',
+    fontSize: 9,
+    padding: 0,
+    borderRadius: '50%',
+    border: '1px solid var(--vscode-panel-border)',
+    background: 'var(--vscode-editorWidget-background)',
+    color: 'var(--vscode-foreground)',
+    cursor: 'pointer',
+  },
+  // Images inside a committed user bubble.
+  userImgs: { display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 },
+  userImg: { maxWidth: 120, maxHeight: 90, borderRadius: 4, border: '1px solid var(--vscode-panel-border)' },
   composer: { position: 'relative', display: 'flex', gap: 6, padding: 8, borderTop: '1px solid var(--vscode-panel-border)' },
   input: {
     flex: 1,
@@ -1007,7 +1489,8 @@ const styles: Record<string, React.CSSProperties> = {
     color: 'var(--vscode-button-foreground)',
     border: 'none',
     borderRadius: 4,
-    padding: '0 12px',
+    padding: '3px 12px',
+    fontSize: 12,
     cursor: 'pointer',
   },
   stop: {

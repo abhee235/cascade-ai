@@ -43,8 +43,8 @@ export function schemaOf(t: Tool): Record<string, unknown> {
 /** Resolve a tool's description for a window tier (ADR-037): descriptions are advertised on EVERY request, so
  *  a tool may provide a tier function — rich guidance on big windows, essentials on small ones. Plain strings
  *  (all MCP tools, most builtins) pass through unchanged. */
-export function descriptionOf(t: Tool, tier: WindowTier = 'full'): string {
-  return typeof t.description === 'function' ? t.description(tier) : t.description
+export function descriptionOf(t: Tool, tier: WindowTier = 'full', exec?: 'win32' | 'posix'): string {
+  return typeof t.description === 'function' ? t.description(tier, exec) : t.description
 }
 
 /** The active tool set for a turn. Injected via DI (LoopDeps/ToolContext) so it can be DYNAMIC (MCP tools
@@ -52,8 +52,9 @@ export function descriptionOf(t: Tool, tier: WindowTier = 'full'): string {
 export interface ToolRegistry {
   list(): Tool[]
   find(name: string): Tool | undefined
-  /** Advertised schemas for a turn. `tier` sizes the descriptions to the window (default 'full'). */
-  schemas(tier?: WindowTier): ToolSchema[]
+  /** Advertised schemas for a turn. `tier` sizes the descriptions to the window (default 'full');
+   *  `exec` is the command-execution platform (sandbox ⇒ 'posix') for shell-syntax guidance. */
+  schemas(tier?: WindowTier, exec?: 'win32' | 'posix'): ToolSchema[]
 }
 
 /** Build a registry of builtins + `extraTools()` (e.g. `() => mcpHub.readyTools()`). `extraTools` is a
@@ -63,7 +64,7 @@ export function registryOf(tools: () => Tool[]): ToolRegistry {
   return {
     list: tools,
     find: (name) => tools().find((t) => t.name === name),
-    schemas: (tier) => tools().map((t) => ({ name: t.name, description: descriptionOf(t, tier), parameters: schemaOf(t) })),
+    schemas: (tier, exec) => tools().map((t) => ({ name: t.name, description: descriptionOf(t, tier, exec), parameters: schemaOf(t) })),
   }
 }
 

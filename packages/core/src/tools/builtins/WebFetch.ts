@@ -101,7 +101,9 @@ function htmlToMarkdown(html: string): string {
 
 export const WebFetchTool: Tool<z.infer<typeof inputSchema>> = {
   name: 'WebFetch',
-  description: `Fetch a single web page and return its text content (HTML stripped). Use it to READ a page whose URL you already know — docs, a reference, an article you found via WebSearch. For arbitrary queries, use WebSearch first to get URLs, then WebFetch one. http(s) only; private/loopback/metadata addresses are refused.`,
+  // NB: never name tools that may not be registered (a WebSearch mention here once tempted models to call a
+  // tool that doesn't exist — search arrives via MCP, under whatever name the server advertises).
+  description: `Fetch a single web page and return its text content (HTML stripped). Use it to READ a page whose URL you already know — docs, a reference, a link from the user or from search results. It cannot SEARCH; if a search tool is available in your tool list, use it to find URLs first, then WebFetch one. http(s) only; private/loopback/metadata addresses are refused.`,
   inputSchema,
   activitySummary: (input) => `Fetching ${input.url}`,
   isReadOnly: () => true,

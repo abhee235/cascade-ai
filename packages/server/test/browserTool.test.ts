@@ -144,3 +144,44 @@ describe('Browser hands + probe ergonomics (ADR-079 Phase 0)', () => {
 		f.mockRestore()
 	})
 })
+
+describe('Browser audit (the stuck-at-opacity-0 detector — 3 shipped builds motivated it)', () => {
+	const report = (invisible: number) => ({
+		pageHeight: 4000,
+		steps: [
+			{ y: 0, visible: 10, invisible: 0 },
+			{ y: 1200, visible: 2, invisible },
+		],
+		stuckSamples: invisible ? ['Choose your ORBIT', 'Orbit Pro'] : [],
+	})
+
+	it('FAILS (isError) when scrolled content is stuck invisible, naming samples', async () => {
+		const f = stubFetch(true)
+		const page = fakePage({ evaluate: async () => report(8) })
+		const tool = createBrowserTool({ sandbox: fakeSandbox(), launch: async () => ({ page, close: async () => {} }) })
+		const ctx = {} as never
+		await tool.call({ op: 'open' }, ctx)
+		const r = await tool.call({ op: 'audit' }, ctx)
+		expect(r.isError).toBe(true)
+		expect(r.content).toContain('stuck at opacity 0')
+		expect(r.content).toContain('Choose your ORBIT')
+		f.mockRestore()
+	})
+
+	it('PASSES on a fully-rendering page; console errors surface when the fake wires them', async () => {
+		const f = stubFetch(true)
+		const page = fakePage({ evaluate: async () => report(0), consoleErrors: () => ['boom at app.js:1'] })
+		const tool = createBrowserTool({ sandbox: fakeSandbox(), launch: async () => ({ page, close: async () => {} }) })
+		const ctx = {} as never
+		await tool.call({ op: 'open' }, ctx)
+		const r = await tool.call({ op: 'audit' }, ctx)
+		expect(r.isError).toBeFalsy() // stuck content is the FAIL signal; console errors inform but don't block
+		expect(r.content).toContain('boom at app.js:1')
+		const clean = fakePage({ evaluate: async () => report(0) })
+		const tool2 = createBrowserTool({ sandbox: fakeSandbox(), launch: async () => ({ page: clean, close: async () => {} }) })
+		await tool2.call({ op: 'open' }, ctx)
+		const r2 = await tool2.call({ op: 'audit' }, ctx)
+		expect(r2.content).toContain('PASS')
+		f.mockRestore()
+	})
+})
