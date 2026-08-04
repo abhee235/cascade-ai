@@ -1,0 +1,2081 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cascade — The local-first AI app builder</title>
+<meta name="description" content="Cascade is a free, open-source AI app builder that runs entirely on your machine. Powered by your own Ollama models, sandboxed in Docker, with a live preview. No cloud. No API keys. No lock-in." />
+<meta property="og:title" content="Cascade — The local-first AI app builder" />
+<meta property="og:description" content="Build real apps from a prompt, entirely on your machine. Open source, Ollama-native, sandboxed, live preview." />
+<meta property="og:type" content="website" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2338bdf8'/%3E%3Cstop offset='1' stop-color='%232dd4bf'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='3' y='3' width='7' height='19' rx='3.5' fill='url(%23g)'/%3E%3Crect x='12.5' y='8' width='7' height='19' rx='3.5' fill='url(%23g)' opacity='.75'/%3E%3Crect x='22' y='13' width='7' height='16' rx='3.5' fill='url(%23g)' opacity='.5'/%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..800&family=Geist+Mono:wght@400..600&family=Fraunces:opsz,wght@9..144,500..650&display=swap" rel="stylesheet" />
+<style>
+/* ───────────────────────────── tokens ───────────────────────────── */
+:root {
+	--bg: #060607;
+	--panel: #0e0e11;
+	--line: rgba(255, 255, 255, 0.08);
+	--line-strong: rgba(255, 255, 255, 0.14);
+	--text: #f4f4f5;
+	--text-2: #a1a1aa;
+	--text-3: #62626b;
+	--accent: #2dd4bf;
+	--accent-2: #38bdf8;
+	--accent-soft: rgba(45, 212, 191, 0.12);
+	--grad: linear-gradient(100deg, #7dd3fc 0%, #38bdf8 30%, #2dd4bf 65%, #5eead4 100%);
+	--nav-h: 64px;
+	--font: 'Geist', system-ui, -apple-system, 'Segoe UI', sans-serif;
+	--mono: 'Geist Mono', ui-monospace, 'Cascadia Code', Consolas, monospace;
+	/* Sober icon hues — muted enough for a dark UI, distinct enough to give the page
+	   colour instead of a wall of teal. Each icon reads its tint from --ic. */
+	--h-teal: #2dd4bf;
+	--h-violet: #a78bfa;
+	--h-amber: #fbbf24;
+	--h-sky: #38bdf8;
+	--h-rose: #fb7185;
+	--h-lime: #a3e635;
+	/* Vertical rhythm between sections — fluid, not fixed, so it scales 1K → 4K.
+	   ~144px @1024 · 166 @1440 · 221 @1920 · 294 @2560 · 360 @3840 (capped).
+	   A fixed value is why the page read fine on a laptop and cramped on a 4K panel. */
+	--section-gap: clamp(144px, 11.5vw, 360px);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { background: var(--bg); }
+html.lenis, html.lenis body { height: auto; }
+.lenis.lenis-smooth { scroll-behavior: auto !important; }
+body {
+	/* transparent on purpose — html carries the base colour. An opaque body would
+	   paint over the negative-z-index ambient layers below it. */
+	background: transparent;
+	color: var(--text);
+	font-family: var(--font);
+	font-size: 16px;
+	line-height: 1.6;
+	-webkit-font-smoothing: antialiased;
+	overflow-x: hidden;
+}
+::selection { background: rgba(45, 212, 191, 0.28); color: #fff; }
+a { color: inherit; text-decoration: none; }
+img, svg { display: block; }
+.wrap { max-width: 1152px; margin: 0 auto; padding: 0 24px; }
+.mono { font-family: var(--mono); }
+
+/* ── gentle reveal on scroll (the ONLY animation outside the demo) ── */
+html.io .rv { opacity: 0; transform: translateY(22px); transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1); }
+html.io .rv.on { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+	html.io .rv { opacity: 1; transform: none; transition: none; }
+	*, *::before, *::after { animation-duration: 0.001s !important; animation-iteration-count: 1 !important; }
+}
+
+/* ───────────────────────────── nav ───────────────────────────── */
+nav {
+	position: fixed; inset: 0 0 auto 0; z-index: 50; height: var(--nav-h);
+	display: flex; align-items: center;
+	border-bottom: 1px solid transparent;
+	transition: background 0.3s, border-color 0.3s;
+}
+nav.scrolled {
+	background: rgba(6, 6, 7, 0.72);
+	backdrop-filter: blur(14px) saturate(1.4);
+	-webkit-backdrop-filter: blur(14px) saturate(1.4);
+	border-bottom-color: var(--line);
+}
+.nav-inner { display: flex; align-items: center; gap: 28px; width: 100%; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 17px; letter-spacing: -0.01em; }
+.brand svg { width: 22px; height: 22px; }
+.nav-links { display: flex; gap: 26px; margin-left: 12px; }
+.nav-links a { font-size: 14px; color: var(--text-2); transition: color 0.2s; }
+.nav-links a:hover { color: var(--text); }
+.nav-cta { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+@media (max-width: 760px) { .nav-links { display: none; } }
+
+/* ───────────────────────────── buttons ───────────────────────────── */
+.btn {
+	display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+	font-family: var(--font); font-size: 14px; font-weight: 550;
+	padding: 0 18px; height: 40px; border-radius: 10px; cursor: pointer;
+	border: 1px solid transparent; white-space: nowrap;
+	transition: transform 0.15s, box-shadow 0.25s, background 0.2s, border-color 0.2s;
+}
+.btn:active { transform: translateY(1px); }
+.btn-primary {
+	background: linear-gradient(180deg, #fafafa, #e4e4e7);
+	color: #09090b;
+	box-shadow: 0 1px 0 rgba(255,255,255,0.25) inset, 0 8px 24px -8px rgba(255,255,255,0.25);
+}
+.btn-primary:hover { box-shadow: 0 1px 0 rgba(255,255,255,0.25) inset, 0 10px 32px -6px rgba(148, 233, 222, 0.45); }
+.btn-ghost {
+	background: rgba(255,255,255,0.04); color: var(--text);
+	border-color: var(--line-strong);
+}
+.btn-ghost:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.22); }
+.btn-lg { height: 48px; padding: 0 26px; font-size: 15px; border-radius: 12px; }
+.btn svg { width: 16px; height: 16px; }
+
+/* ───────────────────────────── hero scene ───────────────────────────── */
+/* ── ambient page backdrop: a faint line grid that fades out towards the edges, so
+      the large dark areas read as designed space instead of empty black. Fixed, so
+      it stays put while the page scrolls. ── */
+/* Scoped to the hero only — absolute (not fixed), so it scrolls away with the hero
+   instead of sitting behind the whole page. */
+.page-bg {
+	position: absolute; top: 0; left: 0; right: 0; height: 104vh;
+	z-index: -2; pointer-events: none;
+	background-image:
+		linear-gradient(to right, rgba(255, 255, 255, 0.055) 1px, transparent 1px),
+		linear-gradient(to bottom, rgba(255, 255, 255, 0.055) 1px, transparent 1px);
+	background-size: 76px 76px;
+	mask-image: radial-gradient(ellipse 64% 52% at 50% 26%, #000 0%, rgba(0, 0, 0, 0.45) 46%, transparent 76%);
+	-webkit-mask-image: radial-gradient(ellipse 64% 52% at 50% 26%, #000 0%, rgba(0, 0, 0, 0.45) 46%, transparent 76%);
+}
+.hero-stage { position: relative; padding-top: var(--nav-h); }
+.hero-bg { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+/* a soft pool of light directly under the headline */
+.hero-bg .grid-dots {
+	position: absolute; inset: 0;
+	background: radial-gradient(ellipse 46% 46% at 50% 34%, rgba(255, 186, 118, 0.05), transparent 70%);
+}
+/* warm, to match the light source behind the demo below — atmosphere is warm,
+   the brand accent stays teal */
+.hero-bg .aurora {
+	position: absolute; left: 50%; top: -260px; width: 1100px; height: 700px;
+	transform: translateX(-50%);
+	background:
+		radial-gradient(ellipse 42% 42% at 38% 40%, rgba(233, 150, 70, 0.13), transparent 70%),
+		radial-gradient(ellipse 40% 44% at 62% 38%, rgba(196, 108, 44, 0.12), transparent 70%);
+	filter: blur(28px);
+	animation: aurora-drift 14s ease-in-out infinite alternate;
+}
+@keyframes aurora-drift {
+	from { transform: translateX(-53%) scale(1); }
+	to { transform: translateX(-47%) scale(1.06); }
+}
+.hero-copy { position: relative; z-index: 1; text-align: center; padding: 76px 24px 0; }
+.badge {
+	display: inline-flex; align-items: center; gap: 8px;
+	font-size: 13px; font-weight: 500; color: var(--text-2);
+	border: 1px solid var(--line-strong); border-radius: 999px;
+	padding: 6px 14px 6px 8px; background: rgba(255,255,255,0.03);
+	backdrop-filter: blur(6px);
+}
+.badge .pill {
+	font-size: 11px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase;
+	background: var(--accent-soft); color: var(--accent);
+	border-radius: 999px; padding: 2px 9px;
+}
+h1 {	
+	margin: 22px auto 0; max-width: 1000px;
+	font-size: clamp(34px, 5.4vw, 62px); font-weight: 650; letter-spacing: -0.035em; line-height: 1.08;
+}
+h1 .line { display: block; overflow: hidden; padding-bottom: 0.08em; margin-bottom: -0.08em; }
+h1 .li { display: inline-block; will-change: transform; }
+h1 .grad { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.hero-sub {
+	margin: 22px auto 0; max-width: 620px;
+	font-size: clamp(16px, 2vw, 18px); color: var(--text-2); line-height: 1.65;
+	text-wrap: pretty;
+}
+.hero-ctas { margin-top: 34px; display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; }
+.hero-note { margin-top: 16px; font-size: 13px; color: var(--text-3); }
+.hero-note .mono { font-size: 12px; }
+.scroll-hint {
+	margin: 44px auto 0; width: 22px; height: 36px; border: 1.5px solid var(--line-strong);
+	border-radius: 999px; display: flex; justify-content: center; padding-top: 7px;
+}
+.scroll-hint i { width: 3px; height: 8px; border-radius: 2px; background: var(--text-3); animation: hint 1.8s ease-in-out infinite; }
+@keyframes hint { 0%,100% { transform: translateY(0); opacity: 1; } 55% { transform: translateY(10px); opacity: 0.1; } }
+
+/* ── Large screens: the hero keeps laptop spacing otherwise, so the copy sits tight
+      under the nav and the whole block reads compressed. Scale the vertical rhythm
+      and the type together — padding alone would just push a small block down. ── */
+@media (min-width: 1600px) {
+	.hero-copy { padding-top: 108px; }
+	h1 { font-size: 68px; margin-top: 26px; max-width: 1120px; }
+	.hero-sub { font-size: 19px; margin-top: 26px; max-width: 680px; }
+	.hero-ctas { margin-top: 40px; }
+	.hero-note { margin-top: 18px; }
+	.scroll-hint { margin-top: 56px; }
+}
+@media (min-width: 2000px) {
+	.hero-copy { padding-top: 140px; }
+	.badge { font-size: 14px; padding: 7px 16px 7px 9px; }
+	.badge .pill { font-size: 12px; }
+	h1 { font-size: 68px; margin-top: 30px; max-width: 1280px; }
+	.hero-sub { font-size: 19px; margin-top: 30px; max-width: 760px; }
+	.hero-ctas { margin-top: 46px; gap: 16px; }
+	.hero-note { font-size: 14px; margin-top: 22px; }
+	.hero-note .mono { font-size: 13px; }
+	.btn-lg { height: 54px; padding: 0 30px; font-size: 16px; }
+	.scroll-hint { margin-top: 68px; width: 24px; height: 40px; }
+}
+@media (min-width: 2600px) {
+	.hero-copy { padding-top: 180px; }
+	h1 { font-size: 92px; max-width: 1500px; }
+	.hero-sub { font-size: 23px; max-width: 860px; }
+	.hero-ctas { margin-top: 54px; }
+	.btn-lg { height: 60px; padding: 0 34px; font-size: 17px; }
+	.scroll-hint { margin-top: 80px; }
+}
+
+/* cinematic mode: standard hero copy in normal flow; the demo lives below it in a
+   100vh stage. On scroll the stage pins and the window grows FLAT from card to
+   fullscreen — no 3D rise, no tilt. */
+/* top-anchored: the card sits just under the nav (small hero→demo gap on ANY screen
+   height), then grows down to fill the viewport. */
+html.cine .demo-stage { min-height: 100vh; display: flex; align-items: flex-start; justify-content: center; padding-top: calc(var(--nav-h) + clamp(24px, 6vh, 92px)); }
+html.cine .mock-outer { max-width: none; width: 100%; height: auto; margin: 0; display: flex; justify-content: center; }
+html.cine .window { display: flex; flex-direction: column; height: auto; }
+html.cine .panes { flex: 1; min-height: 0; }
+
+/* ───────────────────────────── product mockup ───────────────────────────── */
+.demo-stage { position: relative; }
+.mock-outer { position: relative; margin: 64px auto 0; width: 100%; max-width: 1040px; }
+.tilt { position: relative; }
+.mock-glow {
+	position: absolute; inset: 6% 10% -6% 10%; z-index: 0;
+	/* Neutral, not teal: the warm halo above is the window's only light source, and a
+	   cool glow underneath the same object fought it and muddied both. */
+	background: radial-gradient(ellipse 60% 60% at 50% 40%, rgba(190, 120, 60, 0.10), rgba(140, 84, 40, 0.05) 45%, transparent 75%);
+	filter: blur(30px);
+}
+/* A painted glow asset, not gradients — its falloff and colour shift can't be
+   reproduced with radial-gradients. translateY is a % of the IMAGE's own height, so
+   -36% lands the bright band right at the window's top edge; the window occludes
+   the rest, which is what gives the crisp cut. */
+.mock-halo {
+	position: absolute; left: 50%; top: 0; transform: translate(-50%, -31%);
+	width: 62%; height: 400px; object-fit: fill; z-index: 0; pointer-events: none;
+}
+/* No rim overlay on the window — the glow sits strictly behind it, so the top edge
+   stays a clean hard cut with nothing hazing over the chrome. */
+.window {
+	position: relative; z-index: 1;
+	border: 1px solid rgba(255, 255, 255, 0.09); border-radius: 14px;
+	background: linear-gradient(180deg, #111214, #0b0c0e);
+	box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 50px 100px -30px rgba(0, 0, 0, 0.9), 0 0 70px -36px rgba(45, 212, 191, 0.14);
+	overflow: hidden;
+	text-align: left;
+}
+/* Windows 11-style app chrome */
+.titlebar {
+	display: flex; align-items: center; gap: 10px;
+	height: 44px; padding: 0 0 0 14px; flex: none;
+	border-bottom: 1px solid var(--line);
+	background: rgba(255,255,255,0.02);
+}
+.tb-app { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; letter-spacing: -0.01em; color: var(--text-2); }
+.tb-app svg { width: 16px; height: 16px; }
+.tb-tab {
+	display: flex; align-items: center; gap: 8px;
+	font-family: var(--mono); font-size: 12px; color: var(--text);
+	background: rgba(255,255,255,0.055); border: 1px solid var(--line);
+	border-radius: 8px; padding: 5px 11px; margin-left: 6px;
+}
+.tb-tab i { font-style: normal; color: var(--text-3); font-size: 12px; }
+.tb-tab .tab-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.win-ctls { margin-left: auto; display: flex; align-self: stretch; }
+.win-ctl {
+	width: 46px; display: grid; place-items: center;
+	color: var(--text-3); font-size: 11px; font-family: var(--mono);
+	transition: background 0.15s, color 0.15s;
+}
+.win-ctl:hover { background: rgba(255,255,255,0.07); color: var(--text); }
+.win-ctl.x:hover { background: #e81123cc; color: #fff; }
+.statusbar {
+	display: flex; align-items: center; gap: 16px;
+	height: 32px; padding: 0 14px; flex: none;
+	border-top: 1px solid var(--line);
+	background: rgba(255,255,255,0.015);
+	font-family: var(--mono); font-size: 11px; color: var(--text-3);
+	white-space: nowrap; overflow: hidden;
+}
+.statusbar .sb-ok { color: #4ade80; }
+.statusbar .sb-accent { color: var(--accent); }
+.statusbar .sb-right { margin-left: auto; display: flex; gap: 16px; }
+@media (max-width: 640px) { .statusbar .sb-right span:first-child { display: none; } }
+
+.panes { display: grid; grid-template-columns: 202px 330px 1fr; min-height: 500px; overflow: hidden; }
+.pane { border-right: 1px solid var(--line); min-width: 0; display: flex; flex-direction: column; }
+.pane:last-child { border-right: 0; }
+.pane-head {
+	display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; flex: none;
+	font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3);
+	border-bottom: 1px solid var(--line);
+}
+.pane-head .live {
+	margin-left: auto; display: inline-flex; align-items: center; gap: 5px;
+	font-size: 10px; letter-spacing: 0.06em; color: #4ade80; text-transform: none; font-weight: 550;
+}
+.live-dot { width: 6px; height: 6px; border-radius: 50%; background: #4ade80; animation: pulse-dot 1.6s ease-in-out infinite; }
+@keyframes pulse-dot { 50% { opacity: 0.35; } }
+
+/* app sidebar (far left) — the real NavSidebar, styled Linear-grade */
+.snav { display: flex; flex-direction: column; padding: 10px 8px; gap: 1px; background: rgba(255, 255, 255, 0.012); font-size: 12.5px; }
+.snav-brand { display: flex; align-items: center; gap: 8px; padding: 3px 8px 10px; font-weight: 600; font-size: 13.5px; letter-spacing: -0.01em; }
+.snav-brand .mark {
+	width: 20px; height: 20px; border-radius: 6px; flex: none;
+	background: linear-gradient(135deg, #38bdf8, #2dd4bf);
+	display: grid; place-items: center; color: #06282e;
+}
+.snav-brand .mark svg { width: 11px; height: 11px; }
+.snav-brand .chev { color: var(--text-3); font-size: 8px; margin-top: 1px; }
+.snav-new {
+	display: flex; align-items: center; gap: 7px; margin: 0 4px 12px;
+	border: 1px solid var(--line-strong); background: rgba(255, 255, 255, 0.05);
+	border-radius: 7px; padding: 6px 10px; font-size: 12px; color: var(--text);
+}
+.snav-new svg { width: 11px; height: 11px; color: var(--text-2); }
+.snav-item { display: flex; align-items: center; gap: 8px; padding: 5.5px 8px; border-radius: 6px; color: var(--text-2); }
+.snav-item svg { width: 14px; height: 14px; color: var(--text-3); flex: none; }
+.snav-item.active { background: rgba(255, 255, 255, 0.06); color: var(--text); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05) inset; }
+.snav-item.active svg { color: var(--text-2); }
+.snav-label { padding: 14px 8px 5px; font-size: 11px; color: var(--text-3); }
+.snav-proj { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; color: var(--text-2); font-family: var(--mono); font-size: 11.5px; }
+.snav-proj .pdot { width: 6px; height: 6px; border-radius: 2px; background: var(--text-3); opacity: 0.5; flex: none; }
+.snav-proj.active { background: rgba(45, 212, 191, 0.07); color: var(--text); }
+.snav-proj.active .pdot { background: var(--accent); opacity: 1; }
+.snav-foot { margin-top: auto; display: flex; align-items: center; gap: 7px; padding: 8px 8px 2px; font-family: var(--mono); font-size: 10.5px; color: var(--text-3); border-top: 1px solid var(--line); }
+.snav-foot i { width: 6px; height: 6px; border-radius: 50%; background: #4ade80; }
+
+/* chat thread — transcript of tool cards, mirroring the real builder's ActivityCard */
+.chat-head {
+	display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px; flex: none;
+	border-bottom: 1px solid var(--line); font-size: 13px; font-weight: 600; color: var(--text-2);
+}
+.ch-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.chat-sub {
+	display: flex; align-items: center; gap: 6px; padding: 8px 14px; flex: none;
+	border-bottom: 1px solid var(--line); font-size: 12.5px; font-weight: 550; color: var(--text-2);
+}
+.chat-sub .cs-chev { font-size: 8px; color: var(--text-3); }
+.ch-model {
+	margin-left: auto; display: flex; align-items: center; gap: 6px; flex: none;
+	font-family: var(--mono); font-size: 10px; font-weight: 400; color: var(--text-3);
+	border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px; white-space: nowrap;
+}
+.ch-model i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.chat { padding: 12px; display: flex; flex-direction: column; gap: 9px; font-size: 13px; flex: 1; overflow: hidden; }
+.msg-user {
+	align-self: flex-end; max-width: 92%;
+	background: rgba(255,255,255,0.07); border: 1px solid var(--line);
+	border-radius: 12px 12px 4px 12px; padding: 8px 12px; color: var(--text); margin-bottom: 4px;
+}
+.tcard {
+	border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,0.025);
+	overflow: hidden; flex: none;
+	opacity: 0; transform: translateY(6px);
+	transition: opacity 0.4s, transform 0.4s;
+}
+.tcard.on { opacity: 1; transform: none; }
+.tcard-row { display: flex; align-items: center; gap: 7px; padding: 8px 10px; font-size: 12px; color: var(--text-2); }
+.tcard-row .chev { color: var(--text-3); font-size: 8px; flex: none; }
+.tc-ic { position: relative; width: 14px; height: 14px; flex: none; display: grid; place-items: center; color: var(--text-3); }
+.tc-ic svg { width: 12.5px; height: 12.5px; transition: opacity 0.2s; }
+.tcard .spin { position: absolute; inset: 0; margin: auto; width: 11px; height: 11px; border: 1.5px solid var(--line-strong); border-top-color: var(--accent); border-radius: 50%; animation: rot 0.8s linear infinite; opacity: 0; }
+.tcard.running .spin { opacity: 1; }
+.tcard.running .tc-ic svg { opacity: 0; }
+.tcard .verb { color: var(--text-3); flex: none; }
+.tcard .fname { font-family: var(--mono); font-size: 11.5px; color: var(--text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 96px; }
+.tcard .fdir { font-family: var(--mono); font-size: 11.5px; color: var(--text-3); white-space: nowrap; flex: 0 9 auto; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tcard .stat, .tcard .chev, .tc-ic { flex: none; }
+.tcard .stat { margin-left: auto; flex: none; font-family: var(--mono); font-size: 11px; opacity: 0; transition: opacity 0.3s; }
+.tcard.done .stat { opacity: 1; }
+.tcard .add { color: #4ade80; }
+.tcard .run-ok { color: #4ade80; }
+@keyframes rot { to { transform: rotate(360deg); } }
+/* the agent's plan — todo list that ticks as it works (ListTodo ActivityCard) */
+.plan {
+	border: 1px solid var(--line); border-radius: 8px; background: rgba(255, 255, 255, 0.025);
+	padding: 9px 11px; flex: none;
+	opacity: 0; transform: translateY(6px);
+	transition: opacity 0.4s, transform 0.4s;
+}
+.plan.on { opacity: 1; transform: none; }
+.plan-title { display: flex; align-items: center; gap: 6px; font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-3); margin-bottom: 7px; font-weight: 600; }
+.plan-title svg { width: 12px; height: 12px; }
+.plan-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); padding: 3.5px 0; }
+.plan-item .pbox {
+	width: 11px; height: 11px; flex: none;
+	border: 1.5px solid var(--line-strong); border-radius: 3.5px;
+	display: grid; place-items: center; font-size: 8px; color: #06282e;
+	transition: background 0.25s, border-color 0.25s;
+}
+.plan-item.done .pbox { background: var(--accent); border-color: var(--accent); }
+.plan-item.done { color: var(--text-3); text-decoration: line-through; text-decoration-color: rgba(255, 255, 255, 0.25); }
+.plan-count { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--text-3); letter-spacing: 0; text-transform: none; }
+/* collapsed "Thought process" rows + plain reasoning text, like the real transcript */
+.tp { display: flex; align-items: center; gap: 6px; padding: 2px 2px; font-size: 12px; color: var(--text-3); border: 0; background: none; }
+.tp .tp-chev { font-size: 8px; }
+.ttext { font-size: 12.5px; color: var(--text-2); line-height: 1.55; padding: 1px 2px; border: 0; background: none; }
+.ttext code { font-family: var(--mono); font-size: 11px; background: rgba(255, 255, 255, 0.07); border-radius: 5px; padding: 1px 5px; }
+.ok-circ {
+	width: 14px; height: 14px; border-radius: 50%; flex: none;
+	background: rgba(74, 222, 128, 0.14); color: #4ade80;
+	display: grid; place-items: center; font-size: 8.5px;
+}
+.err-circ {
+	width: 14px; height: 14px; border-radius: 50%; flex: none;
+	background: rgba(248, 113, 113, 0.14); color: #f87171;
+	display: grid; place-items: center; font-size: 8.5px;
+}
+.tcard .del { color: #f87171; }
+/* status rows: "⊙ 📄 Reading src/App.tsx" — plain rows, like the real transcript */
+.srow { display: flex; align-items: center; gap: 8px; padding: 2px 2px; font-size: 12px; color: var(--text-2); border: 0; background: none; }
+.srow svg { width: 13px; height: 13px; color: var(--text-3); flex: none; }
+.srow .sr-path { font-family: var(--mono); font-size: 11.5px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.srow .sr-ok { color: #4ade80; }
+.srow .sr-err { color: #f87171; }
+.msg-agent {
+	align-self: flex-start; max-width: 95%;
+	border: 1px solid rgba(45, 212, 191, 0.25); background: rgba(45, 212, 191, 0.06);
+	border-radius: 12px 12px 12px 4px; padding: 8px 12px; color: var(--text);
+	opacity: 0; transform: translateY(6px); transition: opacity 0.4s, transform 0.4s;
+}
+.msg-agent.on { opacity: 1; transform: none; }
+.chat-input {
+	margin: 0 12px 12px; flex: none;
+	border: 1px solid var(--line-strong); border-radius: 11px;
+	background: rgba(255,255,255,0.03);
+	padding: 9px 8px 9px 12px; font-size: 12px; color: var(--text-3);
+	display: flex; align-items: center; gap: 8px;
+}
+.chat-input .caret { width: 1.5px; height: 13px; background: var(--accent); animation: blink 1.1s steps(1) infinite; }
+.ci-right { margin-left: auto; display: flex; align-items: center; gap: 7px; flex: none; }
+.ci-model { font-family: var(--mono); font-size: 9px; color: var(--text-3); border: 1px solid var(--line); border-radius: 7px; padding: 3px 8px; white-space: nowrap; }
+.ci-send { width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: #06282e; display: grid; place-items: center; font-size: 11px; font-weight: 700; }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* builder pane (right) — tabbed Preview | Code | Versions, like BuilderPane.tsx */
+.builder { background: #0a0a0c; }
+.b-tabs { display: flex; align-items: center; height: 40px; padding: 0 10px; border-bottom: 1px solid var(--line); flex: none; }
+.b-tab {
+	display: flex; align-items: center; gap: 6px; height: 100%; padding: 0 11px;
+	font-size: 12.5px; color: var(--text-3); border-bottom: 1.5px solid transparent;
+	transition: color 0.25s, border-color 0.25s;
+}
+.b-tab svg { width: 14px; height: 14px; }
+.b-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.b-div { width: 1px; height: 18px; background: var(--line); margin: 0 8px; flex: none; }
+.b-term { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-3); }
+.b-term svg { width: 14px; height: 14px; }
+.b-devices { margin-left: auto; display: flex; gap: 4px; }
+.b-devices span { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: var(--text-3); }
+.b-devices span.active { background: rgba(255,255,255,0.07); color: var(--text); }
+.b-devices svg { width: 13px; height: 13px; }
+.b-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.b-view[hidden] { display: none; }
+
+/* Code tab: file tree + editor */
+.code-body { display: grid; grid-template-columns: 196px 1fr; flex: 1; min-height: 0; }
+.editor { display: flex; flex-direction: column; min-width: 0; }
+.ed-tabs { display: flex; height: 32px; border-bottom: 1px solid var(--line); flex: none; }
+.ed-tab {
+	display: flex; align-items: center; gap: 7px; padding: 0 12px;
+	font-family: var(--mono); font-size: 10.5px; color: var(--text);
+	background: rgba(255,255,255,0.03); border-right: 1px solid var(--line);
+}
+.ed-tab i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+/* VS Code-style tree: chevrons, colored folders, per-language file icons */
+.tree { border-right: 1px solid var(--line); padding: 8px 0; font-size: 11.5px; color: var(--text-2); overflow: hidden; }
+.trow { display: flex; align-items: center; gap: 6px; padding: 2.5px 8px 2.5px 10px; white-space: nowrap; overflow: hidden; }
+.trow .tlabel { overflow: hidden; text-overflow: ellipsis; }
+.trow .tch { width: 8px; flex: none; font-size: 7.5px; color: var(--text-3); }
+.trow svg { width: 13px; height: 13px; flex: none; }
+.trow .i-folder { color: #7d95ad; }
+.trow .i-react { color: #61dafb; }
+.trow .badge {
+	flex: none; font-family: var(--mono); font-weight: 700; font-size: 7px;
+	border-radius: 2.5px; padding: 1px 2.5px; line-height: 1.25; color: #fff;
+}
+.trow .b-ts { background: #3178c6; }
+.trow .b-css { background: #a074c4; }
+.trow .b-json { background: #8a7a2e; }
+.trow .b-md { background: #4a7dab; }
+.trow .b-html { background: #b3592e; }
+.trow .b-dim { background: #3f3f46; color: #a1a1aa; }
+.d1 { padding-left: 24px; }
+.d2 { padding-left: 38px; }
+.trow.active { color: var(--accent); background: rgba(45, 212, 191, 0.08); box-shadow: inset 2px 0 0 var(--accent); }
+.code { padding: 12px 14px; font-family: var(--mono); font-size: 11.5px; line-height: 1.75; overflow: hidden; }
+.cl { white-space: pre; opacity: 0; transform: translateX(6px); transition: opacity 0.3s, transform 0.3s; }
+.cl.on { opacity: 1; transform: none; }
+.tk-kw { color: #c4b5fd; } .tk-fn { color: #7dd3fc; } .tk-str { color: #86efac; }
+.tk-cm { color: #52525b; } .tk-tag { color: #5eead4; } .tk-attr { color: #fda4af; }
+.tk-pl { color: #d4d4d8; }
+
+/* Preview tab: browser-ish toolbar + the app frame, like PreviewPane.tsx */
+.p-toolbar { display: flex; align-items: center; gap: 4px; height: 34px; padding: 0 8px; border-bottom: 1px solid var(--line); flex: none; color: var(--text-3); }
+.p-toolbar .p-ico { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 5px; flex: none; }
+.p-toolbar .p-ico svg { width: 12px; height: 12px; }
+.p-toolbar .p-url { font-family: var(--mono); font-size: 11.5px; color: var(--text-3); margin-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.p-live { margin-left: auto; flex: none; display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 550; color: #4ade80; opacity: 0; transition: opacity 0.4s; }
+.p-live.on { opacity: 1; }
+.p-frame { position: relative; flex: 1; min-height: 0; background: #0c0c0f; display: flex; }
+.p-pill {
+	position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 3;
+	display: flex; align-items: center; gap: 8px; white-space: nowrap;
+	background: rgba(10, 10, 13, 0.92); border: 1px solid var(--line-strong); color: var(--text-2);
+	border-radius: 999px; padding: 5px 13px; font-size: 10.5px; font-weight: 500;
+	backdrop-filter: blur(6px);
+	opacity: 0; transition: opacity 0.4s;
+}
+.p-pill.on { opacity: 1; }
+.p-pill .pspin { width: 11px; height: 11px; border: 1.5px solid var(--line-strong); border-top-color: var(--accent); border-radius: 50%; animation: rot 0.8s linear infinite; flex: none; }
+.p-app {
+	flex: 1; min-width: 0; overflow: hidden;
+	background: #fafafa; color: #18181b;
+	display: flex; flex-direction: column;
+	opacity: 0; transform: scale(0.985); transition: opacity 0.6s, transform 0.6s;
+}
+.p-app.on { opacity: 1; transform: none; }
+/* ── the previewed app: Velocarta — the exact app the real Cascade built (localhost:4320) ── */
+.vfade { opacity: 0; transform: translateY(-4px); transition: opacity 0.4s, transform 0.4s; }
+.vfade.on { opacity: 1; transform: none; }
+.vrev { opacity: 0; transform: translateY(10px); transition: opacity 0.5s, transform 0.5s; }
+.vrev.on { opacity: 1; transform: none; }
+/* every band shares one centred container — that's what stops text and cards
+   from sprawling to the window edges on a wide screen */
+.vl-wrap { width: 100%; max-width: 1120px; margin: 0 auto; padding: 0 34px; }
+.vl-nav { border-bottom: 1px solid #ececec; background: rgba(255, 255, 255, 0.94); flex: none; }
+.vl-nav-in { display: flex; align-items: center; gap: 18px; padding-top: 12px; padding-bottom: 12px; }
+.vl-logo { font-family: 'Fraunces', Georgia, serif; font-weight: 600; font-size: 15px; letter-spacing: -0.01em; color: #18181b; }
+.vl-links { display: flex; gap: 16px; font-size: 10.5px; color: #52525b; margin-left: auto; }
+.vl-cart { font-size: 10.5px; font-weight: 600; color: #18181b; }
+.vl-hero { position: relative; flex: 0 0 40%; min-height: 260px; overflow: hidden; display: flex; align-items: center; }
+.vl-hero .vl-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 62% 46%; }
+/* the photo is bright alpine green, so the copy gets a deeper scrim to stay legible */
+.vl-hero::after {
+	content: ''; position: absolute; inset: 0;
+	background: linear-gradient(90deg, rgba(8, 12, 10, 0.82) 0%, rgba(8, 12, 10, 0.55) 42%, rgba(8, 12, 10, 0.12) 78%, rgba(8, 12, 10, 0.05) 100%);
+}
+.vl-hero .vl-wrap { position: relative; z-index: 2; }
+.vl-hero-copy { color: #fff; max-width: 480px; }
+.vl-badge {
+	display: inline-block; font-size: 9.5px; font-weight: 550;
+	border: 1px solid rgba(255, 255, 255, 0.4); background: rgba(255, 255, 255, 0.16);
+	backdrop-filter: blur(4px); border-radius: 999px; padding: 3px 11px; margin-bottom: 12px;
+}
+.vl-h1 { font-family: 'Fraunces', Georgia, serif; font-size: 32px; font-weight: 600; line-height: 1.06; letter-spacing: -0.015em; }
+.vl-sub { font-size: 11.5px; opacity: 0.9; margin-top: 10px; line-height: 1.6; }
+.vl-ctas { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
+.vl-btn { font-size: 10.5px; font-weight: 600; border-radius: 9px; padding: 8px 16px; }
+.vl-btn.primary { background: #6d28d9; color: #fff; }
+.vl-btn.ghost { background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.35); color: #fff; backdrop-filter: blur(4px); }
+.vl-note { font-size: 9.5px; opacity: 0.7; margin-left: 4px; }
+/* stat strip — the muted band between hero and categories, as in the real app */
+.vl-stats { background: #f7f7f8; border-bottom: 1px solid #e9e9ec; flex: none; }
+.vl-stats-in { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; padding-top: 15px; padding-bottom: 15px; }
+.vl-stat { display: flex; align-items: center; gap: 10px; }
+.vl-stat .si {
+	width: 26px; height: 26px; border-radius: 8px; flex: none; display: grid; place-items: center;
+	background: #ede9fe; color: #6d28d9;
+}
+.vl-stat .si svg { width: 14px; height: 14px; }
+.vl-stat b { display: block; font-size: 11px; font-weight: 650; color: #18181b; line-height: 1.35; }
+.vl-stat span { display: block; font-size: 9.5px; color: #71717a; line-height: 1.35; }
+
+.vl-cats { background: #fff; padding: 26px 0 28px; min-height: 0; }
+.vl-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 18px; }
+.vl-eyebrow { font-size: 9.5px; letter-spacing: 0.16em; color: #6d28d9; font-weight: 700; }
+.vl-title { font-family: 'Fraunces', Georgia, serif; font-size: 21px; font-weight: 600; color: #18181b; margin-top: 4px; letter-spacing: -0.015em; }
+.vl-all { font-size: 10.5px; font-weight: 600; color: #6d28d9; white-space: nowrap; padding-bottom: 3px; }
+.vl-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; align-content: start; }
+.vl-card { display: flex; flex-direction: column; }
+/* every tile is the same 4:3 crop — that's what makes the row read as one system */
+.vl-img { display: block; aspect-ratio: 3 / 3; border-radius: 12px; overflow: hidden; background: #f4f4f5; }
+.vl-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vl-card b { font-size: 11px; font-weight: 650; color: #18181b; padding: 9px 2px 0; letter-spacing: -0.005em; }
+.vl-card span { font-size: 9.5px; color: #71717a; padding: 2px 2px 0; }
+/* ── large / 4K screens: the window fills the viewport, so scale its UI up with it.
+     `zoom` scales layout+text together; it only touches the window internals, so
+     scroll/pin geometry outside stays untouched. ── */
+@media (min-width: 1700px) { .wrap { max-width: 1280px; } }
+@media (min-width: 2100px) { .wrap { max-width: 1420px; } }
+
+@media (max-width: 900px) {
+	.panes { grid-template-columns: 1fr; min-height: 420px; }
+	.pane-chat, .snav { display: none; }
+	.pane { border-right: 0; }
+	.code-body { grid-template-columns: 110px 1fr; }
+	.vl-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ───────────────────────────── stats ───────────────────────────── */
+/* ───────────────────────────── proof cards ───────────────────────────── */
+.stats-band { padding: var(--section-gap) 0 0; }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+@media (max-width: 900px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 520px) { .stats { grid-template-columns: 1fr; } }
+.scard {
+	position: relative; overflow: hidden;
+	border: 1px solid var(--line); border-radius: 16px;
+	background: linear-gradient(180deg, rgba(255,255,255,0.032), rgba(255,255,255,0.008));
+	padding: 22px 22px 20px;
+	transition: border-color 0.3s;
+}
+.scard:hover { border-color: rgba(255,255,255,0.18); }
+.scard .sic {
+	width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
+	--ic: var(--h-teal);
+	background: color-mix(in oklab, var(--ic) 14%, transparent);
+	color: var(--ic);
+	border: 1px solid color-mix(in oklab, var(--ic) 30%, transparent);
+	margin-bottom: 16px;
+}
+.stats .scard:nth-child(2) .sic { --ic: var(--h-violet); }
+.stats .scard:nth-child(3) .sic { --ic: var(--h-amber); }
+.stats .scard:nth-child(4) .sic { --ic: var(--h-sky); }
+.scard .sic svg { width: 16px; height: 16px; }
+.scard b { display: block; font-size: 28px; font-weight: 650; letter-spacing: -0.03em; line-height: 1.1; }
+.scard .slabel { display: block; margin-top: 4px; font-size: 13.5px; font-weight: 550; color: var(--text); }
+.scard p { margin-top: 7px; font-size: 15px; color: var(--text-3); line-height: 1.5; }
+
+/* ───────────────────────────── supported models ─────────────────────────────
+   A static 3×3 grid rather than a marquee: nine models all fit on screen, so
+   scrolling them would only clip cards at the edges and compete with the demo. */
+.models { padding: 8px 0 40px; }
+.models-label {
+	display: flex; align-items: center; gap: 9px;
+	font-size: 12.5px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--text-3);
+	margin: 40px 0 20px;
+}
+.models-label img { width: 18px; height: 18px; opacity: 0.95; flex: none; }
+.model-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 1000px) { .model-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .model-grid { grid-template-columns: 1fr; } }
+.models-note { margin-top: 18px; font-size: 15px; color: var(--text-3); }
+.models-note b { color: var(--text-2); font-weight: 550; }
+/* BYOK — the escape hatch: local by default, any cloud endpoint when you want it */
+.byok {
+	--ic: var(--h-amber);
+	margin-top: 16px; display: flex; align-items: center; gap: 22px; flex-wrap: wrap;
+	border: 1px solid color-mix(in oklab, var(--ic) 26%, transparent); border-radius: 16px;
+	background: linear-gradient(115deg, color-mix(in oklab, var(--ic) 10%, transparent), rgba(255, 255, 255, 0.02) 60%, transparent);
+	padding: 20px 24px;
+}
+.byok .bic {
+	width: 38px; height: 38px; border-radius: 11px; flex: none; display: grid; place-items: center;
+	background: color-mix(in oklab, var(--ic) 15%, transparent);
+	color: var(--ic);
+	border: 1px solid color-mix(in oklab, var(--ic) 32%, transparent);
+}
+.byok .bic svg { width: 18px; height: 18px; }
+.byok .btxt { min-width: 220px; flex: 1 1 320px; }
+.byok b { display: block; font-size: 15.5px; font-weight: 620; letter-spacing: -0.01em; }
+.byok p { margin-top: 5px; font-size: 16px; color: var(--text-2); line-height: 1.55; }
+.byok p em { font-style: normal; color: var(--text); font-weight: 550; }
+.byok p .mono { font-size: 12.5px; color: var(--text-2); }
+/* provider wall — brand marks set like a logo row, dimmed until hover */
+.provider-wall { margin-top: 30px; }
+.pw-label { text-align: center; font-size: 13px; color: var(--text-3); margin-bottom: 20px; }
+/* Left-aligned like every other section header (hero stays centred — that's the
+   page's rhythm). The full-width dead zone is solved by SPREADING the logo row
+   edge to edge instead of centring the whole section. */
+.pw-row {
+	display: flex; align-items: center; justify-content: space-between;
+	gap: 26px 40px; flex-wrap: wrap; margin-top: 52px;
+}
+.pw {
+	display: flex; align-items: center; gap: 13px;
+	opacity: 0.62; filter: grayscale(1);
+	transition: opacity 0.3s, filter 0.3s;
+}
+.pw:hover { opacity: 1; filter: grayscale(0); }
+.pw img { width: 32px; height: 32px; object-fit: contain; flex: none; }
+.pw b { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; color: #fff; white-space: nowrap; }
+.pw.nv b { font-weight: 700; letter-spacing: 0.01em; }
+.pw.txt b { font-family: var(--mono); font-size: 20px; font-weight: 600; letter-spacing: -0.03em; }
+/* Two real points instead of a trailing "…or any other" apology — same information,
+   but it reads as a feature rather than a footnote. */
+.pw-points {
+	margin-top: 60px;
+	display: grid; grid-template-columns: 1fr 1fr; gap: 24px 56px;
+}
+@media (max-width: 760px) { .pw-points { grid-template-columns: 1fr; } }
+.pwp b { display: block; font-size: 16px; font-weight: 620; letter-spacing: -0.01em; color: var(--text); }
+/* direct child only — a nested .mono span was inheriting display:block and
+   breaking `.env` onto its own line */
+.pwp > span { display: block; margin-top: 6px; font-size: 15px; color: var(--text-3); line-height: 1.55; }
+.pwp .mono { display: inline; font-size: 13.5px; color: var(--text-2); }
+@media (max-width: 760px) { .pw-row { gap: 28px; } .pw b { font-size: 19px; } .pw img { width: 22px; height: 22px; } }
+
+.byok .provs { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.byok .provs span {
+	font-family: var(--mono); font-size: 12px; color: var(--text-2);
+	border: 1px solid var(--line-strong); border-radius: 8px; padding: 6px 11px;
+	background: rgba(255, 255, 255, 0.04); white-space: nowrap;
+}
+.byok .provs .more { border-style: dashed; color: var(--text-3); }
+/* a model card: real brand mark + the tag you'd actually pull */
+.mcard {
+	display: flex; align-items: center; gap: 16px; min-width: 0;
+	border: 1px solid var(--line); border-radius: 14px;
+	background: linear-gradient(180deg, rgba(255,255,255,0.038), rgba(255,255,255,0.012));
+	padding: 20px 16px 16px 24px;
+	transition: border-color 0.25s, background 0.25s;
+}
+.mcard > span { min-width: 0; }
+.mcard:hover { border-color: rgba(255,255,255,0.2); background: rgba(255,255,255,0.055); }
+.mlogo {
+	width: 40px; height: 40px; border-radius: 9px; flex: none; display: grid; place-items: center;
+	background: rgba(255,255,255,0.06); border: 1px solid var(--line);
+}
+.mlogo img { width: 34px; height: 34px; object-fit: contain; }
+.mcard b { display: block; font-family: var(--mono); font-size: 18px; font-weight: 550; color: var(--text); letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mcard span span { display: block; margin-top: 1px; font-size: 14px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ───────────────── model-manager showcase: rail + elevated product mock ───────────────── */
+.mm-layout { margin-top: 54px; display: grid; grid-template-columns: 296px 1fr; gap: 52px; align-items: start; }
+@media (max-width: 1000px) { .mm-layout { grid-template-columns: 1fr; gap: 30px; } }
+.mm-rail { display: flex; flex-direction: column; }
+.mm-item { padding: 22px 0 22px 20px; border-top: 1px solid var(--line); border-left: 2px solid transparent; }
+.mm-item:last-child { border-bottom: 1px solid var(--line); }
+.mm-item.active { border-left-color: var(--accent); }
+.mm-item .mm-h { display: flex; align-items: center; gap: 9px; font-size: 16px; font-weight: 620; letter-spacing: -0.01em; color: var(--text); }
+/* each capability gets its own sober hue, so the rail reads as a set rather than
+   four identical white glyphs */
+.mm-item .mm-h svg { width: 18px; height: 18px; color: var(--ic, var(--h-teal)); flex: none; }
+.mm-item:nth-child(1) { --ic: var(--h-teal); }
+.mm-item:nth-child(2) { --ic: var(--h-violet); }
+.mm-item:nth-child(3) { --ic: var(--h-amber); }
+.mm-item:nth-child(4) { --ic: var(--h-sky); }
+.mm-item.active { border-left-color: var(--ic, var(--accent)); }
+.mm-item.active .mm-h { color: var(--text); }
+.mm-item p { margin-top: 8px; font-size: 15.5px; color: var(--text-2); line-height: 1.6; }
+.mm-item.active p { color: var(--text-2); }
+
+/* the stage lifts the window off the page, Linear-style */
+.mm-stage {
+	position: relative; border: 1px solid var(--line); border-radius: 22px;
+	background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.006));
+	padding: 24px;
+}
+.mm-stage::before {
+	content: ''; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none;
+	background: radial-gradient(ellipse 70% 40% at 50% 0%, rgba(45, 212, 191, 0.10), transparent 70%);
+}
+.mm-window {
+	position: relative; border: 1px solid var(--line-strong); border-radius: 14px;
+	background: linear-gradient(180deg, #111214, #0b0c0e); overflow: hidden;
+	box-shadow: 0 34px 70px -28px rgba(0,0,0,0.9), 0 0 0 1px rgba(0,0,0,0.4);
+}
+.mmw-head { padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.mmw-head b { font-size: 16px; font-weight: 620; letter-spacing: -0.015em; }
+.mmw-head p { margin-top: 5px; font-size: 13.5px; color: var(--text); line-height: 1.5; }
+.mmw-body { display: grid; grid-template-columns: 212px 1fr; }
+@media (max-width: 620px) { .mmw-body { grid-template-columns: 1fr; } .mmw-side { display: none; } }
+.mmw-side { border-right: 1px solid var(--line); padding: 12px 10px; display: flex; flex-direction: column; }
+.mmw-label {
+	display: flex; align-items: center; justify-content: space-between; padding: 2px 6px 9px;
+	font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-2);
+}
+.mmw-model { padding: 6px 9px; border-radius: 8px; }
+.mmw-model.on { background: rgba(255,255,255,0.06); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05); }
+.mmw-model b { display: block; font-size: 12px; font-weight: 550; color: var(--text); }
+.mmw-model.on b { color: var(--text); }
+.mmw-model span { font-size: 11.5px; color: var(--text-2); }
+.mmw-add {
+	margin: 11px 4px 0; border-radius: 9px; text-align: center; padding: 8px;
+	background: var(--accent); color: #06282e; font-size: 12px; font-weight: 650;
+}
+.mmw-provs { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 10px; }
+.mmw-prov { display: flex; align-items: center; gap: 8px; padding: 5px 6px; font-size: 12px; color: var(--text-2); }
+.mmw-prov svg { width: 13px; height: 13px; color: var(--text-2); flex: none; }
+.mmw-prov .tag { margin-left: auto; font-size: 9.5px; border-radius: 999px; padding: 2px 8px; font-weight: 550; }
+.tag.local { background: var(--accent-soft); color: var(--accent); }
+.tag.set { background: rgba(56, 189, 248, 0.15); color: #7dd3fc; }
+.tag.none { background: rgba(255,255,255,0.06); color: var(--text-2); }
+
+.mmw-main { padding: 16px 20px 20px; min-width: 0; }
+.mmw-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mmw-title b { font-size: 17px; font-weight: 650; letter-spacing: -0.02em; }
+.mmw-title .badge-active { font-size: 10px; font-weight: 650; color: var(--accent); background: var(--accent-soft); border: 1px solid rgba(45,212,191,0.25); border-radius: 999px; padding: 2px 9px; }
+.mmw-prov-name { margin-top: 3px; font-size: 12.5px; color: var(--text-2); }
+.mmw-caps { margin-top: 9px; display: flex; gap: 6px; }
+.mmw-caps span { font-size: 9.5px; font-weight: 650; letter-spacing: 0.06em; color: var(--text); background: rgba(255,255,255,0.07); border-radius: 5px; padding: 3px 7px; }
+.mmw-sec { margin-top: 18px; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3); }
+/* sliders */
+.sl { margin-top: 13px; }
+.sl-top { display: flex; align-items: baseline; justify-content: space-between; }
+.sl-top b { font-size: 13px; font-weight: 600; }
+.sl-top em { font-style: normal; font-size: 12.5px; color: var(--text-2); }
+.sl-track { margin-top: 9px; height: 4px; border-radius: 999px; background: rgba(255,255,255,0.1); position: relative; }
+.sl-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; background: var(--accent); }
+.sl-knob { position: absolute; top: 50%; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); transform: translate(-50%, -50%); box-shadow: 0 0 0 4px rgba(45, 212, 191, 0.16); }
+.sl-scale { margin-top: 8px; display: flex; justify-content: space-between; font-family: var(--mono); font-size: 9.5px; color: var(--text-2); }
+.sl-note { margin-top: 7px; font-size: 11.5px; color: var(--text-2); }
+.sl-two { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; }
+@media (max-width: 760px) { .sl-two { grid-template-columns: 1fr; gap: 0; } }
+.mmw-actions { margin-top: 18px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.mmw-btn { border: 1px solid var(--line-strong); background: rgba(255,255,255,0.05); border-radius: 9px; padding: 8px 14px; font-size: 12.5px; font-weight: 550; }
+.mmw-hint { font-size: 11.5px; color: var(--text-2); margin-left: auto; }
+.mmw-key { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 15px; }
+.mmw-key-label { display: flex; align-items: center; gap: 7px; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-2); }
+.mmw-key-label svg { width: 12px; height: 12px; }
+.mmw-key-row { margin-top: 10px; display: flex; gap: 8px; }
+.mmw-input {
+	flex: 1; min-width: 0; border: 1px solid var(--line-strong); border-radius: 9px;
+	padding: 8px 11px; font-size: 12px; color: var(--text-2);
+	display: flex; align-items: center; justify-content: space-between; gap: 8px;
+	background: rgba(255,255,255,0.02);
+}
+.mmw-input svg { width: 13px; height: 13px; flex: none; }
+.mmw-foot { margin-top: 9px; font-size: 11.5px; color: var(--text-2); }
+.mmw-foot .mono { font-size: 11px; background: rgba(255,255,255,0.07); border-radius: 5px; padding: 1px 5px; }
+
+/* ───────────────────────────── sections (static, calm) ───────────────────────────── */
+section { padding: var(--section-gap) 0 0; }
+.eyebrow {
+	font-size: 12.5px; font-weight: 650; letter-spacing: 0.14em; text-transform: uppercase;
+	background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+h2 { margin-top: 12px; font-size: clamp(30px, 4.4vw, 44px); font-weight: 650; letter-spacing: -0.03em; line-height: 1.14; text-wrap: balance; }
+.section-sub { margin-top: 14px; max-width: 560px; color: var(--text-2); font-size: 16.5px; text-wrap: pretty; }
+
+/* bento */
+.bento { margin-top: 52px; display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; }
+.card {
+	position: relative; overflow: hidden;
+	border: 1px solid var(--line); border-radius: 16px;
+	background: linear-gradient(180deg, rgba(255,255,255,0.028), rgba(255,255,255,0.008));
+	padding: 26px;
+	transition: border-color 0.3s;
+}
+.card:hover { border-color: rgba(255,255,255,0.18); }
+.card::before {
+	content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+	background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 0%), rgba(56, 189, 248, 0.09), transparent 42%);
+	opacity: 0; transition: opacity 0.35s;
+}
+.card:hover::before { opacity: 1; }
+
+.c-3 { grid-column: span 3; } .c-2 { grid-column: span 2; } .c-6 { grid-column: span 6; }
+@media (max-width: 900px) { .c-3, .c-2 { grid-column: span 6; } }
+.card .icon {
+	width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center;
+	--ic: var(--h-teal);
+	background: color-mix(in oklab, var(--ic) 14%, transparent);
+	color: var(--ic);
+	border: 1px solid color-mix(in oklab, var(--ic) 30%, transparent);
+	margin-bottom: 18px;
+}
+.bento .card:nth-child(2) .icon { --ic: var(--h-sky); }
+.bento .card:nth-child(3) .icon { --ic: var(--h-violet); }
+.bento .card:nth-child(4) .icon { --ic: var(--h-amber); }
+.bento .card:nth-child(5) .icon { --ic: var(--h-rose); }
+.bento .card:nth-child(6) .icon { --ic: var(--h-lime); }
+.card .icon svg { width: 18px; height: 18px; }
+/* ── two light cards break up the black. Everything inside has to invert with them:
+      text, the icon chip, the border and the hover spotlight. ── */
+.card.tone-lime, .card.tone-white { border-color: transparent; }
+.card.tone-lime:hover, .card.tone-white:hover { border-color: rgba(10, 10, 11, 0.22); }
+.card.tone-lime::before, .card.tone-white::before { display: none; }
+.card.tone-lime h3, .card.tone-white h3 { color: #0a0a0b; }
+.card.tone-lime p, .card.tone-white p { color: rgba(10, 10, 11, 0.7); }
+.card.tone-lime .icon, .card.tone-white .icon {
+	background: rgba(10, 10, 11, 0.09);
+	border-color: rgba(10, 10, 11, 0.16);
+	color: #0a0a0b;
+}
+/* the code block stays dark — on a light card it reads as a deliberate inset terminal */
+.card.tone-lime .term, .card.tone-white .term { background: #0b0b0e; border-color: rgba(10, 10, 11, 0.18); color: var(--text-2); }
+.card.tone-lime { background: #e4f222; }
+.card.tone-white { background: #f4f4f5; }
+.card h3 { font-size: 19px; font-weight: 620; letter-spacing: -0.015em; }
+.card p { margin-top: 9px; font-size: 16px; color: var(--text-2); line-height: 1.6; }
+.card .art { margin-top: 20px; }
+.term {
+	border: 1px solid var(--line); border-radius: 10px; background: #08080a;
+	font-family: var(--mono); font-size: 13px; line-height: 1.85; padding: 14px 16px;
+	color: var(--text-2); overflow: hidden;
+}
+.term .p { color: var(--accent); } .term .ok { color: #4ade80; } .term .dim { color: var(--text-3); }
+.toolchips { display: flex; flex-wrap: wrap; gap: 7px; }
+.toolchips span {
+	font-family: var(--mono); font-size: 12.5px; color: var(--text-2);
+	border: 1px solid var(--line); border-radius: 7px; padding: 5px 10px;
+	background: rgba(255,255,255,0.02);
+}
+.toolchips span.hl { color: var(--accent); border-color: rgba(45, 212, 191, 0.3); background: rgba(45, 212, 191, 0.05); }
+.plats { display: flex; gap: 10px; flex-wrap: wrap; }
+.plat {
+	display: flex; align-items: center; gap: 9px; flex: 1 1 140px;
+	border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+	font-size: 14.5px; color: var(--text-2); background: rgba(255,255,255,0.02);
+}
+.plat svg { width: 16px; height: 16px; color: var(--text-2); flex: none; }
+.plat .soon { margin-left: auto; font-size: 9.5px; font-weight: 650; letter-spacing: 0.05em; text-transform: uppercase; color: var(--accent); background: var(--accent-soft); padding: 2px 7px; border-radius: 999px; }
+
+/* how it works — simple grid */
+.steps { margin-top: 52px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+@media (max-width: 760px) { .steps { grid-template-columns: 1fr; } }
+.step {
+	position: relative; border: 1px solid var(--line); border-radius: 16px; padding: 28px;
+	background: linear-gradient(180deg, rgba(255,255,255,0.028), rgba(255,255,255,0.008));
+}
+.step .num {
+	font-family: var(--mono); font-size: 12px; font-weight: 600;
+	--ic: var(--h-teal);
+	color: var(--ic);
+	border: 1px solid color-mix(in oklab, var(--ic) 32%, transparent);
+	background: color-mix(in oklab, var(--ic) 15%, transparent);
+	width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; margin-bottom: 16px;
+}
+.steps .step:nth-child(2) .num { --ic: var(--h-violet); }
+.steps .step:nth-child(3) .num { --ic: var(--h-sky); }
+.step h3 { font-size: 19px; font-weight: 620; letter-spacing: -0.015em; }
+.step p { margin-top: 9px; font-size: 16px; color: var(--text-2); line-height: 1.6; }
+.step .mono-line {
+	margin-top: 18px; font-family: var(--mono); font-size: 13px; color: var(--text-3);
+	border: 1px solid var(--line); border-radius: 9px; padding: 10px 13px; background: #08080a;
+	white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.step .mono-line b { color: var(--accent); font-weight: 500; }
+.step-cta { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 14px; border-color: rgba(45, 212, 191, 0.28); background: linear-gradient(160deg, rgba(45, 212, 191, 0.09), rgba(56, 189, 248, 0.04)); }
+.step-cta h3 { font-size: 22px; }
+
+/* open source */
+.os-grid { margin-top: 52px; display: grid; grid-template-columns: 1.15fr 1fr; gap: 40px; align-items: center; }
+@media (max-width: 900px) { .os-grid { grid-template-columns: 1fr; } }
+.os-points { display: flex; flex-direction: column; gap: 22px; }
+.os-point { display: flex; gap: 14px; }
+.os-point .tick {
+	flex: none; width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center;
+	background: var(--accent-soft); color: var(--accent); border: 1px solid rgba(45,212,191,0.2);
+}
+.os-point .tick svg { width: 13px; height: 13px; }
+.os-point b { font-size: 16.5px; font-weight: 620; letter-spacing: -0.01em; display: block; }
+.os-point span { font-size: 16px; color: var(--text-2); line-height: 1.6; }
+.repo-card {
+	border: 1px solid var(--line-strong); border-radius: 16px; overflow: hidden;
+	background: linear-gradient(180deg, #101014, #0b0b0e);
+	box-shadow: 0 30px 70px -30px rgba(0,0,0,0.8);
+}
+.repo-head { display: flex; align-items: center; gap: 10px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+.repo-head svg { width: 18px; height: 18px; color: var(--text-2); }
+.repo-head .mono { font-size: 13.5px; }
+.repo-head .mono b { color: var(--text); font-weight: 600; }
+.repo-head .mono span { color: var(--text-3); }
+.repo-badge { margin-left: auto; font-size: 11px; color: var(--text-2); border: 1px solid var(--line-strong); border-radius: 999px; padding: 3px 10px; }
+.repo-body { padding: 16px 18px; font-size: 15px; color: var(--text-2); line-height: 1.55; }
+.repo-langs { display: flex; align-items: center; gap: 16px; padding: 0 18px 16px; font-size: 12px; color: var(--text-3); }
+.lang { display: inline-flex; align-items: center; gap: 6px; }
+.lang i { width: 9px; height: 9px; border-radius: 50%; }
+.repo-bar { display: flex; height: 6px; margin: 0 18px 18px; border-radius: 999px; overflow: hidden; background: var(--line); }
+.repo-bar i { display: block; height: 100%; }
+
+/* download */
+/* No dividing rule — the two soft gradients below separate this from the page. */
+/* The CTA and the footer nav are now ONE element (<footer>) sharing this single
+   background — no seam, no second component. The ask sits at the top of the same
+   dark field the nav grid sits in; only generous padding tells them apart. */
+/* padding only — a margin here would stack on top of it and double the gap. The
+   padding is the better half to keep: it puts the space INSIDE the lit block. */
+footer { position: relative; padding-top: var(--section-gap); overflow: hidden; }
+/* One VERTICAL wash across the whole merged block — not elliptical pools. It rises
+   through the middle and fades out at both the top and bottom edges, so the CTA and
+   the nav grid sit in the same continuous field of light. */
+.dl-bg { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+.dl-bg .glow {
+	position: absolute; inset: 0;
+	background: linear-gradient(180deg,
+		transparent 0%,
+		rgba(233, 150, 70, 0.045) 20%,
+		rgba(233, 150, 70, 0.085) 44%,
+		rgba(212, 128, 60, 0.06) 68%,
+		rgba(180, 100, 46, 0.02) 86%,
+		transparent 100%);
+}
+/* CTA: text left, quick-start right — the layout the reference gets from its image */
+.dl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 96px; align-items: center; }
+@media (max-width: 900px) { .dl-grid { grid-template-columns: 1fr; gap: 40px; } }
+.dl-quick {
+	border: 1px solid var(--line); border-radius: 16px;
+	background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.008));
+	padding: 22px 24px;
+}
+.dl-quick .qlabel { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-3); margin-bottom: 14px; }
+.dl-quick .qline { font-family: var(--mono); font-size: 13.5px; line-height: 2.1; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dl-quick .qline .p { color: var(--accent); }
+.dl-quick .qline .dim { color: var(--text-3); }
+/* lift the content above the backdrop — but NOT .dl-bg itself: same specificity and
+   declared later, it was overriding that layer's `position: absolute` and collapsing
+   it to zero height, so the glow never rendered. */
+.dl-grid, .foot { position: relative; }
+.dl-grid h2 { max-width: 560px; }
+.dl-grid .section-sub { max-width: 520px; }
+.dl-grid .hero-ctas { margin-top: 40px; justify-content: flex-start; }
+.dl-grid .hero-note { text-align: left; margin-top: 22px; }
+
+/* No divider between the ask and the nav grid — the reference has none; only the
+   bottom bar gets a rule. Space alone separates them. */
+.foot-divider { height: 0; margin: 0 0 120px; }
+
+.foot { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 56px; align-items: start; }
+@media (max-width: 900px) { .foot { grid-template-columns: 1fr 1fr; gap: 36px; } }
+@media (max-width: 560px) { .foot { grid-template-columns: 1fr; } }
+.foot .brand { font-size: 17px; }
+.foot-note { margin-top: 16px; max-width: 300px; font-size: 14px; color: var(--text-3); line-height: 1.65; }
+.foot-social { margin-top: 22px; display: flex; gap: 10px; }
+.foot-social a {
+	width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center;
+	border: 1px solid var(--line); color: var(--text-3);
+	transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+.foot-social a:hover { color: var(--text); border-color: var(--line-strong); background: rgba(255,255,255,0.04); }
+.foot-social svg { width: 15px; height: 15px; }
+.foot-col b { display: block; font-size: 15.5px; font-weight: 620; letter-spacing: -0.01em; color: var(--text); margin-bottom: 16px; }
+.foot-col a { display: block; font-size: 14.5px; color: var(--text-3); margin-bottom: 12px; transition: color 0.2s; }
+.foot-col a:hover { color: var(--text); }
+footer .wrap:last-of-type { padding-bottom: 60px; }
+.foot-base {
+	margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--line);
+	display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+	font-size: 13.5px; color: var(--text-3);
+}
+.foot-base .fb-links { display: flex; gap: 26px; flex-wrap: wrap; }
+.foot-base .fb-links a { transition: color 0.2s; }
+.foot-base .fb-links a:hover { color: var(--text); }
+</style>
+</head>
+<body>
+<div class="page-bg" aria-hidden="true"></div>
+
+<!-- ══════════════════ NAV ══════════════════ -->
+<nav id="nav">
+	<div class="wrap nav-inner">
+		<a class="brand" href="#top">
+			<svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+				<defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+					<stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#2dd4bf"/>
+				</linearGradient></defs>
+				<rect x="3" y="3" width="7" height="19" rx="3.5" fill="url(#lg)"/>
+				<rect x="12.5" y="8" width="7" height="19" rx="3.5" fill="url(#lg)" opacity="0.75"/>
+				<rect x="22" y="13" width="7" height="16" rx="3.5" fill="url(#lg)" opacity="0.5"/>
+			</svg>
+			Cascade
+		</a>
+		<div class="nav-links">
+			<a href="#features">Features</a>
+			<a href="#how">How it works</a>
+			<a href="#opensource">Open source</a>
+		</div>
+		<div class="nav-cta">
+			<a class="btn btn-ghost" href="https://github.com/" target="_blank" rel="noopener">
+				<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+				GitHub
+			</a>
+			<a class="btn btn-primary" href="#download">Download</a>
+		</div>
+	</div>
+</nav>
+
+<!-- ══════════════════ HERO SCENE ══════════════════ -->
+<header class="hero-stage" id="top">
+	<div class="hero-bg">
+		<div class="aurora"></div>
+		<div class="grid-dots"></div>
+	</div>
+
+	<div class="hero-copy" id="heroCopy">
+		<div class="badge">
+			<span class="pill">Open source</span>
+			Free forever &middot; runs 100% on your machine
+		</div>
+		<h1>
+			<span class="line"><span class="li">Build real apps from a prompt.</span></span>
+			<span class="line"><span class="li grad">Entirely on your machine.</span></span>
+		</h1>
+		<p class="hero-sub">
+			Cascade is a local-first AI app builder powered by your own Ollama models.
+			An agent writes the code, runs it in a sandboxed container, and shows you a live
+			preview — no cloud, no API keys, no lock-in.
+		</p>
+		<div class="hero-ctas">
+			<a class="btn btn-primary btn-lg" href="#download">
+				<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.55 10.5 4.5v7H3v-5.95ZM3 18.45V12.5h7.5v7L3 18.45ZM11.5 4.36 21 3v8.5h-9.5v-7.14ZM21 12.5V21l-9.5-1.36V12.5H21Z"/></svg>
+				Download for Windows
+			</a>
+			<a class="btn btn-ghost btn-lg" href="https://github.com/" target="_blank" rel="noopener">
+				<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></svg>
+				Star on GitHub
+			</a>
+		</div>
+		<p class="hero-note">No sign-up. No telemetry. Bring your own model — <span class="mono">ollama pull qwen2.5-coder</span> and go.</p>
+		<div class="scroll-hint" aria-hidden="true"><i></i></div>
+	</div>
+
+	<div class="demo-stage" id="demoStage">
+		<div class="mock-outer">
+			<div class="mock-glow"></div>
+			<img class="mock-halo" src="assets/glow.png" alt="" aria-hidden="true" />
+			<div class="tilt" id="tilt">
+			<div class="window" id="mock">
+				<div class="titlebar">
+					<span class="tb-app">
+						<svg viewBox="0 0 32 32" fill="none"><rect x="3" y="3" width="7" height="19" rx="3.5" fill="#38bdf8"/><rect x="12.5" y="8" width="7" height="19" rx="3.5" fill="#38bdf8" opacity="0.7"/><rect x="22" y="13" width="7" height="16" rx="3.5" fill="#2dd4bf" opacity="0.5"/></svg>
+						Cascade
+					</span>
+					<span class="tb-tab"><span class="tab-dot"></span>velocarta<i>×</i></span>
+					<span class="win-ctls">
+						<span class="win-ctl">─</span><span class="win-ctl">▢</span><span class="win-ctl x">✕</span>
+					</span>
+				</div>
+				<div class="panes">
+					<!-- app sidebar — the real NavSidebar -->
+					<div class="pane snav">
+						<div class="snav-brand">
+							<span class="mark"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 14.4 9.6 22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4Z"/></svg></span>
+							Cascade <span class="chev">▼</span>
+						</div>
+						<div class="snav-new"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New project</div>
+						<div class="snav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M9 22V12h6v10"/></svg>Home</div>
+						<div class="snav-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg>Projects</div>
+						<div class="snav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4c0-1.1.9-2 2-2h8a2 2 0 0 1 2 2Z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/></svg>Chats</div>
+						<div class="snav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5M9 8V2M15 8V2M6 8h12v4a6 6 0 0 1-12 0Z"/></svg>Connectors</div>
+						<div class="snav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v3M12 20v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M1 12h3M20 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>Settings</div>
+						<div class="snav-label">Recent projects</div>
+						<div class="snav-proj active"><span class="pdot"></span>velocarta</div>
+						<div class="snav-proj"><span class="pdot"></span>saas-dashboard</div>
+						<div class="snav-proj"><span class="pdot"></span>portfolio-site</div>
+						<div class="snav-foot"><i></i>Ollama · connected</div>
+					</div>
+
+					<!-- chat thread — same transcript UI as the real builder -->
+					<div class="pane pane-chat">
+						<div class="chat-head"><span class="ch-title">Act as an expert UX/UI designer</span><span class="ch-model"><i></i>qwen2.5-coder</span></div>
+						<div class="chat-sub">continue where we left off <span class="cs-chev">▼</span></div>
+						<div class="chat">
+							<div class="msg-user">Act as an expert UX/UI designer. Build "Velocarta" — a premium bike accessories store.</div>
+							<div class="plan" id="plan">
+								<div class="plan-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>Tasks<span class="plan-count" id="planCount">0/4</span></div>
+								<div class="plan-item"><span class="pbox">✓</span>Scaffold Vite + React app</div>
+								<div class="plan-item"><span class="pbox">✓</span>Build hero, categories &amp; cart</div>
+								<div class="plan-item"><span class="pbox">✓</span>Install dependencies in the sandbox</div>
+								<div class="plan-item"><span class="pbox">✓</span>Run dev server &amp; verify green</div>
+							</div>
+							<div class="tcard tp"><span class="tp-chev">›</span>Thought process</div>
+							<div class="tcard">
+								<div class="tcard-row">
+									<span class="chev">▶</span>
+									<span class="tc-ic"><span class="spin"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 18v-6M9 15h6"/></svg></span>
+									<span class="verb">Created</span><span class="fname">LandingView.tsx</span><span class="fdir">components</span>
+									<span class="stat"><span class="add">+175</span></span>
+								</div>
+							</div>
+							<div class="tcard">
+								<div class="tcard-row">
+									<span class="chev">▶</span>
+									<span class="tc-ic"><span class="spin"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 18v-6M9 15h6"/></svg></span>
+									<span class="verb">Created</span><span class="fname">CatalogView.tsx</span><span class="fdir">components</span>
+									<span class="stat"><span class="add">+115</span></span>
+								</div>
+							</div>
+							<div class="tcard srow">
+								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sr-ok"><circle cx="12" cy="12" r="10"/><path d="m8.5 12 2.5 2.5L15.5 10"/></svg>
+								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+								Reading&nbsp;<span class="sr-path">src/App.tsx</span>
+							</div>
+							<div class="tcard ttext">The views ship hardcoded NavBars that don't accept <code>cartCount</code> / <code>addLine</code>. Updating each view's interface:</div>
+							<div class="tcard">
+								<div class="tcard-row">
+									<span class="chev">▶</span>
+									<span class="tc-ic"><span class="spin"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></span>
+									<span class="verb">Editing</span><span class="fname">LandingView.tsx</span><span class="fdir">components</span>
+									<span class="stat"><span class="err-circ">✕</span></span>
+								</div>
+							</div>
+							<div class="tcard">
+								<div class="tcard-row">
+									<span class="chev">▶</span>
+									<span class="tc-ic"><span class="spin"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m6 9 3 3-3 3M12 15h5"/></svg></span>
+									<span class="fname">head -35 src/components/Landi…</span>
+									<span class="stat"><span class="ok-circ">✓</span></span>
+								</div>
+							</div>
+							<div class="tcard ttext">Tabs — the file uses tabs, not spaces. Retrying with a targeted edit:</div>
+							<div class="tcard">
+								<div class="tcard-row">
+									<span class="chev">▶</span>
+									<span class="tc-ic"><span class="spin"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></span>
+									<span class="verb">Edited</span><span class="fname">App.tsx</span><span class="fdir">src</span>
+									<span class="stat"><span class="add">+4</span> <span class="del">−1</span></span>
+								</div>
+							</div>
+							<div class="tcard">
+								<div class="tcard-row">
+									<span class="chev">▶</span>
+									<span class="tc-ic"><span class="spin"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m6 9 3 3-3 3M12 15h5"/></svg></span>
+									<span class="fname">npm install</span><span class="fdir">· sandbox</span>
+									<span class="stat"><span class="ok-circ">✓</span></span>
+								</div>
+							</div>
+							<div class="tcard">
+								<div class="tcard-row">
+									<span class="chev">▶</span>
+									<span class="tc-ic"><span class="spin"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m6 9 3 3-3 3M12 15h5"/></svg></span>
+									<span class="fname">npm run dev</span><span class="fdir">· :4320</span>
+									<span class="stat"><span class="ok-circ">✓</span></span>
+								</div>
+							</div>
+							<div class="msg-agent" id="msgAgent">Done — Velocarta is live: serif hero, four collection categories and cart wired. Build is green. Want a bestsellers row next?</div>
+							<div style="flex:1"></div>
+						</div>
+						<div class="chat-input">Ask Cascade…<span class="caret"></span>
+							<span class="ci-right"><span class="ci-model">qwen2.5-coder ▾</span><span class="ci-send">↑</span></span>
+						</div>
+					</div>
+
+					<!-- builder pane (right): Preview | Code | Versions tabs -->
+					<div class="pane builder">
+						<div class="b-tabs">
+							<span class="b-tab" id="tabPreview">
+								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+								Preview
+							</span>
+							<span class="b-tab active" id="tabCode">
+								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/></svg>
+								Code
+							</span>
+							<span class="b-tab">
+								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5M12 7v5l4 2"/></svg>
+								Versions
+							</span>
+							<span class="b-div"></span>
+							<span class="b-term">
+								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m6 9 3 3-3 3M12 15h5"/></svg>
+								Terminal
+							</span>
+							<span class="b-devices">
+								<span class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span>
+								<span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M12 18h.01"/></svg></span>
+								<span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M12 18h.01"/></svg></span>
+							</span>
+						</div>
+
+						<!-- Code tab -->
+						<div class="b-view" id="viewCode">
+						<div class="code-body">
+							<div class="tree">
+								<div class="trow"><span class="tch">▼</span><svg class="i-folder" viewBox="0 0 24 24" fill="currentColor"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg><span class="tlabel">src</span></div>
+								<div class="trow d1"><span class="tch">▶</span><svg class="i-folder" viewBox="0 0 24 24" fill="currentColor"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg><span class="tlabel">assets</span></div>
+								<div class="trow d1"><span class="tch">▼</span><svg class="i-folder" viewBox="0 0 24 24" fill="currentColor"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg><span class="tlabel">components</span></div>
+								<div class="trow d2"><span class="tch">▶</span><svg class="i-folder" viewBox="0 0 24 24" fill="currentColor"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg><span class="tlabel">blocks</span></div>
+								<div class="trow d2"><span class="tch">▶</span><svg class="i-folder" viewBox="0 0 24 24" fill="currentColor"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg><span class="tlabel">ui</span></div>
+								<div class="trow d2"><span class="tch"></span><svg class="i-react" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><circle cx="12" cy="12" r="2" fill="currentColor"/><ellipse cx="12" cy="12" rx="10" ry="4"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(120 12 12)"/></svg><span class="tlabel">CartView.tsx</span></div>
+								<div class="trow d2"><span class="tch"></span><svg class="i-react" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><circle cx="12" cy="12" r="2" fill="currentColor"/><ellipse cx="12" cy="12" rx="10" ry="4"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(120 12 12)"/></svg><span class="tlabel">CatalogView.tsx</span></div>
+								<div class="trow d2 active"><span class="tch"></span><svg class="i-react" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><circle cx="12" cy="12" r="2" fill="currentColor"/><ellipse cx="12" cy="12" rx="10" ry="4"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(120 12 12)"/></svg><span class="tlabel">LandingView.tsx</span></div>
+								<div class="trow d2"><span class="tch"></span><svg class="i-react" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><circle cx="12" cy="12" r="2" fill="currentColor"/><ellipse cx="12" cy="12" rx="10" ry="4"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(120 12 12)"/></svg><span class="tlabel">ProductDetailView.tsx</span></div>
+								<div class="trow d1"><span class="tch">▶</span><svg class="i-folder" viewBox="0 0 24 24" fill="currentColor"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg><span class="tlabel">hooks</span></div>
+								<div class="trow d1"><span class="tch">▼</span><svg class="i-folder" viewBox="0 0 24 24" fill="currentColor"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg><span class="tlabel">lib</span></div>
+								<div class="trow d2"><span class="tch"></span><span class="badge b-ts">TS</span><span class="tlabel">data.ts</span></div>
+								<div class="trow d2"><span class="tch"></span><span class="badge b-ts">TS</span><span class="tlabel">photos.ts</span></div>
+								<div class="trow d2"><span class="tch"></span><span class="badge b-ts">TS</span><span class="tlabel">storage.ts</span></div>
+								<div class="trow d2"><span class="tch"></span><span class="badge b-ts">TS</span><span class="tlabel">types.ts</span></div>
+								<div class="trow d2"><span class="tch"></span><span class="badge b-ts">TS</span><span class="tlabel">useHistoryView.ts</span></div>
+								<div class="trow d2"><span class="tch"></span><span class="badge b-ts">TS</span><span class="tlabel">utils.ts</span></div>
+								<div class="trow d1"><span class="tch">▶</span><svg class="i-folder" viewBox="0 0 24 24" fill="currentColor"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg><span class="tlabel">themes</span></div>
+								<div class="trow d1"><span class="tch"></span><svg class="i-react" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><circle cx="12" cy="12" r="2" fill="currentColor"/><ellipse cx="12" cy="12" rx="10" ry="4"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(120 12 12)"/></svg><span class="tlabel">App.tsx</span></div>
+								<div class="trow d1"><span class="tch"></span><span class="badge b-css">#</span><span class="tlabel">fonts.css</span></div>
+								<div class="trow d1"><span class="tch"></span><span class="badge b-css">#</span><span class="tlabel">index.css</span></div>
+								<div class="trow d1"><span class="tch"></span><svg class="i-react" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><circle cx="12" cy="12" r="2" fill="currentColor"/><ellipse cx="12" cy="12" rx="10" ry="4"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(120 12 12)"/></svg><span class="tlabel">main.tsx</span></div>
+								<div class="trow d1"><span class="tch"></span><span class="badge b-ts">TS</span><span class="tlabel">vite-env.d.ts</span></div>
+								<div class="trow"><span class="tch"></span><span class="badge b-dim">·</span><span class="tlabel">.gitignore</span></div>
+								<div class="trow"><span class="tch"></span><span class="badge b-md">M↓</span><span class="tlabel">AI_RULES.md</span></div>
+								<div class="trow"><span class="tch"></span><span class="badge b-json">{}</span><span class="tlabel">components.json</span></div>
+								<div class="trow"><span class="tch"></span><span class="badge b-html">&lt;&gt;</span><span class="tlabel">index.html</span></div>
+								<div class="trow"><span class="tch"></span><span class="badge b-json">{}</span><span class="tlabel">package.json</span></div>
+								<div class="trow"><span class="tch"></span><span class="badge b-md">M↓</span><span class="tlabel">PLAN.md</span></div>
+								<div class="trow"><span class="tch"></span><span class="badge b-json">{}</span><span class="tlabel">tsconfig.json</span></div>
+							</div>
+							<div class="editor">
+							<div class="ed-tabs"><span class="ed-tab">LandingView.tsx<i></i></span></div>
+							<div class="code" id="code">
+								<div class="cl"><span class="tk-kw">import</span> { useMemo } <span class="tk-kw">from</span> <span class="tk-str">'react'</span></div>
+								<div class="cl"><span class="tk-kw">import</span> <span class="tk-kw">type</span> { ComponentType } <span class="tk-kw">from</span> <span class="tk-str">'react'</span></div>
+								<div class="cl"><span class="tk-kw">import</span> * <span class="tk-kw">as</span> Lucide <span class="tk-kw">from</span> <span class="tk-str">'lucide-react'</span></div>
+								<div class="cl"><span class="tk-kw">import</span> { Button } <span class="tk-kw">from</span> <span class="tk-str">'@/components/ui/button'</span></div>
+								<div class="cl"><span class="tk-kw">import</span> { Badge } <span class="tk-kw">from</span> <span class="tk-str">'@/components/ui/badge'</span></div>
+								<div class="cl"><span class="tk-kw">import</span> { NavBar } <span class="tk-kw">from</span> <span class="tk-str">'@/components/blocks/NavBar'</span></div>
+								<div class="cl"><span class="tk-kw">import</span> { Hero } <span class="tk-kw">from</span> <span class="tk-str">'@/components/blocks/Hero'</span></div>
+								<div class="cl">&nbsp;</div>
+								<div class="cl"><span class="tk-kw">import</span> { Section } <span class="tk-kw">from</span> <span class="tk-str">'@/components/blocks/Section'</span></div>
+								<div class="cl"><span class="tk-kw">import</span> { MediaCard } <span class="tk-kw">from</span> <span class="tk-str">'@/components/blocks/MediaCard'</span></div>
+								<div class="cl"><span class="tk-kw">import</span> { StatStrip } <span class="tk-kw">from</span> <span class="tk-str">'@/components/blocks/StatStrip'</span></div>
+								<div class="cl"><span class="tk-kw">import</span> { Footer } <span class="tk-kw">from</span> <span class="tk-str">'@/components/blocks/Footer'</span></div>
+								<div class="cl"><span class="tk-kw">import</span> { Photo } <span class="tk-kw">from</span> <span class="tk-str">'@/components/blocks/Photo'</span></div>
+								<div class="cl"><span class="tk-kw">import</span> { photo } <span class="tk-kw">from</span> <span class="tk-str">'@/lib/photos'</span></div>
+								<div class="cl"><span class="tk-kw">import</span> { PRODUCTS, CATEGORIES, BESTSELLERS } <span class="tk-kw">from</span> <span class="tk-str">'@/lib/data'</span></div>
+								<div class="cl"><span class="tk-kw">import</span> <span class="tk-kw">type</span> { View <span class="tk-kw">as</span> AppView } <span class="tk-kw">from</span> <span class="tk-str">'@/lib/types'</span></div>
+								<div class="cl">&nbsp;</div>
+								<div class="cl"><span class="tk-kw">type</span> View = AppView</div>
+								<div class="cl">&nbsp;</div>
+								<div class="cl"><span class="tk-kw">interface</span> LandingViewProps {</div>
+								<div class="cl">  cartCount?: number</div>
+								<div class="cl">  addLine?: (productId: number, qty?: number) =&gt; void</div>
+								<div class="cl">  setView: (v: View) =&gt; void</div>
+								<div class="cl">  onOpenProduct: (id: number) =&gt; void</div>
+								<div class="cl">}</div>
+								<div class="cl">&nbsp;</div>
+								<div class="cl"><span class="tk-kw">function</span> FeatureIcon(name: string): ComponentType&lt;{ className?: string }&gt; {</div>
+								<div class="cl">  <span class="tk-kw">const</span> map: Record&lt;<span class="tk-tag">string</span>, <span class="tk-kw">keyof</span> <span class="tk-kw">typeof</span> Lucide&gt; = {</div>
+								<div class="cl">    Durability: <span class="tk-str">'ShieldCheck'</span>, Warranty: <span class="tk-str">'BadgeCheck'</span>, Design: <span class="tk-str">'Palette'</span>, Shipping: <span class="tk-str">'Truck'</span></div>
+								<div class="cl">  }</div>
+								<div class="cl">  <span class="tk-kw">return</span> (Lucide <span class="tk-kw">as</span> any)[map[name] ?? <span class="tk-str">'Star'</span>]</div>
+								<div class="cl">}</div>
+								<div class="cl">&nbsp;</div>
+								<div class="cl"><span class="tk-kw">export</span> <span class="tk-kw">function</span> LandingView({ setView, onOpenProduct, cartCount = 0 }: LandingViewProps) {</div>
+								<div class="cl">  <span class="tk-kw">const</span> featuredCategories = CATEGORIES.slice(0, 4)</div>
+								<div class="cl">  <span class="tk-kw">const</span> bestsellerProducts = useMemo(() =&gt; PRODUCTS.filter(p =&gt; BESTSELLERS.includes(p.id)), [])</div>
+								<div class="cl">&nbsp;</div>
+								<div class="cl">  <span class="tk-kw">return</span> (</div>
+								<div class="cl">    &lt;<span class="tk-tag">main</span> <span class="tk-attr">className</span>="min-h-screen bg-background text-foreground"&gt;</div>
+								<div class="cl">      &lt;<span class="tk-tag">NavBar</span></div>
+								<div class="cl">        <span class="tk-attr">variant</span>="floating"</div>
+								<div class="cl">        <span class="tk-attr">brand</span>="Velocarta"</div>
+								<div class="cl">        <span class="tk-attr">links</span>={</div>
+								<div class="cl">          &lt;&gt;</div>
+								<div class="cl">            &lt;<span class="tk-tag">span</span></div>
+								<div class="cl">              <span class="tk-attr">className</span>="cursor-pointer text-sm text-muted-foreground transition-colors hover:text-foreground"</div>
+								<div class="cl">              <span class="tk-attr">onClick</span>={() =&gt; setView(<span class="tk-str">'landing'</span>)}</div>
+								<div class="cl">            &gt;</div>
+							</div>
+							</div>
+						</div>
+						</div>
+
+						<!-- Preview tab -->
+						<div class="b-view" id="viewPreview" hidden>
+						<div class="p-toolbar">
+							<span class="p-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7M19 12H5"/></svg></span>
+							<span class="p-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 5 7 7-7 7M5 12h14"/></svg></span>
+							<span class="p-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg></span>
+							<span class="p-url">http://localhost:4320 · velocarta</span>
+							<span class="p-live" id="liveTag"><span class="live-dot"></span>running in Docker</span>
+						</div>
+						<div class="p-frame">
+							<div class="p-pill" id="pPill"><span class="pspin"></span>Cascade is building your app — preview updates live as code lands</div>
+							<div class="p-app" id="pApp">
+								<div class="vl-nav vfade" id="shopHero">
+									<div class="vl-wrap vl-nav-in">
+										<span class="vl-logo">Velocarta</span>
+										<span class="vl-links"><span>Home</span><span>Bags &amp; Racks</span><span>Lights &amp; Safety</span><span>Tools &amp; Maintenance</span><span>Accessories</span></span>
+										<span class="vl-cart">Cart (0)</span>
+									</div>
+								</div>
+								<div class="vl-hero vrev">
+									<img class="vl-bg" src="assets/velo-hero.jpg" alt="" />
+									<div class="vl-wrap">
+										<div class="vl-hero-copy">
+											<span class="vl-badge">New · Carbon Series 2026</span>
+											<div class="vl-h1">Ride Smarter.<br />Ride Better.</div>
+											<div class="vl-sub">Premium bike accessories engineered for the way you actually ride — from morning commutes to weekend gravel grinds.</div>
+											<div class="vl-ctas"><span class="vl-btn primary">Shop Now</span><span class="vl-btn ghost">Explore Categories</span><span class="vl-note">Free returns for 30 days</span></div>
+										</div>
+									</div>
+								</div>
+								<div class="vl-cats">
+									<div class="vl-wrap">
+									<div class="vl-head">
+										<div>
+											<span class="vl-eyebrow">COLLECTIONS</span>
+											<div class="vl-title">Shop by Category</div>
+										</div>
+										<span class="vl-all">View all →</span>
+									</div>
+									<div class="vl-grid">
+										<div class="vl-card vrev"><span class="vl-img"><img src="assets/velo-c1.jpg" alt="" /></span><b>Bags &amp; Racks</b><span>3 products</span></div>
+										<div class="vl-card vrev"><span class="vl-img"><img src="assets/velo-c2.jpg" alt="" /></span><b>Lights &amp; Safety</b><span>2 products</span></div>
+										<div class="vl-card vrev"><span class="vl-img"><img src="assets/velo-c3.jpg" alt="" /></span><b>Tools &amp; Maintenance</b><span>3 products</span></div>
+										<div class="vl-card vrev"><span class="vl-img"><img src="assets/velo-c4.jpg" alt="" /></span><b>Accessories</b><span>2 products</span></div>
+									</div>
+									</div>
+								</div>
+								<div class="vl-stats vrev">
+									<div class="vl-wrap vl-stats-in">
+									<div class="vl-stat"><span class="si"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg></span><span><b>Built to Last</b><span>Field-tested hardware</span></span></div>
+									<div class="vl-stat"><span class="si"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 9.6 5.2 5.6 5l-.6 4-3.2 2.4L4 15l-.6 4 4 .2L12 22l2.4-3.2 4 .2-.6-4 3.2-2.4L18.4 9l.6-4-4 .2Z"/><path d="m9 12 2 2 4-4"/></svg></span><span><b>Lifetime Warranty</b><span>On every frame bag</span></span></div>
+									<div class="vl-stat"><span class="si"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="19" cy="13" r="2.5"/><circle cx="6" cy="12" r="2.5"/><path d="M12 22a10 10 0 1 1 0-20"/></svg></span><span><b>Clean Design</b><span>Nothing you don't need</span></span></div>
+									<div class="vl-stat"><span class="si"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 17V5a1 1 0 0 0-1-1H2v13h1"/><path d="M14 8h4l3 4v5h-2"/><circle cx="6.5" cy="17.5" r="2.5"/><circle cx="16.5" cy="17.5" r="2.5"/></svg></span><span><b>Free Shipping $75+</b><span>Ships in 24 hours</span></span></div>
+									</div>
+								</div>
+							</div>
+						</div>
+						</div>
+					</div>
+				</div>
+				<div class="statusbar">
+					<span>⎇ <span class="sb-accent">main</span> · +512 −0</span>
+					<span><span class="sb-ok">●</span> sandbox healthy · node:20-alpine</span>
+					<span class="sb-right">
+						<span>ollama · qwen2.5-coder</span>
+						<span class="sb-accent">100% local</span>
+					</span>
+				</div>
+			</div>
+			</div>
+		</div>
+	</div>
+</header>
+
+<!-- ══════════════════ PROVIDERS / BYOK ══════════════════ -->
+<section id="providers">
+	<div class="wrap">
+		<div class="eyebrow rv">Providers</div>
+		<h2 class="rv">Bring your own key.</h2>
+		<p class="section-sub rv">Cascade speaks the OpenAI wire protocol, so it points at whatever you already pay for — or at nothing at all, and stays local. Your key, your account, called directly; nothing proxies through us.</p>
+
+		<div class="provider-wall rv">
+			<div class="pw-row">
+				<span class="pw"><img src="assets/logo-ollama.svg" alt="" /><b>Ollama</b></span>
+				<span class="pw"><img src="assets/logo-openai.svg" alt="" /><b>OpenAI</b></span>
+				<span class="pw"><img src="assets/logo-groq.svg" alt="" /><b>Groq</b></span>
+				<span class="pw"><img src="assets/logo-openrouter.svg" alt="" /><b>OpenRouter</b></span>
+				<span class="pw nv"><img src="assets/logo-nvidia.svg" alt="" /><b>NVIDIA</b></span>
+				<span class="pw"><img src="assets/logo-vllm.png" alt="" /><b>vLLM</b></span>
+			</div>
+			<div class="pw-points">
+				<div class="pwp">
+					<b>Any OpenAI-compatible endpoint</b>
+					<span>Paste a base URL and Cascade talks to it — no adapter to write.</span>
+				</div>
+				<div class="pwp">
+					<b>Keys never leave your machine</b>
+					<span>They live in your shell or <span class="mono">.env</span>, never in committed settings.</span>
+				</div>
+			</div>
+		</div>
+	</div>
+</section>
+
+<!-- ══════════════════ MODELS + PROOF ══════════════════ -->
+<div class="stats-band">
+	<div class="models">
+		<div class="wrap">
+			<div class="eyebrow rv">Models</div>
+			<h2 class="rv">Bring your own model.</h2>
+			<p class="section-sub rv">Whatever Ollama can run, Cascade can drive — swap per project, no re-install.</p>
+			<div class="models-label rv"><img src="assets/logo-ollama.svg" alt="" />If Ollama runs it, Cascade runs on it</div>
+			<div class="model-grid">
+				<span class="mcard rv"><span class="mlogo"><img src="assets/logo-qwen.svg" alt="" /></span><span><b>qwen2.5-coder</b><span>Alibaba · 1.5B–32B</span></span></span>
+				<span class="mcard rv"><span class="mlogo"><img src="assets/logo-meta.svg" alt="" /></span><span><b>llama3.3</b><span>Meta · 70B</span></span></span>
+				<span class="mcard rv"><span class="mlogo"><img src="assets/logo-deepseek.svg" alt="" /></span><span><b>deepseek-r1</b><span>DeepSeek · 1.5B–671B</span></span></span>
+				<span class="mcard rv"><span class="mlogo"><img src="assets/logo-openai.svg" alt="" /></span><span><b>gpt-oss</b><span>OpenAI · 20B–120B</span></span></span>
+				<span class="mcard rv"><span class="mlogo"><img src="assets/logo-mistral.svg" alt="" /></span><span><b>devstral</b><span>Mistral · 24B</span></span></span>
+				<span class="mcard rv"><span class="mlogo"><img src="assets/logo-google.svg" alt="" /></span><span><b>gemma3</b><span>Google · 1B–27B</span></span></span>
+				<span class="mcard rv"><span class="mlogo"><img src="assets/logo-qwen.svg" alt="" /></span><span><b>qwen3</b><span>Alibaba · 0.6B–235B</span></span></span>
+				<span class="mcard rv"><span class="mlogo"><img src="assets/logo-mistral.svg" alt="" /></span><span><b>mistral-small</b><span>Mistral · 24B</span></span></span>
+				<span class="mcard rv"><span class="mlogo"><img src="assets/logo-meta.svg" alt="" /></span><span><b>codellama</b><span>Meta · 7B–70B</span></span></span>
+			</div>
+			<p class="models-note rv">Nine of the models people run most — the full Ollama library works the same way.</p>
+		</div>
+	</div>
+	<div class="wrap">
+		<div class="stats">
+			<div class="scard rv">
+				<div class="sic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+				<b>100%</b><span class="slabel">Local &amp; private</span>
+				<p>Prompts, code and data never leave the machine.</p>
+			</div>
+			<div class="scard rv">
+				<div class="sic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/><path d="m15.5 7.5 3 3"/></svg></div>
+				<b>0</b><span class="slabel">API keys required</span>
+				<p>Nothing to sign up for. Add your own key later only if you want cloud.</p>
+			</div>
+			<div class="scard rv">
+				<div class="sic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3 8l9 5 9-5-9-5Z"/><path d="M3 12l9 5 9-5"/><path d="M3 16l9 5 9-5"/></svg></div>
+				<b>Apache-2.0</b><span class="slabel">Open source</span>
+				<p>Every line public — read it, fork it, ship with it.</p>
+			</div>
+			<div class="scard rv">
+				<div class="sic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 2.5-1.5 4-3 5.5V17H8v-2.5C6.5 13 5 11.5 5 9a7 7 0 0 1 7-7Z"/><path d="M9 21h6"/></svg></div>
+				<b>Any model</b><span class="slabel">Ollama-native</span>
+				<p>Swap models per project — 7B laptop to 70B workstation.</p>
+			</div>
+		</div>
+	</div>
+</div>
+
+<!-- ══════════════════ MODEL MANAGER / CUSTOMISATION ══════════════════ -->
+<section id="customize">
+	<div class="wrap">
+		<div class="eyebrow rv">Customization</div>
+		<h2 class="rv">Tune every model.<br />Down to the token.</h2>
+		<p class="section-sub rv">Cascade ships a full model manager — curate your picker, set the context window and output cap per model, dial sampling, and manage provider keys. Changes apply live, on the next turn.</p>
+
+		<div class="mm-layout">
+			<div class="mm-rail rv">
+				<div class="mm-item active">
+					<div class="mm-h"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 3 7v10l9 5 9-5V7Z"/><path d="M3 7l9 5 9-5M12 12v10"/></svg>Your models</div>
+					<p>Curate what shows in the picker — add by name or straight from a provider's catalog, then switch in one click.</p>
+				</div>
+				<div class="mm-item">
+					<div class="mm-h"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M1 14h6M9 8h6M17 16h6"/></svg>Parameters</div>
+					<p>Context window, max output tokens, temperature and top-p — per model, with Auto to defer to the backend default.</p>
+				</div>
+				<div class="mm-item">
+					<div class="mm-h"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/><path d="m15.5 7.5 3 3"/></svg>Providers &amp; keys</div>
+					<p>Ollama runs local; OpenAI, Groq, OpenRouter and NVIDIA take your key. Set it for the session or persist it in <span class="mono">.env</span>.</p>
+				</div>
+				<div class="mm-item">
+					<div class="mm-h"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4.5 12.8h6L11 22l8.5-10.8h-6Z"/></svg>Applies live</div>
+					<p>No restart, no re-index. Save and the very next turn uses the new model and settings.</p>
+				</div>
+			</div>
+
+			<div class="mm-stage rv">
+				<div class="mm-window">
+					<div class="mmw-head">
+						<b>Models &amp; providers</b>
+						<p>Curate the models in your picker, add models manually or from a provider's catalog, and tune each model's context window, output cap, and sampling. Changes apply live — no restart.</p>
+					</div>
+					<div class="mmw-body">
+						<div class="mmw-side">
+							<div class="mmw-label"><span>Your models</span><span>11</span></div>
+							<div class="mmw-model on"><b>gpt-5.6-luna</b><span>openai</span></div>
+							<div class="mmw-model"><b>gpt-4.1</b><span>openai · 63K ctx</span></div>
+							<div class="mmw-model"><b>qwen36-agentic</b><span>ollama · 128K ctx</span></div>
+							<div class="mmw-model"><b>gemma4:latest</b><span>ollama</span></div>
+							<div class="mmw-model"><b>gpt-oss:20b</b><span>ollama · 128K ctx</span></div>
+							<div class="mmw-model"><b>qwen3.6:27b</b><span>VAST AI · 128K ctx</span></div>
+							<div class="mmw-add">＋ Add model</div>
+							<div class="mmw-provs">
+								<div class="mmw-label"><span>Providers</span></div>
+								<div class="mmw-prov"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>Ollama<span class="tag local">local</span></div>
+								<div class="mmw-prov"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>Openai<span class="tag set">key set</span></div>
+								<div class="mmw-prov"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>Nvidia<span class="tag set">key set</span></div>
+								<div class="mmw-prov"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>Groq<span class="tag none">no key</span></div>
+								<div class="mmw-prov"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>Openrouter<span class="tag none">no key</span></div>
+							</div>
+						</div>
+
+						<div class="mmw-main">
+							<div class="mmw-title"><b>gpt-5.6-luna</b><span class="badge-active">Active</span></div>
+							<div class="mmw-prov-name">Openai</div>
+							<div class="mmw-caps"><span>TOOLS</span><span>VISION</span></div>
+
+							<div class="mmw-sec">Parameters</div>
+							<div class="sl">
+								<div class="sl-top"><b>Context window</b><em>Auto</em></div>
+								<div class="sl-track"><span class="sl-fill" style="width:87%"></span><span class="sl-knob" style="left:87%"></span></div>
+								<div class="sl-scale"><span>4K</span><span>8K</span><span>16K</span><span>32K</span><span>64K</span><span>128K</span><span>256K</span><span>512K</span><span>1M</span></div>
+								<div class="sl-note">Model max: 1M.</div>
+							</div>
+							<div class="sl">
+								<div class="sl-top"><b>Max output tokens</b><em>Auto</em></div>
+								<div class="sl-track"><span class="sl-fill" style="width:4%"></span><span class="sl-knob" style="left:4%"></span></div>
+								<div class="sl-scale"><span>256</span><span>128,000</span></div>
+								<div class="sl-note">Cap on tokens generated per turn (num_predict / max_tokens).</div>
+							</div>
+							<div class="sl-two">
+								<div class="sl">
+									<div class="sl-top"><b>Temperature</b><em>Auto</em></div>
+									<div class="sl-track"><span class="sl-fill" style="width:70%"></span><span class="sl-knob" style="left:70%"></span></div>
+									<div class="sl-scale"><span>0.00</span><span>1.00</span></div>
+									<div class="sl-note">Higher = more random.</div>
+								</div>
+								<div class="sl">
+									<div class="sl-top"><b>Top P</b><em>Auto</em></div>
+									<div class="sl-track"><span class="sl-fill" style="width:98%"></span><span class="sl-knob" style="left:98%"></span></div>
+									<div class="sl-scale"><span>0.00</span><span>1.00</span></div>
+									<div class="sl-note">Nucleus sampling.</div>
+								</div>
+							</div>
+							<div class="mmw-actions">
+								<span class="mmw-btn">Save parameters</span>
+								<span class="mmw-hint">Auto = backend default. Applies live to the next turn.</span>
+							</div>
+
+							<div class="mmw-key">
+								<div class="mmw-key-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/><path d="m15.5 7.5 3 3"/></svg>OpenAI API key</div>
+								<div class="mmw-key-row">
+									<span class="mmw-input">Key set — enter a new one to replace<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></span>
+									<span class="mmw-btn">Save</span>
+								</div>
+								<div class="mmw-foot">Applies to the running server this session. For persistence set it in <span class="mono">.env</span>.</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+</section>
+
+<!-- ══════════════════ FEATURES ══════════════════ -->
+<section id="features">
+	<div class="wrap">
+		<div class="eyebrow rv">Why Cascade</div>
+		<h2 class="rv">Everything the cloud builders do.<br />Nothing they take from you.</h2>
+		<p class="section-sub rv">The full prompt-to-running-app loop — chat, code, sandbox, preview — rebuilt from first principles to run on your hardware, with your models.</p>
+
+		<div class="bento">
+			<div class="card c-3 tone-lime rv">
+				<div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+				<h3>Yours, entirely</h3>
+				<p>Your prompts, your code, your data — none of it leaves your machine. No accounts, no telemetry, no usage caps. Work on a plane, in a lab, or behind an air gap.</p>
+				<div class="art term">
+					<div><span class="p">$</span> cascade <span class="dim">— starting…</span></div>
+					<div><span class="ok">✓</span> engine ready <span class="dim">· 0 network calls</span></div>
+					<div><span class="ok">✓</span> model: qwen2.5-coder <span class="dim">· local</span></div>
+				</div>
+			</div>
+
+			<div class="card c-3 tone-white rv">
+				<div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3 8l9 5 9-5-9-5Z"/><path d="M3 12l9 5 9-5"/><path d="M3 16l9 5 9-5"/></svg></div>
+				<h3>Sandboxed by design</h3>
+				<p>Every project gets its own Docker container. The agent's shell commands and dev server run inside it — it can build anything without ever touching your machine.</p>
+				<div class="art term">
+					<div><span class="p">▸</span> Bash <span class="dim">npm run dev</span></div>
+					<div><span class="dim">  container: sneaker-store · node:20-alpine</span></div>
+					<div><span class="ok">✓</span> host untouched</div>
+				</div>
+			</div>
+
+			<div class="card c-2 rv">
+				<div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg></div>
+				<h3>Live preview, instantly</h3>
+				<p>The dev server runs in the sandbox and streams straight into the builder. Prompt, watch the diff, see it running — one loop, no deploys.</p>
+			</div>
+
+			<div class="card c-2 rv">
+				<div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 2.5-1.5 4-3 5.5V17H8v-2.5C6.5 13 5 11.5 5 9a7 7 0 0 1 7-7Z"/><path d="M9 21h6"/></svg></div>
+				<h3>A real agent engine</h3>
+				<p>Not a prompt wrapper — a full agentic loop with tools, permissions, subagents, 3-tier memory, context compaction and error recovery.</p>
+				<div class="art toolchips">
+					<span>Read</span><span>Write</span><span class="hl">Edit</span><span>Glob</span><span>Grep</span><span class="hl">Bash</span><span>Subagent</span><span>MCP</span>
+				</div>
+			</div>
+
+			<div class="card c-2 rv">
+				<div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M1 12h4M19 12h4M4.2 19.8 7 17M17 7l2.8-2.8"/></svg></div>
+				<h3>Watch it think</h3>
+				<p>An activity-first timeline shows every file written, every command run, live — then the answer lands whole. No wall of streaming tokens.</p>
+			</div>
+
+			<div class="card c-6 rv">
+				<div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg></div>
+				<h3>One engine, everywhere you work</h3>
+				<p>The same headless core drives every frontend over one protocol — use the app builder in your browser, the agent inside VS Code, or the native Windows app.</p>
+				<div class="art plats">
+					<div class="plat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3.5 9h17M3.5 15h17M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>Web builder</div>
+					<div class="plat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 6-6 6 6 6M16 6l6 6-6 6"/></svg>VS Code extension</div>
+					<div class="plat"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.55 10.5 4.5v7H3v-5.95ZM3 18.45V12.5h7.5v7L3 18.45ZM11.5 4.36 21 3v8.5h-9.5v-7.14ZM21 12.5V21l-9.5-1.36V12.5H21Z"/></svg>Windows app<span class="soon">Soon</span></div>
+				</div>
+			</div>
+		</div>
+	</div>
+</section>
+
+<!-- ══════════════════ HOW IT WORKS ══════════════════ -->
+<section id="how">
+	<div class="wrap">
+		<div class="eyebrow rv">How it works</div>
+		<h2 class="rv">Prompt to running app in three steps.</h2>
+		<div class="steps">
+			<div class="step rv">
+				<div class="num">01</div>
+				<h3>Describe what you want</h3>
+				<p>Start from a template and tell the agent what to build — a store, a dashboard, a game. Plain words, no boilerplate.</p>
+				<div class="mono-line"><b>›</b> build a sneaker store with cart &amp; checkout</div>
+			</div>
+			<div class="step rv">
+				<div class="num">02</div>
+				<h3>The agent builds it</h3>
+				<p>It plans, writes files, installs dependencies and fixes its own errors — every step visible in the live activity timeline.</p>
+				<div class="mono-line"><b>✓</b> 9 files written · npm install · self-check passed</div>
+			</div>
+			<div class="step rv">
+				<div class="num">03</div>
+				<h3>See it run. Keep going.</h3>
+				<p>The dev server spins up in the project's container and appears in the preview pane. Iterate by chatting — every change is git-tracked.</p>
+				<div class="mono-line"><b>●</b> live on localhost:5173 — ask for changes</div>
+			</div>
+			<div class="step step-cta rv">
+				<h3>Ready when you are.</h3>
+				<p>Your models. Your machine. Your apps.</p>
+				<a class="btn btn-primary" href="#download">Get Cascade</a>
+			</div>
+		</div>
+	</div>
+</section>
+
+<!-- ══════════════════ OPEN SOURCE ══════════════════ -->
+<section id="opensource">
+	<div class="wrap">
+		<div class="eyebrow rv">Open source</div>
+		<h2 class="rv">Built in the open,<br />from the first commit.</h2>
+		<div class="os-grid">
+			<div class="os-points rv">
+				<div class="os-point">
+					<div class="tick"><svg viewBox="0 0 16 16" fill="none"><path d="M3 8.5 6.5 12 13 4.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+					<div><b>Every line, public</b><span>The whole engine — agent loop, tools, sandbox, builder UI — lives in one repo you can read, fork and audit.</span></div>
+				</div>
+				<div class="os-point">
+					<div class="tick"><svg viewBox="0 0 16 16" fill="none"><path d="M3 8.5 6.5 12 13 4.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+					<div><b>From scratch, not a fork</b><span>Cascade re-derives the agent algorithm phase by phase — a codebase you can actually learn from, not a wrapper around someone's API.</span></div>
+				</div>
+				<div class="os-point">
+					<div class="tick"><svg viewBox="0 0 16 16" fill="none"><path d="M3 8.5 6.5 12 13 4.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+					<div><b>Free means free</b><span>Apache-2.0. No pro tier holding features hostage, no seat licenses, no "contact sales". Run it, ship with it, build on it.</span></div>
+				</div>
+			</div>
+			<div class="repo-card rv">
+				<div class="repo-head">
+					<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+					<span class="mono"><span>abhee235 /</span> <b>cascade-ai</b></span>
+					<span class="repo-badge">Public</span>
+				</div>
+				<div class="repo-body">A local-first, Ollama-native AI coding agent and app builder. One headless engine, many frontends.</div>
+				<div class="repo-langs">
+					<span class="lang"><i style="background:#3178c6"></i>TypeScript</span>
+					<span class="lang"><i style="background:#61dafb"></i>React</span>
+					<span class="lang"><i style="background:#2dd4bf"></i>Apache-2.0</span>
+				</div>
+				<div class="repo-bar">
+					<i style="width:78%;background:#3178c6"></i>
+					<i style="width:14%;background:#61dafb"></i>
+					<i style="width:8%;background:#2dd4bf"></i>
+				</div>
+			</div>
+		</div>
+	</div>
+</section>
+
+<!-- ══════════════════ DOWNLOAD + FOOTER — one continuous block, one background ══════════════════ -->
+<footer id="download">
+	<div class="dl-bg"><div class="glow"></div></div>
+	<div class="wrap dl-grid">
+	<div>
+	<div class="eyebrow rv">Get Cascade</div>
+	<h2 class="rv">Your machine is enough.</h2>
+	<p class="section-sub rv">Run the web builder today from source — the native Windows app is on its way. No sign-up, no keys.</p>
+	<div class="hero-ctas rv">
+		<a class="btn btn-primary btn-lg" href="https://github.com/" target="_blank" rel="noopener">
+			<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.55 10.5 4.5v7H3v-5.95ZM3 18.45V12.5h7.5v7L3 18.45ZM11.5 4.36 21 3v8.5h-9.5v-7.14ZM21 12.5V21l-9.5-1.36V12.5H21Z"/></svg>
+			Download for Windows — soon
+		</a>
+		<a class="btn btn-ghost btn-lg" href="https://github.com/" target="_blank" rel="noopener">
+			<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+			Run from source
+		</a>
+	</div>
+	<p class="hero-note rv">Works with Ollama + Docker Desktop &middot; Windows, macOS &amp; Linux from source</p>
+	</div>
+	<div class="dl-quick rv">
+		<div class="qlabel">Up and running in three commands</div>
+		<div class="qline"><span class="p">$</span> ollama pull qwen2.5-coder</div>
+		<div class="qline"><span class="p">$</span> npm install</div>
+		<div class="qline"><span class="p">$</span> npm run dev <span class="dim">-w @cascade/server</span></div>
+		<div class="qline dim">→ open http://localhost:5319</div>
+	</div>
+	</div>
+
+	<div class="foot-divider"></div>
+
+	<div class="wrap">
+		<div class="foot">
+			<div>
+				<a class="brand" href="#top">
+					<svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+						<rect x="3" y="3" width="7" height="19" rx="3.5" fill="url(#lg)"/>
+						<rect x="12.5" y="8" width="7" height="19" rx="3.5" fill="url(#lg)" opacity="0.75"/>
+						<rect x="22" y="13" width="7" height="16" rx="3.5" fill="url(#lg)" opacity="0.5"/>
+					</svg>
+					Cascade
+				</a>
+				<p class="foot-note">The local-first AI app builder. Open source, Ollama-native, sandboxed — your machine is enough.</p>
+				<div class="foot-social">
+					<a href="https://github.com/" target="_blank" rel="noopener" aria-label="GitHub">
+						<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+					</a>
+					<a href="https://github.com/" target="_blank" rel="noopener" aria-label="X">
+						<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.9 2H22l-7.1 8.1L23.2 22h-6.5l-5.1-6.7L5.8 22H2.7l7.6-8.7L1.2 2h6.7l4.6 6.1L18.9 2Zm-1.1 18h1.7L7.3 3.7H5.5L17.8 20Z"/></svg>
+					</a>
+					<a href="https://github.com/" target="_blank" rel="noopener" aria-label="Discord">
+						<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.3 4.5A19 19 0 0 0 15.6 3l-.2.5c1.6.4 2.9 1 4.2 1.8a15.9 15.9 0 0 0-11.2 0C9.7 4.5 11 3.9 12.6 3.5L12.4 3a19 19 0 0 0-4.7 1.5C4.4 9.3 3.5 14 4 18.6a19 19 0 0 0 5.7 2.9l1.2-1.9c-.6-.3-1.3-.6-1.9-1l.5-.4a13.6 13.6 0 0 0 11.2 0l.5.4c-.6.4-1.2.7-1.9 1l1.2 1.9a19 19 0 0 0 5.7-2.9c.6-5.4-.9-10-3.9-14.1ZM9.7 15.9c-1.1 0-2-1-2-2.3s.9-2.3 2-2.3 2 1 2 2.3-.9 2.3-2 2.3Zm4.6 0c-1.1 0-2-1-2-2.3s.9-2.3 2-2.3 2 1 2 2.3-.9 2.3-2 2.3Z"/></svg>
+					</a>
+				</div>
+			</div>
+			<div class="foot-col">
+					<b>Product</b>
+					<a href="#features">Features</a>
+					<a href="#how">How it works</a>
+					<a href="#download">Download</a>
+				</div>
+				<div class="foot-col">
+					<b>Open source</b>
+					<a href="https://github.com/" target="_blank" rel="noopener">GitHub</a>
+					<a href="https://github.com/" target="_blank" rel="noopener">Roadmap</a>
+					<a href="https://github.com/" target="_blank" rel="noopener">Contributing</a>
+				</div>
+				<div class="foot-col">
+					<b>Ecosystem</b>
+					<a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a>
+					<a href="https://www.docker.com" target="_blank" rel="noopener">Docker</a>
+					<a href="https://code.visualstudio.com" target="_blank" rel="noopener">VS Code</a>
+				</div>
+		</div>
+		<div class="foot-base">
+			<span>© 2026 Cascade. Apache-2.0 licensed.</span>
+			<span class="fb-links">
+				<a href="https://github.com/" target="_blank" rel="noopener">License</a>
+				<a href="https://github.com/" target="_blank" rel="noopener">Changelog</a>
+				<span>Not affiliated with Ollama.</span>
+			</span>
+		</div>
+	</div>
+</footer>
+
+
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lenis@1.1.18/dist/lenis.min.js"></script>
+<script>
+/* ═══════════════ shared bits ═══════════════ */
+const nav = document.getElementById('nav')
+const onScrollNav = () => nav.classList.toggle('scrolled', window.scrollY > 12)
+window.addEventListener('scroll', onScrollNav, { passive: true })
+onScrollNav()
+
+document.querySelectorAll('.card').forEach(card => {
+	card.addEventListener('pointermove', e => {
+		const r = card.getBoundingClientRect()
+		card.style.setProperty('--mx', e.clientX - r.left + 'px')
+		card.style.setProperty('--my', e.clientY - r.top + 'px')
+	})
+})
+
+
+const $$ = s => Array.from(document.querySelectorAll(s))
+const cards = $$('.tcard')
+const codeLines = $$('#code .cl')
+const prods = $$('.vrev')
+const shopHero = document.getElementById('shopHero')
+const msgAgent = document.getElementById('msgAgent')
+const liveTag = document.getElementById('liveTag')
+const pApp = document.getElementById('pApp')
+const pPill = document.getElementById('pPill')
+const plan = document.getElementById('plan')
+const planItems = $$('.plan-item')
+const planCount = document.getElementById('planCount')
+const tickPlan = i => { planItems[i].classList.add('done'); planCount.textContent = `${i + 1}/4` }
+const tabCode = document.getElementById('tabCode')
+const tabPreview = document.getElementById('tabPreview')
+const viewCode = document.getElementById('viewCode')
+const viewPreview = document.getElementById('viewPreview')
+
+/* The builder pane ALWAYS shows the running Velocarta app — the Preview tab is the
+   permanent view; the Code tab exists as chrome only. */
+/* Preview is the RESTING view (idle + between loops); the Code view is shown only
+   while the agent is writing files, then it hands back to Preview. */
+function showTab(which) {
+	const code = which === 'code'
+	tabCode.classList.toggle('active', code)
+	tabPreview.classList.toggle('active', !code)
+	viewCode.hidden = !code
+	viewPreview.hidden = code
+}
+/* FIRST PAINT — the window must never be seen empty. Before any animation runs the
+   demo already shows a finished session: Velocarta rendered in the preview and the
+   whole transcript in place. The loop only replays it once it scrolls into view. */
+function renderIdle() {
+	showTab('preview')
+	pApp.classList.add('on')
+	shopHero.classList.add('on')
+	prods.forEach(p => p.classList.add('on'))
+	cards.forEach(c => c.classList.add('on', 'done'))
+	plan.classList.add('on')
+	planItems.forEach(p => p.classList.add('done'))
+	planCount.textContent = '4/4'
+	codeLines.forEach(l => l.classList.add('on'))
+	msgAgent.classList.add('on')
+	liveTag.classList.add('on')
+	pPill.classList.remove('on')
+}
+renderIdle()
+
+const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+const wide = window.matchMedia('(min-width: 900px)').matches
+const hasGsap = typeof gsap !== 'undefined' && typeof ScrollTrigger !== 'undefined'
+
+/* gentle reveal-on-scroll for the static sections (both modes) */
+function initReveals() {
+	document.documentElement.classList.add('io')
+	const io = new IntersectionObserver(
+		entries => entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('on'); io.unobserve(e.target) } }),
+		{ threshold: 0.12, rootMargin: '0px 0px -40px 0px' }
+	)
+	$$('.rv').forEach(el => io.observe(el))
+}
+
+/* ═══════════════ the demo: a self-playing loop, never scroll-driven ═══════════════ */
+function resetMock() {
+	cards.forEach(c => c.classList.remove('on', 'running', 'done'))
+	plan.classList.remove('on')
+	planItems.forEach(p => p.classList.remove('done'))
+	planCount.textContent = '0/4'
+	codeLines.forEach(l => l.classList.remove('on'))
+	msgAgent.classList.remove('on')
+	liveTag.classList.remove('on')
+	pPill.classList.remove('on')
+	/* the preview pane always renders the finished Velocarta app */
+	pApp.classList.add('on')
+	shopHero.classList.add('on')
+	prods.forEach(p => p.classList.add('on'))
+	showTab('preview')
+}
+function playMock() {
+	if (reduced) { renderIdle(); return }
+	resetMock()
+	let t = 350
+	const at = (ms, fn) => setTimeout(fn, ms)
+	/* a real mid-build session: thoughts, file writes, a failed edit + recovery, then install/dev.
+	   cards: 0 thought · 1 LandingView · 2 CatalogView · 3 Reading · 4 text · 5 Editing(✕)
+	          6 head-35 · 7 text · 8 Edited +4−1 · 9 npm install · 10 npm run dev */
+	at(t, () => { plan.classList.add('on'); pPill.classList.add('on') })
+	at((t += 350), () => cards[0].classList.add('on'))
+	/* ── the agent starts writing: the builder opens the Code view and types it out ── */
+	at((t += 300), () => { showTab('code'); cards[1].classList.add('on', 'running') })
+	codeLines.forEach((l, i) => at(t + 150 + i * 55, () => l.classList.add('on')))
+	at((t += 1200), () => { cards[1].classList.replace('running', 'done'); tickPlan(0); cards[2].classList.add('on', 'running') })
+	at((t += 700), () => { cards[2].classList.replace('running', 'done'); tickPlan(1); cards[3].classList.add('on') })
+	at((t += 450), () => cards[4].classList.add('on'))
+	at((t += 550), () => cards[5].classList.add('on', 'running'))
+	at((t += 900), () => cards[5].classList.replace('running', 'done'))
+	at((t += 350), () => cards[6].classList.add('on', 'running'))
+	at((t += 650), () => cards[6].classList.replace('running', 'done'))
+	at((t += 350), () => cards[7].classList.add('on'))
+	at((t += 450), () => cards[8].classList.add('on', 'running'))
+	at((t += 750), () => cards[8].classList.replace('running', 'done'))
+	at((t += 300), () => cards[9].classList.add('on', 'running'))
+	at((t += 1200), () => { cards[9].classList.replace('running', 'done'); tickPlan(2) })
+	at((t += 300), () => cards[10].classList.add('on', 'running'))
+	/* ── dev server is up: hand back to the Preview and stay there ── */
+	at((t += 900), () => {
+		cards[10].classList.replace('running', 'done'); tickPlan(3)
+		showTab('preview'); liveTag.classList.add('on'); pPill.classList.remove('on')
+	})
+	at((t += 500), () => msgAgent.classList.add('on'))
+	at(t + 8000, playMock)
+}
+function startMockLoop() {
+	const mockIO = new IntersectionObserver(entries => {
+		if (entries[0].isIntersecting) { playMock(); mockIO.disconnect() }
+	}, { threshold: 0.25 })
+	mockIO.observe(document.getElementById('mock'))
+}
+
+/* ═══════════════ fallback: static page + demo loop ═══════════════ */
+function initFallback() {
+	initReveals()
+	startMockLoop()
+}
+
+/* ═══════════════ cinematic: ONLY the hero scene is animated ═══════════════
+   card grows to full width → demo replays on its own clock → pin releases
+   and normal scrolling takes over.                                          */
+function initCinematic() {
+	document.documentElement.classList.add('cine')
+	initReveals()
+	gsap.registerPlugin(ScrollTrigger)
+
+	/* buttery smooth scroll */
+	let lenis = null
+	if (typeof Lenis !== 'undefined') {
+		lenis = new Lenis({ lerp: 0.09, smoothWheel: true })
+		lenis.on('scroll', ScrollTrigger.update)
+		gsap.ticker.add(t => lenis.raf(t * 1000))
+		gsap.ticker.lagSmoothing(0)
+	}
+	document.querySelectorAll('a[href^="#"]').forEach(a => {
+		a.addEventListener('click', e => {
+			const target = document.querySelector(a.getAttribute('href'))
+			if (!target) return
+			e.preventDefault()
+			if (lenis) lenis.scrollTo(target, { offset: -20, duration: 1.4 })
+			else target.scrollIntoView({ behavior: 'smooth' })
+		})
+	})
+
+	/* entrance: line-mask reveal of the headline */
+	gsap.set('h1 .li', { yPercent: 115 })
+	gsap.from('.badge', { y: 24, autoAlpha: 0, duration: 0.8, ease: 'power3.out', delay: 0.15 })
+	gsap.to('h1 .li', { yPercent: 0, duration: 1.1, ease: 'power4.out', stagger: 0.14, delay: 0.3 })
+	gsap.from(['#heroCopy .hero-sub', '#heroCopy .hero-ctas', '#heroCopy .hero-note', '#heroCopy .scroll-hint'], {
+		y: 28, autoAlpha: 0, duration: 0.9, ease: 'power3.out', stagger: 0.09, delay: 0.65,
+	})
+
+	/* the pinned demo stage — a flat card below the hero that grows to fit the screen.
+	   The card always presents a LAPTOP aspect (16:10), independent of the monitor's
+	   shape, then its real width/height animate out to the full viewport. */
+	const stagePad = () => 64 + Math.min(92, Math.max(24, window.innerHeight * 0.06))
+	/* The frozen box follows the SCREEN's aspect (clamped so it never becomes a strip),
+	   so a uniform scale reaches every edge — no letterbox, no reflow. */
+	/* layout width, NOT innerWidth — innerWidth counts the scrollbar and would leave a gap */
+	const VW = () => document.documentElement.clientWidth
+	/* The window is LAID OUT at its final on-screen size, so the full-screen state is
+	   scale 1 = native pixels (perfectly crisp). The card state scales DOWN, and
+	   downscaling never blurs. Aspect is clamped so it can't become a strip. */
+	let boxW = 0, boxZoom = 1
+	/* Only the WIDTH is fitted — the window is as tall as its content needs and simply
+	   scrolls. The UI is laid out LARGER via css zoom (re-renders text at the new size,
+	   so it stays sharp) instead of being scaled up as pixels. */
+	const uiZoom = vw => (vw >= 3200 ? 2 : vw >= 2560 ? 1.7 : vw >= 2000 ? 1.45 : vw >= 1500 ? 1.2 : 1)
+	function sizeCard() {
+		boxW = VW()
+		boxZoom = uiZoom(boxW)
+		/* css width is divided by the zoom so the RENDERED width is exactly the viewport */
+		gsap.set('.window', { width: Math.round(boxW / boxZoom), height: 'auto' })
+		document.querySelector('.window').style.zoom = boxZoom
+	}
+	gsap.set('.window', { borderRadius: 14, transformOrigin: '50% 0%' })
+	sizeCard()
+	/* re-measure whenever ScrollTrigger recalculates (load, resize, orientation) */
+	ScrollTrigger.addEventListener('refreshInit', sizeCard)
+	/* card state: the same window scaled down to sit under the hero */
+	const cardScale = () => {
+		const vw = VW()
+		return Math.min(vw - 48, Math.max(1152, Math.round(vw * 0.62))) / boxW
+	}
+
+	const story = gsap.timeline({
+		defaults: { ease: 'none' },
+		scrollTrigger: {
+			trigger: '#demoStage',
+			start: 'top top',
+			end: '+=2800',
+			scrub: 1,
+			pin: true,
+			anticipatePin: 1,
+			invalidateOnRefresh: true,
+		},
+	})
+
+	/* 1 — the card scales up as one unit until it fills the screen at native size (no reflow) */
+	story.fromTo('.window',
+		{ scale: () => cardScale(), y: 0 },
+		{ scale: 1, y: () => -stagePad() / boxZoom, borderRadius: 0, duration: 1.4, ease: 'power1.inOut', immediateRender: false }, 0)
+	story.to('#nav', { autoAlpha: 0, duration: 0.5 }, 0.7)
+
+	/* 2 — the demo starts the moment the app reaches full screen */
+	let demoStarted = false
+	story.call(() => { if (!demoStarted) { demoStarted = true; playMock() } }, null, 1.5)
+
+	/* 3 — hold while the demo plays, then release: normal scrolling takes over
+	        (no fly-through, no fade-out — the window simply scrolls away) */
+	story.to({}, { duration: 2.6 }, 1.5)
+	story.to('#nav', { autoAlpha: 1, duration: 0.4 }, 3.7)
+
+	ScrollTrigger.refresh()
+}
+
+if (hasGsap && wide && !reduced) initCinematic()
+else initFallback()
+</script>
+</body>
+</html>
