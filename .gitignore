@@ -27,3 +27,9 @@ eval/.work/
 
 # Server console logs (crash forensics; see start-cascade.cmd)
 logs/
+
+# Test apps BUILT BY the agent inside this repo (extension runs use the workspace as cwd; a web-builder
+# project can be pointed here too). They are throwaway build outputs, not source — and keeping them
+# untracked also stops a future agent run from dirtying the harness repo it is running in.
+/focusflow/
+/packages/orbit/
