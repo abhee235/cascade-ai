@@ -63,3 +63,35 @@ describe('extension Browser tool', () => {
 		expect(r.content).toContain('op:"open"')
 	})
 })
+
+describe('unavailability degrades gracefully (no playwright / no browser)', () => {
+	const failing = (message: string) =>
+		createBrowserTool({
+			launch: async () => {
+				throw new Error(message)
+			},
+		})
+
+	it('a missing playwright-core is a TOOL ERROR with the install + a text-only fallback — never a crash', async () => {
+		const tool = failing('The Browser tool needs the "playwright-core" package, which is not installed in this extension. Install it (npm i playwright-core) and reload the window. Continue WITHOUT the browser: verify with Bash instead — `curl -s http://localhost:<port>`')
+		const r = await tool.call({ op: 'open', url: 'http://localhost:5173' }, ctx)
+		expect(r.isError).toBe(true)
+		expect(r.content).toContain('playwright-core')
+		expect(r.content).toContain('curl') // the model is told how to continue
+	})
+
+	it('no system browser reports the install options and keeps the turn going', async () => {
+		const tool = failing('No browser found to drive (tried Edge, Chrome, and a Playwright-managed chromium). Install Edge or Chrome, or run `npx playwright install chromium`.')
+		const r = await tool.call({ op: 'open', url: 'http://localhost:5173' }, ctx)
+		expect(r.isError).toBe(true)
+		expect(r.content).toContain('playwright install chromium')
+	})
+
+	it('later ops without a successful open stay actionable rather than throwing', async () => {
+		const tool = failing('boom')
+		await tool.call({ op: 'open', url: 'http://localhost:5173' }, ctx).catch(() => undefined)
+		const r = await tool.call({ op: 'audit' }, ctx)
+		expect(r.isError).toBe(true)
+		expect(r.content).toContain('op:"open"')
+	})
+})

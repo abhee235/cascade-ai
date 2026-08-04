@@ -140,7 +140,7 @@
         "cascade.maxOutputTokens": {
           "type": "number",
           "default": 0,
-          "description": "Model max output tokens (ADR-039): sizes the compaction summary reserve and is sent to the provider. 0 = backend default."
+          "description": "Max tokens the model may generate per response — sizes the compaction summary reserve and is sent to the provider. 0 = AUTO: derived from the context window (window/8, at least 2048, capped by the model's published max and 16384). Set a number to pin it; raise it if long file writes get truncated."
         },
         "cascade.temperature": {
           "type": "number",

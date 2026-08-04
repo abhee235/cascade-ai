@@ -175,12 +175,12 @@ export function handleConnection(
 
   // Send a preview status to the client. When it's running, point the proxy at the container and hand the
   // client the STABLE proxy origin instead of the container's random port (M5.2).
-  const emitPreview = (s: { status: string; url?: string }) => {
+  const emitPreview = (s: { status: string; url?: string; error?: string }) => {
     if (s.status === 'running' && s.url && previewProxy && previewPort) {
       previewProxy.setTarget(Number(new URL(s.url).port))
       send({ type: 'preview', status: 'running', url: `http://localhost:${previewPort}` })
     } else {
-      send({ type: 'preview', status: s.status, url: s.url })
+      send({ type: 'preview', status: s.status, url: s.url, error: s.error })
     }
   }
 

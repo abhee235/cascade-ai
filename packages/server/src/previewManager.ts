@@ -9,6 +9,9 @@ export type PreviewStatus = 'installing' | 'starting' | 'running' | 'error' | 's
 export interface PreviewState {
   status: PreviewStatus
   url?: string
+  /** Why it failed, in the user's words — e.g. port drift ("started on 5174, only 5173 is published").
+   *  Without this the pane showed a bare "Preview unreachable" and the cause stayed invisible. */
+  error?: string
 }
 
 /** Where the detached dev server's stdout/stderr is redirected inside the container, so the Console pane
@@ -82,7 +85,23 @@ export class PreviewManager {
       await sandbox.execDetached(`CHOKIDAR_USEPOLLING=true VITE_HMR_CLIENT_PORT=${hmrPort} npm run dev > ${DEV_LOG} 2>&1`)
       const url = `http://localhost:${hostPort}` // direct url; wsServer rewrites it to the proxy origin
       const up = await waitForHttp(url, 60_000)
-      set(up ? { status: 'running', url } : { status: 'error' })
+      if (up) {
+        set({ status: 'running', url })
+        return
+      }
+      // PORT DRIFT (measured, 3D Solar build 2026-08-03): the container publishes exactly ONE port
+      // (-p 0:5173). If Vite finds 5173 busy it silently takes 5174 — which is published NOWHERE, so the
+      // preview is unreachable from the host and no URL the user could type would reach it either. The dev
+      // log states the truth ("Local: http://localhost:5174/"), so read it and say so precisely instead of
+      // showing a bare "error" that sent a model into a 30-minute cache-nuking loop.
+      const drift = await detectDevPort(sandbox)
+      set({
+        status: 'error',
+        error:
+          drift && drift !== DEV_PORT_IN_CONTAINER
+            ? `The dev server started on port ${drift}, but only ${DEV_PORT_IN_CONTAINER} is published from the container — so the preview cannot reach it. Something else is holding ${DEV_PORT_IN_CONTAINER} (usually a dev server left over from an earlier run). Stop the preview and start it again to reclaim the port.`
+            : 'The dev server did not start. Check the Output/Console pane for its error.',
+      })
     } catch {
       set({ status: 'error' })
     }
@@ -90,6 +109,27 @@ export class PreviewManager {
 
   stop(projectId: string): void {
     this.states.delete(projectId)
+  }
+}
+
+/** The container port the sandbox publishes. Anything else is unreachable from the host by construction. */
+const DEV_PORT_IN_CONTAINER = Number(process.env.CASCADE_DEV_PORT ?? 5173)
+
+/** The port the dev server ACTUALLY bound, read from its own log ("Local: http://localhost:5174/"), or
+ *  undefined when the log says nothing useful. Exported for tests. */
+export function parseDevPort(log: string): number | undefined {
+  // Vite prints "Local:   http://localhost:5173/"; Next/others print similar "http://localhost:PORT".
+  const matches = [...log.matchAll(/https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0):(\d{2,5})/gi)]
+  const last = matches[matches.length - 1]
+  return last ? Number(last[1]) : undefined
+}
+
+async function detectDevPort(sandbox: DockerSandbox): Promise<number | undefined> {
+  try {
+    const { output } = await sandbox.exec(`tail -40 ${DEV_LOG} 2>/dev/null || true`)
+    return parseDevPort(output)
+  } catch {
+    return undefined
   }
 }
 

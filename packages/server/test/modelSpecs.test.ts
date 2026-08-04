@@ -2,7 +2,7 @@
 // and expose top_k only where the API does. Match is most-specific-substring-first; unknown ⇒ default ceiling.
 
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_LIMITS, limitsFor, specCapabilities } from '@cascade/core'
+import { DEFAULT_LIMITS, limitsFor, recommendedMaxOutputTokens, specCapabilities } from '@cascade/core'
 
 describe('limitsFor (ADR-067)', () => {
 	it('resolves a hosted OpenAI model to its official ceilings, no top_k', () => {
@@ -54,5 +54,29 @@ describe('specCapabilities (hosted badges)', () => {
 	})
 	it('returns undefined for an unknown model (caller keeps its own detection)', () => {
 		expect(specCapabilities('totally-unknown')).toBeUndefined()
+	})
+})
+
+// ── Derived output cap (2026-07-30) ──────────────────────────────────────────────────────────────────
+// A Modelfile with no `num_predict` leaves Ollama unbounded ("generate until the context fills") — the
+// ceiling that let a degeneration spiral run 186s. `'auto'` derives one from the window instead.
+describe('recommendedMaxOutputTokens', () => {
+	it('scales with the window (1/8), floors at 2048, caps at 16384', () => {
+		expect(recommendedMaxOutputTokens(8_192, 'ollama', 'qwen3:8b')).toBe(2_048) // floor
+		expect(recommendedMaxOutputTokens(32_768, 'ollama', 'qwen3:8b')).toBe(4_096)
+		expect(recommendedMaxOutputTokens(65_536, 'ollama', 'qwen3:8b')).toBe(8_192)
+		expect(recommendedMaxOutputTokens(131_072, 'ollama', 'qwen3:8b')).toBe(16_384) // practical cap
+		expect(recommendedMaxOutputTokens(1_048_576, 'openai', 'gpt-5.6-luna')).toBe(16_384)
+	})
+
+	it("never exceeds the model's own published maximum", () => {
+		// qwen2.5-coder publishes 8192 — a 131k window must not promise more than the model can emit.
+		expect(recommendedMaxOutputTokens(131_072, 'ollama', 'qwen2.5-coder:7b')).toBe(8_192)
+	})
+
+	it('leaves room: the cap is a small fraction of the window, never most of it', () => {
+		for (const w of [8_192, 32_768, 131_072]) {
+			expect(recommendedMaxOutputTokens(w, 'ollama', 'qwen3:8b')).toBeLessThanOrEqual(Math.max(2_048, w / 4))
+		}
 	})
 })

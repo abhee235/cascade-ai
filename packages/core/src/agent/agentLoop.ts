@@ -24,7 +24,7 @@ import { buildTodoReminder, shouldRemindTodos, type TodoReminderConfig } from '.
 import { buildStalledVerifyNudge, buildVerifyNudge, foldVerifyState, isVerifyCommand, STALLED_VERIFY_TURNS } from './verifyGate'
 import { buildDelegateNudgeText, foldReadPressure, READ_PRESSURE_FRACTION, sawSubagent } from './delegateNudge'
 import { buildReadLoopNudge, foldReadLoop } from './readLoopGate'
-import { buildReEditNudge, foldReEdit } from './reEditGate'
+import { buildReEditNudge, foldReEdit, reEditCount } from './reEditGate'
 import { recallForTurn, recentFocusText } from './dynamicRecall'
 import { editedTsFiles, postEditDiagnostics } from './postEditCheck'
 import { agentChildInstructions } from './agentDefs'
@@ -646,7 +646,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
       // file whose problem-source lives elsewhere (a theme token, a shared type). Point it at Grep/Lsp.
       for (const path of foldReEdit(reEditCounts, toolUses, results)) {
         tracer.event({ t: 're_edit', turn, path })
-        appendReminder(messages, buildReEditNudge(path))
+        appendReminder(messages, buildReEditNudge(path, reEditCount(reEditCounts, path)))
         yield { type: 'status', text: 'Repeated edits to one file — suggesting Grep/Lsp to find the source…' }
       }
       // IDENTICAL-CALL BREAKER: the same tool with the SAME arguments N times, with no mutation in between.

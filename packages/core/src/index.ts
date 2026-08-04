@@ -64,4 +64,4 @@ export type { AgentDef } from './agent/agentDefs'
 
 // Model specs (ADR-067): per-model official limits + hosted capabilities — shared by every model manager
 // UI (web server AND the extension) so they agree on what a model supports.
-export { DEFAULT_LIMITS, limitsFor, MODEL_SPECS, specCapabilities, type ModelLimits } from './llm/modelSpecs'
+export { DEFAULT_LIMITS, limitsFor, MODEL_SPECS, recommendedMaxOutputTokens, specCapabilities, type ModelLimits } from './llm/modelSpecs'

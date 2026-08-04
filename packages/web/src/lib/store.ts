@@ -592,7 +592,7 @@ export const useStore = create<UiState>((set, get) => {
           set({ fileDiff: { path: e.path, original: e.original, modified: e.modified } })
           break
         case 'preview':
-          set({ preview: { status: e.status, url: e.url } })
+          set({ preview: { status: e.status, url: e.url, error: e.error } })
           break
         case 'log':
           set((s) => ({ logs: [...s.logs, e.line].slice(-2000) }))

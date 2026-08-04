@@ -113,6 +113,27 @@ export function limitsFor(provider: string, model: string, detected?: number): M
 	return base
 }
 
+/** A DERIVED output cap for backends that declare none (measured 2026-07-30: a Modelfile with no
+ *  `num_predict` leaves Ollama unbounded — generation runs until the context fills, which is how a
+ *  degeneration spiral burned 186s before the stream guard existed).
+ *
+ *  Rule — the same shape as the compaction reserve: a fraction of the window, floored so a small window can
+ *  still finish a file, ceilinged by what the model actually supports AND by a practical 16k (past that, a
+ *  single response is far more likely runaway than useful).
+ *
+ *  This is a POLICY default, not a claimed model limit: too low merely truncates a response, which the loop
+ *  already recovers from (max-tokens continue-nudge) — unlike a wrong context window, which silently
+ *  truncates the PROMPT. That asymmetry is why ADR-038 forbids guessing the window but allows this. */
+export const OUTPUT_WINDOW_FRACTION = 1 / 8
+export const OUTPUT_MIN = 2_048
+export const OUTPUT_PRACTICAL_MAX = 16_384
+
+export function recommendedMaxOutputTokens(window: number, provider: string, model: string): number {
+	const specMax = limitsFor(provider, model).outputMax
+	const ceiling = Math.min(specMax || OUTPUT_PRACTICAL_MAX, OUTPUT_PRACTICAL_MAX)
+	return Math.min(Math.max(Math.floor(window * OUTPUT_WINDOW_FRACTION), OUTPUT_MIN), ceiling)
+}
+
 /** Spec-derived capabilities (tools/vision) for a model, used to badge HOSTED models that have no live probe.
  *  Returns undefined when the model isn't in the table (caller keeps its own detection). */
 export function specCapabilities(model: string): string[] | undefined {

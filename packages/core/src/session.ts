@@ -22,6 +22,7 @@ import { McpHub, type McpServerConfig, type McpConnect, type McpServerStatus } f
 import { createArchival, type ArchivalHit } from './memory/archival'
 import { loadMemory } from './memory/memoryStore'
 import { resolveCompactionPlan } from './context/compactor'
+import { recommendedMaxOutputTokens } from './llm/modelSpecs'
 import { curateMemory } from './memory/curator'
 import { loadHooksConfig } from './hooks/hookRunner'
 import { createSkillTool, loadSkills, skillsPromptSection } from './skills/skills'
@@ -61,8 +62,11 @@ export interface SessionOptions {
   autoMemory?: boolean
   /** Context window (tokens) for compaction sizing (Phase 11). Overrides the model→window map. */
   contextWindow?: number
-  /** Model max output tokens (ADR-039): caps the compaction summary reserve; helps small windows size correctly. */
-  maxOutputTokens?: number
+  /** Model max output tokens (ADR-039): caps the compaction summary reserve AND rides on the wire.
+   *  A number pins it. `'auto'` DERIVES one from the resolved window (recommendedMaxOutputTokens) — for
+   *  backends that declare none, where the default is "unbounded until the context fills". Omit ⇒ send
+   *  nothing (the web builder's behavior: the backend decides). */
+  maxOutputTokens?: number | 'auto'
   /** ADR-067 per-model sampling. Passed to the provider on every turn (each applies what it supports;
    *  hosted reasoning models ignore them). Omit ⇒ backend defaults. */
   temperature?: number
@@ -246,10 +250,17 @@ export function createSession(opts: SessionOptions): CascadeSession {
   // rewrite is a full re-prefill at local speed — so it gets 'constrained' (deep, rare compactions) unless
   // the caller overrides. Hosted APIs keep the standard 'hosted' economics byte-for-byte.
   const compactEconomics = opts.compactEconomics ?? (opts.provider instanceof OllamaProvider ? 'constrained' : 'hosted')
+  // `'auto'` resolves against whatever window we end up confident about (pinned now, or detected later).
+  // Declared BEFORE the plan below, which already calls it.
+  const autoOutput = opts.maxOutputTokens === 'auto'
+  const pinnedOutput = typeof opts.maxOutputTokens === 'number' ? opts.maxOutputTokens : undefined
+  const providerId = opts.provider instanceof OllamaProvider ? 'ollama' : 'openai' // only picks the spec row's topK; outputMax is model-derived
+  const outputFor = (window?: number): number | undefined =>
+    pinnedOutput ?? (autoOutput && window ? recommendedMaxOutputTokens(window, providerId, opts.model) : undefined)
   let compactPlan = resolveCompactionPlan({
     model: opts.model,
     contextWindow: opts.contextWindow,
-    maxOutputTokens: opts.maxOutputTokens,
+    maxOutputTokens: outputFor(opts.contextWindow),
     pct: opts.compactRatio,
     keepRecentRatio: opts.keepRecentRatio,
     economics: compactEconomics,
@@ -257,7 +268,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
   let windowDetected = false
   // ADR-038 enforcement: only limits we are CONFIDENT about go on the wire (explicit option or /api/show
   // detection). A static-map guess must NOT be enforced — it could SHRINK a model's real window.
-  let confidentLimits: { contextWindow?: number; maxOutputTokens?: number } = { contextWindow: opts.contextWindow, maxOutputTokens: opts.maxOutputTokens }
+  let confidentLimits: { contextWindow?: number; maxOutputTokens?: number } = { contextWindow: opts.contextWindow, maxOutputTokens: outputFor(opts.contextWindow) }
   async function ensureDetectedPlan(signal?: AbortSignal): Promise<void> {
     if (windowDetected) return
     windowDetected = true // run at most once; on failure the sync fallback plan stands
@@ -271,11 +282,11 @@ export function createSession(opts: SessionOptions): CascadeSession {
         // as long as the Modelfile happens to declare the same value. Where it doesn't, Ollama falls back to
         // its small default and silently front-truncates the prompt — the exact failure ADR-038 exists to
         // prevent — and the trace couldn't show it, because contextWindow was recorded as undefined.
-        confidentLimits = { contextWindow: limits.contextWindow, maxOutputTokens: limits.maxOutputTokens ?? opts.maxOutputTokens }
+        confidentLimits = { contextWindow: limits.contextWindow, maxOutputTokens: limits.maxOutputTokens ?? outputFor(limits.contextWindow) }
         compactPlan = resolveCompactionPlan({
           model: opts.model,
           contextWindow: limits.contextWindow,
-          maxOutputTokens: limits.maxOutputTokens ?? opts.maxOutputTokens,
+          maxOutputTokens: limits.maxOutputTokens ?? outputFor(limits.contextWindow),
           pct: opts.compactRatio,
           keepRecentRatio: opts.keepRecentRatio,
           economics: compactEconomics,

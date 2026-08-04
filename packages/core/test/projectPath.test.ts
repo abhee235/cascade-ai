@@ -8,6 +8,8 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { assertPatternInProject, isInsideProject, ProjectPathError, resolveInProject } from '../src/tools/projectPath'
+import { ignoresFor as globIgnores } from '../src/tools/builtins/Glob'
+import { ignoresFor as grepIgnores } from '../src/tools/builtins/Grep'
 
 const cwd = mkdtempSync(join(tmpdir(), 'projpath-'))
 mkdirSync(join(cwd, 'src', 'components'), { recursive: true })
@@ -89,5 +91,23 @@ describe('pathAccess policy', () => {
 		expect(resolveInProject(cwd, target, undefined, { roots: [extra] })).toBe(resolve(target))
 		expect(isInsideProject(cwd, target)).toBe(false) // …and still outside the project proper
 		rmSync(extra, { recursive: true, force: true })
+	})
+})
+
+// ── Searching INSTALLED packages (3D Solar build, 2026-08-03) ────────────────────────────────────────
+// The model needed a library's real .d.ts — the ground truth behind 10 guessed rewrites — but Grep/Glob
+// hard-ignored node_modules, so it had to shell out to `grep -r`. Explicit intent now wins over the default.
+describe('ignoresFor — node_modules is hidden by default, searchable on request', () => {
+	it('keeps the node_modules ignore for ordinary project searches', () => {
+		expect(globIgnores('**/*.ts', undefined)).toContain('**/node_modules/**')
+		expect(grepIgnores(undefined, 'src')).toContain('**/node_modules/**')
+	})
+	it('drops it when the pattern or path names node_modules', () => {
+		expect(globIgnores('node_modules/@react-three/fiber/**/*.d.ts', undefined)).not.toContain('**/node_modules/**')
+		expect(grepIgnores(undefined, 'node_modules/three')).not.toContain('**/node_modules/**')
+		expect(grepIgnores('node_modules/**/*.d.ts', undefined)).not.toContain('**/node_modules/**')
+	})
+	it('still hides dist/.git either way', () => {
+		expect(globIgnores('node_modules/x/**', undefined)).toContain('**/dist/**')
 	})
 })

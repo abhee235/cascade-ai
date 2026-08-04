@@ -4,7 +4,7 @@
 // model at Grep/Lsp to trace the real source.
 
 import { describe, expect, it } from 'vitest'
-import { foldReEdit, REEDIT_THRESHOLD } from '../src/agent/reEditGate'
+import { buildReEditNudge, foldReEdit, REEDIT_THRESHOLD } from '../src/agent/reEditGate'
 import type { ContentBlock } from '../src/protocol'
 import type { ToolUse } from '../src/tools/runTool'
 
@@ -37,4 +37,32 @@ describe('foldReEdit — unit', () => {
     for (let i = 0; i < REEDIT_THRESHOLD + 2; i++) foldReEdit(counts, [edit('e', 'A.tsx')], [err])
     expect(counts.get('A.tsx') ?? 0).toBe(0) // all failed → never fires
   })
+})
+
+// ── Escalation (FocusFlow, 2026-07-30) ───────────────────────────────────────────────────────────────
+// The one-shot advisory at 6 was IGNORED: setupTests.ts reached 7 edits, vitest.config.ts 4, package.json 4
+// — all rewriting a config that was never broken (the real fault was a shell-corrupted test file). The gate
+// now fires at 5 and RE-FIRES every 3 further edits, with a directive second message.
+describe('re-edit escalation', () => {
+	const ok = (id: string) => ({ type: 'tool_result' as const, tool_use_id: id, content: 'ok' })
+	const edit = (id: string, path: string) => ({ id, name: 'Edit', input: { file_path: path } })
+
+	it('fires at the threshold, then every 3 edits after it', () => {
+		const counts = new Map<string, number>()
+		const fired: number[] = []
+		for (let i = 1; i <= 12; i++) {
+			const crossed = foldReEdit(counts, [edit(`t${i}`, 'a.ts')] as never, [ok(`t${i}`)] as never)
+			if (crossed.length) fired.push(i)
+		}
+		expect(fired).toEqual([5, 8, 11]) // was [6] only — a single note the model could ignore
+	})
+
+	it('the first nudge is advisory; the escalated one forbids further edits until the diagnosis is checked', () => {
+		const first = buildReEditNudge('a.ts', 5)
+		expect(first).toContain('If these edits are genuine separate improvements, ignore this')
+		const escalated = buildReEditNudge('a.ts', 8)
+		expect(escalated).toContain('STOP editing')
+		expect(escalated).toContain('your DIAGNOSIS is wrong')
+		expect(escalated).toContain('If the error names a different file, fix THAT file')
+	})
 })

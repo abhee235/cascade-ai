@@ -107,7 +107,7 @@ export type BuilderEvent =
   | { type: 'fileEdited'; path: string; ok: boolean } // result of a visual edit; ok:false ⇒ not inline-editable, fall back to AI (M9)
   | { type: 'fileOpError'; action: string; message: string } // a file-tree op failed (e.g. name exists) — surfaced as a toast (M9)
   | { type: 'fileDiff'; path: string; original: string; modified: string } // a file's diff vs last commit (M2; Monaco DiffEditor)
-  | { type: 'preview'; status: 'installing' | 'starting' | 'running' | 'error' | 'stopped'; url?: string } // live preview (M3)
+  | { type: 'preview'; status: 'installing' | 'starting' | 'running' | 'error' | 'stopped'; url?: string; error?: string } // live preview (M3); `error` explains a failure (e.g. dev-server port drift)
   | { type: 'log'; line: string } // a dev-server stdout/stderr line for the Console pane (M5)
   | { type: 'problems'; problems: Problem[]; checking?: boolean } // type-check results for the Problems panel (M5.3)
   | { type: 'versions'; versions: Version[] } // checkpoint history for the Versions panel (M6)

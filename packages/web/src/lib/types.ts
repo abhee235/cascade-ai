@@ -16,7 +16,10 @@ export type RightTab = 'preview' | 'code' | 'versions' // top builder pane (Cons
 export type PreviewDevice = 'desktop' | 'tablet' | 'mobile'
 export type BottomTab = 'terminal' | 'problems' | 'output' | 'ports' // VS Code-style bottom panel (M7)
 export type Page = 'home' | 'project' | 'projects' | 'chats' | 'settings' | 'mcp'
-export type PreviewState = { status: 'installing' | 'starting' | 'running' | 'error' | 'stopped'; url?: string }
+export type PreviewState = { status: 'installing' | 'starting' | 'running' | 'error' | 'stopped'; url?: string
+  /** Why it failed (e.g. dev-server port drift) — shown in the pane instead of a bare 'unreachable'. */
+  error?: string
+}
 // A build/runtime error captured from the running preview (Vite overlay or window.onerror), via postMessage.
 export type RuntimeError = { kind: 'build' | 'runtime'; message: string; file?: string; line?: number; col?: number }
 

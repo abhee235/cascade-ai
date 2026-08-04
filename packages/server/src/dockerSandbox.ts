@@ -34,6 +34,25 @@ export async function dockerAvailable(): Promise<boolean> {
   return exitCode === 0
 }
 
+/** The PREVIEW owns the dev server (PreviewManager starts it on the one published port and the proxy
+ *  points there). A model-started server is invisible at best and unreachable at worst: the container
+ *  publishes exactly one port, so a second Vite silently taking 5174 can never be reached from the host —
+ *  measured (3D Solar build, 2026-08-03), that produced "Preview unreachable" and a 30-minute loop of
+ *  restart-and-nuke. Refuse it with the alternative, the same shape as the Bash content-write/kill guards.
+ *  Detached starts (execDetached) are OURS and bypass this — it only guards the model's `exec` path. */
+const DEV_SERVER_RE = /(^|[;&|]|&&)\s*(npx\s+)?(vite|next|nuxt)\b(?!.*\b(build|preview)\b)|(^|[;&|]|&&)\s*(npm|pnpm|yarn|bun)\s+(run\s+)?(dev|start)\b/i
+
+export function devServerRefusal(command: string): string | undefined {
+  if (!DEV_SERVER_RE.test(command)) return undefined
+  return (
+    'Refused: the dev server is managed by the Preview pane — it is already running on the one port this ' +
+    'container publishes, and a second server would bind a port that is published NOWHERE (unreachable from ' +
+    'the browser, which is exactly how a previous build lost its preview for 30 minutes). To see your changes: ' +
+    'they hot-reload automatically — just look at the Preview. If it seems stuck, stop and start the Preview. ' +
+    'Use Bash for `npm run build`, `npx tsc --noEmit` and tests instead.'
+  )
+}
+
 /** The dev-server port the container publishes (the scaffold runs `vite --host --port 5173`). */
 const DEV_PORT = Number(process.env.CASCADE_DEV_PORT ?? 5173)
 
@@ -128,6 +147,8 @@ export class DockerSandbox implements Sandbox {
   }
 
   async exec(command: string, opts: ExecOptions = {}): Promise<ExecResult> {
+    const owned = devServerRefusal(command)
+    if (owned) return { output: owned, exitCode: 1 }
     return this.execWithRecovery(['exec', '-w', '/workspace'], command, { signal: opts.signal, onData: opts.onData })
   }
 

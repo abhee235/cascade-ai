@@ -7,6 +7,7 @@
 import { spawn } from 'node:child_process'
 import { z } from 'zod'
 import type { Tool } from '../Tool'
+import { cleanTerminalOutput } from '../../utils/ansi'
 
 const inputSchema = z.object({
   command: z.string().describe('The shell command to run (executed via the platform shell).'),
@@ -44,7 +45,7 @@ const shellNoteLean = (exec: ExecPlatform): string =>
 const descriptionFull = (exec: ExecPlatform) => `Run a shell command in the project and return its combined stdout/stderr. Use it for real shell work — building, running tests, installing dependencies, git, and running scripts.
 
 Prefer the dedicated tools over Bash so the user can review your work:
-- Read a file with Read (not cat/head/tail); change one with Edit (not sed/awk); create one with Write (not echo > or heredoc).
+- Read a file with Read (not cat/head/tail); change one with Edit (not sed/awk); create one with Write (not echo > or heredoc). NEVER write file CONTENT through the shell: the shell EATS characters that are also operators — measured, a test file written with \`echo\` lost every \`>\` so \`() =>\` became \`() =\`, producing a syntactically dead file whose error ("no test suite found") then sent 20 turns chasing a config that was never broken.
 - Find files by name with Glob (not find/ls); search file contents with Grep (not grep/rg).
 Reserve Bash for commands that genuinely need a shell.
 
@@ -72,6 +73,34 @@ const bashDescription = (tier: 'minimal' | 'lean' | 'full', exec?: ExecPlatform)
   // the real execution target (sandbox ⇒ posix).
   const e: ExecPlatform = exec ?? (process.platform === 'win32' ? 'win32' : 'posix')
   return tier === 'full' ? descriptionFull(e) : tier === 'lean' ? descriptionLean(e) : BASH_DESCRIPTION_MINIMAL
+}
+
+/** Writing file CONTENT through the shell is never right here — the shell consumes `>`, `|`, `&`, `^`
+ *  inside the text (measured: `() =>` arrived as `() =`), the user sees no diff card, and the read-state
+ *  cache doesn't learn the file. Detected narrowly: an echo/printf/heredoc redirect into a SOURCE-ish file.
+ *  Redirecting a command's OUTPUT to a log (`npm run build > build.log`) is untouched. */
+const CONTENT_WRITE_RE =
+  /(^|[;&|])\s*(echo|printf|cat)\b[^;&|]*?>{1,2}\s*"?'?[^\s"';&|]+\.(ts|tsx|js|jsx|mjs|cjs|json|md|css|scss|html|py|rb|go|rs|java|yml|yaml|toml|txt|sh)\b/i
+
+/** Broad process-killing is never the model's job here. Measured (3D Solar build, 2026-08-03): believing a
+ *  "stale HMR cache", the model ran 24 kill/nuke commands over 32 minutes — `pkill -f vite` escalating to
+ *  `pkill -9 node` and `killall node`, which kill EVERY node process in the container, including the dev
+ *  server the preview proxy points at. Result: "Preview unreachable", and a restart loop it could not exit.
+ *  (A prose ban existed — it named `pkill -f node`; the model simply used other spellings. Hence a guard.)
+ *  On the extension's HOST path this matters even more: `pkill node` would kill VS Code's own processes. */
+const KILL_RE = /(^|[;&|])\s*(pkill|killall)\b|(^|[;&|])\s*kill\s+(-\S+\s+)*(-9\b|\$\()/i
+
+/** Kill the whole process TREE. Node's `kill` signals only the direct child; on Windows a shell's
+ *  grandchildren (the `start /b` case) survive it and keep the inherited stdio pipes open. Best-effort:
+ *  a failure here just means the deadline still resolves the call without the tree dying. */
+function killTree(pid: number | undefined): void {
+  if (!pid) return
+  try {
+    if (process.platform === 'win32') spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' })
+    else process.kill(-pid, 'SIGKILL') // negative pid = the process GROUP
+  } catch {
+    /* best-effort */
+  }
 }
 
 // Conservative heuristic: read-only ONLY if every piped/chained segment leads with a known safe command.
@@ -145,6 +174,22 @@ export const BashTool: Tool<z.infer<typeof inputSchema>> = {
   isConcurrencySafe: (input) => isReadOnlyCommand(input.command), // safe commands can parallelize; mutating ones run solo
 
   async call(input, ctx, onProgress) {
+    // Refuse shell-authored file content BEFORE running it: a corrupted file fails LATER with a misleading
+    // error, and the model then debugs the wrong thing (measured: 20 turns rewriting a fine vitest config).
+    if (KILL_RE.test(input.command)) {
+      return {
+        content:
+          'Refused: broad process killing (pkill / killall / kill -9 / kill $(…)) takes down every matching process — including the dev server this preview depends on, which is how a previous build spent 30+ minutes in a restart loop with an unreachable preview. The dev server is MANAGED for you: it is restarted automatically when needed, so you do not need to kill it. If a port is genuinely stuck, start on a different one (`npx vite --port <n>`); if you believe a cache is stale, `rm -rf node_modules/.vite` alone is enough — do not kill processes.',
+        isError: true,
+      }
+    }
+    if (CONTENT_WRITE_RE.test(input.command)) {
+      return {
+        content:
+          'Refused: this command writes file CONTENT through the shell, which corrupts it — the shell consumes `>`, `|`, `&` and `^` inside the text (measured: `() =>` became `() =`, and the resulting syntax error was misdiagnosed for 20 turns). Use the **Write** tool for the whole file, or **Edit** to change part of one. (Redirecting a command\'s OUTPUT to a log file is fine — this only blocks echo/printf/cat writing into a source file.)',
+        isError: true,
+      }
+    }
     // ADR-045: give every command a deadline. A weak model that fires a command which waits for input (or
     // loops forever) would otherwise hang the whole turn with no recovery. One AbortController drives the
     // child; it trips on EITHER the timer OR the session's Stop, and a flag tells the two apart so the model
@@ -177,7 +222,7 @@ export const BashTool: Tool<z.infer<typeof inputSchema>> = {
           onData: (chunk) => onProgress?.(chunk),
         })
         cleanup()
-        acc.push(output)
+        acc.push(cleanTerminalOutput(output))
         const body = acc.toString()
         if (timedOut) return { content: `${body}\n${timeoutMsg}`, isError: true }
         if (ctx.abortSignal.aborted) return { content: `${body}\n[aborted]`, isError: true }
@@ -193,27 +238,52 @@ export const BashTool: Tool<z.infer<typeof inputSchema>> = {
     return new Promise<{ content: string; isError?: boolean }>((resolve) => {
       // `signal` makes Node kill the child when the controller aborts (timeout OR Stop) — no zombie shells.
       const child = spawn(input.command, { shell: true, cwd: ctx.cwd, signal: ctl.signal })
+
+      // MEASURED HANG (2026-07-30, FocusFlow run): the model started a dev server detached
+      // (`start /b cmd /c "npx vite …"`). The grandchild INHERITS this child's stdout/stderr pipes, so
+      // 'close' — which waits for the process to exit AND every stdio stream to end — never fired. The
+      // timeout's abort killed only the direct shell, leaving the pipes held open by the surviving
+      // grandchild: the tool call hung for 37+ minutes on a 120s deadline.
+      // Fix, two layers: (1) settle on 'exit' (the PROCESS ended; stdio may still be held by a detached
+      // grandchild — that's fine, it's meant to outlive us), and (2) the deadline resolves the call ITSELF
+      // and force-kills the process TREE, so no child behaviour can keep a turn hostage.
+      let settled = false
+      const finish = (r: { content: string; isError?: boolean }) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        clearTimeout(hardTimer)
+        resolve(r)
+      }
+      const hardTimer = setTimeout(() => {
+        killTree(child.pid)
+        finish({ content: `${acc.toString()}\n${timeoutMsg}`, isError: true })
+      }, timeoutMs + 250) // just after the AbortController's own attempt, so a clean kill still wins
+
       const onData = (buf: Buffer) => {
-        const s = buf.toString()
+        // Terminal escapes are noise in BOTH directions: unreadable glyphs in the card (no terminal
+        // emulator in a webview) and wasted context for the model.
+        const s = cleanTerminalOutput(buf.toString())
         acc.push(s) // bounded (head+tail); the raw chunk still streams live to the UI card below
         onProgress?.(s)
       }
       child.stdout?.on('data', onData)
       child.stderr?.on('data', onData)
       child.on('error', (e: NodeJS.ErrnoException) => {
-        cleanup()
-        if (timedOut) resolve({ content: `${acc.toString()}\n${timeoutMsg}`, isError: true })
-        else if (ctx.abortSignal.aborted) resolve({ content: `${acc.toString()}\n[aborted]`, isError: true })
-        else resolve({ content: `Failed to run command: ${e.message}`, isError: true })
+        if (timedOut) finish({ content: `${acc.toString()}\n${timeoutMsg}`, isError: true })
+        else if (ctx.abortSignal.aborted) finish({ content: `${acc.toString()}\n[aborted]`, isError: true })
+        else finish({ content: `Failed to run command: ${e.message}`, isError: e.code !== 'ABORT_ERR' })
       })
-      child.on('close', (code) => {
-        cleanup()
+      child.on('exit', (code) => {
         if (timedOut) {
-          resolve({ content: `${acc.toString()}\n${timeoutMsg}`, isError: true })
+          finish({ content: `${acc.toString()}\n${timeoutMsg}`, isError: true })
           return
         }
-        const body = acc.toString()
-        resolve({ content: `${body || '(no output)'}${code ? `\n[exit ${code}]` : ''}`, isError: code !== 0 })
+        // Give any already-buffered output a tick to drain, then settle regardless of pipe state.
+        setTimeout(() => {
+          const body = acc.toString()
+          finish({ content: `${body || '(no output)'}${code ? `\n[exit ${code}]` : ''}`, isError: code !== 0 })
+        }, 50)
       })
     })
   },

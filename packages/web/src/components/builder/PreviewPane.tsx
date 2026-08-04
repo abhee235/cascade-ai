@@ -94,9 +94,12 @@ export function PreviewPane() {
   if (preview?.status === 'error') {
     return (
       <Center>
-        <div className="text-center">
+        <div className="max-w-md text-center">
           <AlertTriangle className="mx-auto h-7 w-7 text-yellow-500" />
           <p className="mt-2 text-sm">Couldn't start the preview.</p>
+          {/* The REASON, when the server knows it (e.g. the dev server bound a port the container doesn't
+              publish). Without this the pane said only "unreachable" and the cause stayed invisible. */}
+          {preview.error && <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{preview.error}</p>}
           <Button className="mt-3" variant="secondary" onClick={startPreview}>
             <Play className="h-4 w-4" /> Retry
           </Button>

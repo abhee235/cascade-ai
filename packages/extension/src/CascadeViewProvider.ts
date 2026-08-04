@@ -255,7 +255,10 @@ export class CascadeViewProvider implements vscode.WebviewViewProvider {
           return v === 'hosted' || v === 'constrained' ? v : undefined
         })(),
         // ADR-039/067: output cap (sizes the compaction summary reserve) + per-model sampling.
-        maxOutputTokens: cfg.get<number>('maxOutputTokens') || undefined,
+        // 0 = AUTO: derive a cap from the resolved window (window/8, floored 2k, capped by the model's spec
+        // and 16k). Local backends usually declare no num_predict, which means "generate until the context
+        // fills" — an unbounded ceiling is what let a degeneration spiral run for 186s.
+        maxOutputTokens: cfg.get<number>('maxOutputTokens') || 'auto',
         temperature: num('temperature', -1),
         topP: num('topP', -1),
         topK: cfg.get<number>('topK') || undefined,

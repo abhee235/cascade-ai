@@ -45,10 +45,27 @@ export interface PageLike {
 	consoleErrors(): string[]
 }
 
+/** The two ways this tool can be unavailable — module missing, or no browser to drive. Both are the USER's
+ *  environment, not something the model can fix, so the message must (a) say what's missing, (b) name the
+ *  one-line install, and (c) hand the model a text-only fallback so the turn stays productive instead of
+ *  looping on a tool that will never work. */
+const UNAVAILABLE_FALLBACK =
+	'Continue WITHOUT the browser: verify with Bash instead — `curl -s http://localhost:<port>` for a response, ' +
+	'and read the dev-server log for runtime errors. Say clearly in your final answer that you could not visually verify.'
+
 async function launchPage(): Promise<{ page: PageLike; close: () => Promise<void> }> {
-	const { chromium } = await import('playwright-core')
+	let chromium: typeof import('playwright-core').chromium
+	try {
+		;({ chromium } = await import('playwright-core'))
+	} catch {
+		throw new Error(
+			`The Browser tool needs the "playwright-core" package, which is not installed in this extension. ` +
+				`Install it (npm i playwright-core) and reload the window. ${UNAVAILABLE_FALLBACK}`,
+		)
+	}
 	let browser: import('playwright-core').Browser | undefined
-	// System browsers, best-first: Edge ships with Windows; Chrome is the common fallback.
+	// System browsers, best-first: Edge ships with Windows; Chrome is the common fallback. Using a CHANNEL
+	// means we drive an already-installed browser — no 400MB Playwright download.
 	for (const channel of ['msedge', 'chrome']) {
 		try {
 			browser = await chromium.launch({ channel, headless: true })
@@ -57,7 +74,20 @@ async function launchPage(): Promise<{ page: PageLike; close: () => Promise<void
 			/* channel not installed — try the next */
 		}
 	}
-	if (!browser) throw new Error('No system browser found (tried Edge, Chrome). Install one, or skip browser checks.')
+	// Last resort: a Playwright-managed chromium, if the user ran `npx playwright install`.
+	if (!browser) {
+		try {
+			browser = await chromium.launch({ headless: true })
+		} catch {
+			/* none downloaded either — fall through to the actionable error */
+		}
+	}
+	if (!browser) {
+		throw new Error(
+			`No browser found to drive (tried Edge, Chrome, and a Playwright-managed chromium). ` +
+				`Install Edge or Chrome, or run \`npx playwright install chromium\`. ${UNAVAILABLE_FALLBACK}`,
+		)
+	}
 	const raw = await browser.newPage({ viewport: { width: 1280, height: 800 } })
 	const errors: string[] = []
 	raw.on('console', (m) => {
