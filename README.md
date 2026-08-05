@@ -102,10 +102,13 @@ npm test        # vitest (FakeLLM; no Ollama/Docker needed). Docker/live tests a
 
 ## Docs
 
+- **[`docs/guide/`](docs/guide/README.md) — the user guide**: [getting started](docs/guide/getting-started.md) ·
+  [connecting providers](docs/guide/providers.md) · [models & parameters](docs/guide/models.md) ·
+  [the VS Code extension](docs/guide/extension.md) · [connectors (MCP)](docs/guide/mcp.md).
 - [`docs/PLAN.md`](docs/PLAN.md) — the phased curriculum.
 - [`docs/PLAN-web-frontend.md`](docs/PLAN-web-frontend.md) — the builder UI component catalog/roadmap.
 - [`docs/PROGRESS.md`](docs/PROGRESS.md) — progress dashboard.
-- [`docs/adr/`](docs/adr/) — architecture decisions · [`docs/guide/`](docs/guide/) — per-phase guides.
+- [`docs/adr/`](docs/adr/) — architecture decisions · [`docs/guide/phase-00.md`](docs/guide/phase-00.md) — per-phase build guides.
 
 ---
 
