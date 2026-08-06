@@ -21,17 +21,31 @@ interface SpanRow {
   status: string | null
   project_id: string | null
   model: string | null
+  chat_id: string | null
   attributes: string | null
 }
 
 const str = (v: unknown): string | null => (typeof v === 'string' ? v : v == null ? null : String(v))
 
+/** Row → port shape. Shared by every read path, so a column added here surfaces everywhere at once. */
+const toSpan = (r: SpanRow): SpanRecord => ({
+  traceId: r.trace_id,
+  spanId: r.span_id,
+  parentSpanId: r.parent_id ?? undefined,
+  name: r.name,
+  kind: r.kind,
+  startedAt: r.started_at,
+  endedAt: r.ended_at ?? undefined,
+  status: (r.status as 'ok' | 'error' | null) ?? undefined,
+  attributes: r.attributes ? (JSON.parse(r.attributes) as Record<string, unknown>) : undefined,
+})
+
 export function createTraceStore(db: Db): TraceStore {
   // A span is written ONCE, when it ends — but the same span_id can arrive twice if a tracer re-emits
   // after a retry, so upsert rather than insert to keep the write idempotent.
   const insert = db.prepare(`
-    INSERT INTO spans (trace_id, span_id, parent_id, name, kind, started_at, ended_at, status, project_id, model, attributes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO spans (trace_id, span_id, parent_id, name, kind, started_at, ended_at, status, project_id, model, chat_id, attributes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(span_id) DO UPDATE SET
       ended_at = excluded.ended_at, status = excluded.status, attributes = excluded.attributes
   `)
@@ -40,7 +54,7 @@ export function createTraceStore(db: Db): TraceStore {
     db.exec('BEGIN')
     try {
       for (const r of rows) {
-        insert.run(r.trace_id, r.span_id, r.parent_id, r.name, r.kind, r.started_at, r.ended_at, r.status, r.project_id, r.model, r.attributes)
+        insert.run(r.trace_id, r.span_id, r.parent_id, r.name, r.kind, r.started_at, r.ended_at, r.status, r.project_id, r.model, r.chat_id, r.attributes)
       }
       db.exec('COMMIT')
     } catch (e) {
@@ -63,21 +77,46 @@ export function createTraceStore(db: Db): TraceStore {
         status: span.status ?? null,
         project_id: str(a['cascade.project_id'] ?? a.projectId),
         model: str(a['llm.model_name'] ?? a['cascade.model'] ?? a.model),
+        chat_id: str(a['cascade.chat_id'] ?? a['session.id']),
         attributes: Object.keys(a).length ? JSON.stringify(a) : null,
       })
     },
 
     async listTraces(opts): Promise<TraceSummary[]> {
       writer.flush() // the newest trace is usually still buffered — the list must not lag the UI
+      // Only project_id belongs in WHERE. Everything else filters a TRACE, and a trace is an aggregate:
+      // putting `started_at < before` in WHERE (as this first did) drops the late spans of an otherwise
+      // included trace, so its span count and duration come back wrong. HAVING filters whole groups.
       const where: string[] = []
+      const having: string[] = []
       const params: unknown[] = []
       if (opts?.projectId) {
         where.push('project_id = ?')
         params.push(opts.projectId)
       }
       if (opts?.before) {
-        where.push('started_at < ?')
-        params.push(opts.before)
+        // Keyset cursor with a tie-breaker. `MIN(started_at) < ?` alone drops every trace that shares the
+        // boundary millisecond — measured: 150 traces paged out as 136, silently. The ORDER BY below sorts
+        // on the same pair, so the comparison and the ordering agree and no row can be skipped or repeated.
+        if (opts.beforeId) {
+          having.push('(MIN(started_at) < ? OR (MIN(started_at) = ? AND trace_id < ?))')
+          params.push(opts.before, opts.before, opts.beforeId)
+        } else {
+          having.push('MIN(started_at) < ?')
+          params.push(opts.before)
+        }
+      }
+      if (opts?.status === 'error') having.push('has_error = 1')
+      if (opts?.status === 'ok') having.push('has_error = 0')
+      if (opts?.model) {
+        having.push('MAX(model) = ?')
+        params.push(opts.model)
+      }
+      if (opts?.q?.trim()) {
+        // Search the ROOT span: its name is the agent label and its `input` attribute is the user's own
+        // prompt — "which turn was the one where I asked about favourites?" is how you actually look.
+        having.push("MAX(CASE WHEN parent_id IS NULL THEN name || ' ' || COALESCE(attributes, '') END) LIKE ?")
+        params.push(`%${opts.q.trim()}%`)
       }
       params.push(opts?.limit ?? 50)
       // One row per trace: the ROOT span names it (parent_id IS NULL); the aggregate gives span count
@@ -92,11 +131,13 @@ export function createTraceStore(db: Db): TraceStore {
                  MAX(CASE WHEN status = 'error' THEN 1 ELSE 0 END)  AS has_error,
                  MAX(CASE WHEN ended_at IS NULL THEN 1 ELSE 0 END)  AS has_open,
                  MAX(project_id)                                    AS project_id,
-                 MAX(model)                                         AS model
+                 MAX(model)                                         AS model,
+                 MAX(chat_id)                                       AS chat_id
           FROM spans
           ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
           GROUP BY trace_id
-          ORDER BY started_at DESC
+          ${having.length ? `HAVING ${having.join(' AND ')}` : ''}
+          ORDER BY started_at DESC, trace_id DESC
           LIMIT ?
         `)
         .all(...(params as never[])) as Record<string, unknown>[]
@@ -114,23 +155,51 @@ export function createTraceStore(db: Db): TraceStore {
         running: !!r.has_open,
         projectId: (r.project_id as string) ?? undefined,
         model: (r.model as string) ?? undefined,
+        chatId: (r.chat_id as string) ?? undefined,
       }))
     },
 
     async spans(traceId: string): Promise<SpanRecord[]> {
       writer.flush() // a LIVE trace is mid-write; without this the waterfall stops short of "now"
       const rows = db.prepare('SELECT * FROM spans WHERE trace_id = ? ORDER BY started_at ASC').all(traceId) as unknown as SpanRow[]
-      return rows.map((r) => ({
-        traceId: r.trace_id,
-        spanId: r.span_id,
-        parentSpanId: r.parent_id ?? undefined,
-        name: r.name,
-        kind: r.kind,
-        startedAt: r.started_at,
-        endedAt: r.ended_at ?? undefined,
-        status: (r.status as 'ok' | 'error' | null) ?? undefined,
-        attributes: r.attributes ? (JSON.parse(r.attributes) as Record<string, unknown>) : undefined,
-      }))
+      return rows.map(toSpan)
+    },
+
+    async searchSpans(opts): Promise<SpanRecord[]> {
+      writer.flush()
+      const where: string[] = []
+      const params: unknown[] = []
+      if (opts?.projectId) {
+        where.push('project_id = ?')
+        params.push(opts.projectId)
+      }
+      if (opts?.kind) {
+        where.push('kind = ?')
+        params.push(opts.kind)
+      }
+      if (opts?.status) {
+        where.push('status = ?')
+        params.push(opts.status)
+      }
+      if (opts?.q?.trim()) {
+        // Name OR attributes: the name finds "tool Bash", the attributes find the file path in its input
+        // or the error text in its output. One box, because a user hunting a failure does not yet know
+        // which of those their memory of it lives in.
+        where.push("(name LIKE ? OR COALESCE(attributes, '') LIKE ?)")
+        params.push(`%${opts.q.trim()}%`, `%${opts.q.trim()}%`)
+      }
+      params.push(opts?.limit ?? 200)
+      const rows = db
+        .prepare(`SELECT * FROM spans ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY started_at DESC LIMIT ?`)
+        .all(...(params as never[])) as unknown as SpanRow[]
+      return rows.map(toSpan)
+    },
+
+    async models(): Promise<string[]> {
+      writer.flush()
+      // Ordered by most-recently-used, so the filter's first option is the model you are working with.
+      const rows = db.prepare('SELECT model, MAX(started_at) AS last FROM spans WHERE model IS NOT NULL GROUP BY model ORDER BY last DESC').all() as { model: string }[]
+      return rows.map((r) => r.model)
     },
 
     async prune(olderThanMs: number): Promise<number> {

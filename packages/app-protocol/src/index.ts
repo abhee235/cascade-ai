@@ -109,6 +109,8 @@ export interface TraceSummaryInfo {
   running?: boolean
   projectId?: string
   model?: string
+  /** The conversation this turn came from — lets the Observatory open a trace back in its chat. */
+  chatId?: string
 }
 
 /** ADR-081: one span. Flat (parent by id) rather than nested — the client builds the tree, so a span with a
@@ -151,8 +153,11 @@ export type BuilderEvent =
   | { type: 'allChats'; groups: { project: ProjectInfo; chats: ChatMeta[] }[] } // every project's chats, for the Chats page
   | { type: 'terminalData'; id: string; data: string } // a chunk of a terminal session's PTY output (M7)
   | { type: 'terminalExit'; id: string } // a terminal session's shell ended (M7)
-  | { type: 'traces'; traces: TraceSummaryInfo[] } // ADR-081: the Observatory's trace list
+  // ADR-081: the Observatory's trace list. `append` ⇒ a pagination page, not a fresh result set — the
+  // client concatenates instead of replacing, so "load more" doesn't fight the poll.
+  | { type: 'traces'; traces: TraceSummaryInfo[]; append?: boolean; models?: string[] }
   | { type: 'traceSpans'; traceId: string; spans: SpanInfo[] } // ADR-081: one trace's spans (the waterfall)
+  | { type: 'spanResults'; spans: SpanInfo[] } // ADR-081: cross-trace span search hits
 
 /** Client → builder. App/workspace-level commands, distinct from a session's InboundMessages.
  *  Future variants (added in their phases): preview start/stop/refresh, terminal input/resize,
@@ -191,5 +196,10 @@ export type BuilderCommand =
   | { type: 'chat'; action: 'list' | 'new' | 'switch' | 'delete' | 'rename'; id?: string; title?: string } // multi-chat (M11)
   | { type: 'chats'; action: 'listAll' } // request every project's chat list (the Chats page)
   // ADR-081: the Observatory. `projectId` omitted ⇒ every project's traces (the page is global, like Chats).
-  | { type: 'traces'; action: 'list'; projectId?: string; limit?: number }
+  // `before` is the pagination cursor: the oldest startedAt already held. With it the reply is a PAGE
+  // (append), without it a fresh result set.
+  | { type: 'traces'; action: 'list'; projectId?: string; model?: string; status?: 'ok' | 'error'; q?: string; limit?: number; before?: number; beforeId?: string }
   | { type: 'trace'; action: 'spans'; traceId: string } // one trace's spans (→ traceSpans)
+  // Spans across ALL traces — "every failed Bash", "every turn that mentions RecipeGrid". The question a
+  // per-trace viewer structurally cannot answer.
+  | { type: 'spans'; action: 'search'; projectId?: string; kind?: string; status?: 'ok' | 'error'; q?: string; limit?: number }

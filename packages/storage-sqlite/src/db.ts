@@ -41,6 +41,15 @@ const MIGRATIONS: { id: string; sql: string }[] = [
       CREATE INDEX IF NOT EXISTS spans_project     ON spans(project_id, started_at DESC);
     `,
   },
+  {
+    // Lifted out of the attributes JSON for the same reason project_id and model were: the Observatory
+    // links a trace back to the conversation that produced it, and JSON extraction cannot use an index.
+    id: '002-chat-id',
+    sql: `
+      ALTER TABLE spans ADD COLUMN chat_id TEXT;
+      CREATE INDEX IF NOT EXISTS spans_chat ON spans(chat_id, started_at DESC);
+    `,
+  },
 ]
 
 /**

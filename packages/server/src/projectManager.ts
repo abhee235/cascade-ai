@@ -171,16 +171,29 @@ export async function flushTracers(timeoutMs = 2_000): Promise<void> {
   await Promise.race([Promise.allSettled(flushed), new Promise((r) => setTimeout(r, timeoutMs))])
 }
 
+/** Extra (deployment) tracers by `dir:kind`, so a chat switch reaches them the same way it reaches the
+ *  OTLP exporter. Duck-typed on `setSession`: a sink that doesn't care about chats simply won't have it. */
+const extraTracers = new Map<string, { setSession?: (id: string | undefined) => void }>()
+
 export function setTraceSession(dir: string, chatId: string | undefined): void {
   if (chatId) traceSessions.set(dir, chatId)
   else traceSessions.delete(dir)
-  for (const kind of ['builder', 'planner'] as const) otelTracers.get(`${dir}:${kind}`)?.setSession(chatId)
+  for (const kind of ['builder', 'planner'] as const) {
+    otelTracers.get(`${dir}:${kind}`)?.setSession(chatId)
+    extraTracers.get(`${dir}:${kind}`)?.setSession?.(chatId)
+  }
 }
 export const tracerFor = (dir: string, kind: 'builder' | 'planner', extra?: Tracer): Tracer => {
   const jsonl = new JsonlTracer(join(dir, '.cascade', 'traces', `${kind}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.jsonl`))
   // JSONL stays FIRST in every fanout: it is the forensic record, and neither a viewer being down nor a
   // storage adapter throwing may cost us it.
   const tracers: Tracer[] = [jsonl]
+  if (extra) {
+    extraTracers.set(`${dir}:${kind}`, extra as { setSession?: (id: string | undefined) => void })
+    // A tracer born mid-submit (the planner's, created after setTraceSession has already run) must adopt
+    // the chat in flight, or its spans land outside the conversation they belong to.
+    ;(extra as { setSession?: (id: string | undefined) => void }).setSession?.(traceSessions.get(dir))
+  }
   const endpoint = process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
   if (!endpoint) return extra ? fanout(jsonl, extra) : jsonl
   const key = `${dir}:${kind}`

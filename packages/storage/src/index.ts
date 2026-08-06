@@ -117,13 +117,50 @@ export interface TraceSummary {
   running?: boolean
   projectId?: string
   model?: string
+  /** The conversation this turn came from, so a trace can be opened back in its chat. */
+  chatId?: string
+}
+
+/** What the trace list can be narrowed by. `before` is the pagination cursor (a startedAt): pass the
+ *  oldest row you already hold to fetch the next page. */
+export interface TraceQuery {
+  projectId?: string
+  model?: string
+  /** 'error' is the one that matters — "show me the turns that went wrong" is the first question asked. */
+  status?: 'ok' | 'error'
+  /** Free text over the trace name and the user's prompt (the root span's input). */
+  q?: string
+  limit?: number
+  /** Keyset cursor: the startedAt of the oldest row already held. */
+  before?: number
+  /** Tie-breaker for `before`. Turns can share a millisecond (fast successive submits, a backfill replay
+   *  of recorded timestamps), and a plain `started_at < cursor` silently DROPS every row that ties with
+   *  the boundary. Measured: 150 traces paged out as 136. Pass the oldest row's traceId with `before`. */
+  beforeId?: string
+}
+
+/** A cross-trace span query. This is the difference between a trace VIEWER and something that answers
+ *  questions: "every failed Bash", "every turn where compaction fired", "every call that mentions
+ *  RecipeGrid" — none of which can be asked one trace at a time. */
+export interface SpanQuery {
+  projectId?: string
+  /** 'LLM' | 'TOOL' | 'CHAIN' | 'AGENT'. */
+  kind?: string
+  status?: 'ok' | 'error'
+  /** Free text over the span name and its input/output attributes. */
+  q?: string
+  limit?: number
 }
 
 export interface TraceStore {
   /** Buffered by the adapter — see ChatStore.append. The agent loop never awaits telemetry. */
   record(span: SpanRecord): void
-  listTraces(opts?: { projectId?: string; limit?: number; before?: number }): Promise<TraceSummary[]>
+  listTraces(opts?: TraceQuery): Promise<TraceSummary[]>
   spans(traceId: string): Promise<SpanRecord[]>
+  /** Spans across ALL traces, newest first. See SpanQuery for why this exists. */
+  searchSpans(opts?: SpanQuery): Promise<SpanRecord[]>
+  /** The distinct models seen, newest-used first — so a model filter offers real choices, not a free-text box. */
+  models(): Promise<string[]>
   /** Retention: a desktop install must not grow without bound. */
   prune(olderThanMs: number): Promise<number>
   flush(): Promise<void>

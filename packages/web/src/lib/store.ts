@@ -13,6 +13,12 @@ import type { ChatMeta, EnabledModelInfo, FileNode, McpServerInfo, ModelLimits, 
 // ADR-068: events that mutate the active-chat transcript/streaming. Gated to the viewed project so a
 // background turn (another project) can't bleed into this one. Everything else (projects, files, preview,
 // turnActivity, chatHistory, …) is view-agnostic and always applied.
+/** Observatory page size. The client owns it (not the server's default) because the client is what
+ *  decides whether more rows exist: a reply shorter than the limit it asked for is the last one. */
+const TRACE_PAGE = 50
+/** Ceiling on the poll's refresh window, so paging deep doesn't turn a 3s poll into a full table scan. */
+const TRACE_MAX = 500
+
 const TURN_EVENTS = new Set(['step', 'status', 'recovering', 'thinking_delta', 'text_delta', 'toolStart', 'toolProgress', 'toolResult', 'message', 'memory', 'question', 'compacted', 'context', 'turnDone', 'error'])
 
 // Label for the `compacted` event's layer kind (ADR-039). Mirrors core's compactionKindLabel; inlined so the
@@ -52,9 +58,15 @@ interface UiState {
   // and a poll can refresh a LIVE trace's waterfall in place.
   traces: TraceSummaryInfo[]
   tracesLoaded: boolean // distinguishes "none yet" from "not asked" — an empty table must not read as data loss
+  tracesExhausted: boolean // the last page came back short ⇒ nothing older to load
+  traceFilter: { projectId?: string; model?: string; status?: 'error'; q?: string }
+  traceModels: string[] // the models actually present, for the filter's options
   openTraceId: string | null
   traceSpans: Record<string, SpanInfo[]>
   selectedSpanId: string | null
+  /** Cross-trace span search: null ⇒ not searching (the trace list is shown instead). */
+  spanSearch: { q: string; kind?: string; status?: 'error' } | null
+  spanResults: SpanInfo[] | null
   // transcript (per active project; cleared on open)
   items: Item[]
   streaming: Streaming | null
@@ -146,10 +158,13 @@ interface UiState {
   renameChat: (id: string, title: string) => void // M11
   requestAllChats: () => void // the Chats page: ask for every project's chat list
   // ADR-081 Observatory
-  requestTraces: (projectId?: string) => void
+  requestTraces: () => void // (re)load the FIRST page under the current filter
+  setTraceFilter: (patch: Partial<UiState['traceFilter']>) => void
+  loadMoreTraces: () => void
   openTrace: (traceId: string) => void // fetch + show one trace's waterfall
   closeTrace: () => void
   selectSpan: (spanId: string | null) => void
+  searchSpans: (patch: { q?: string; kind?: string; status?: 'error' } | null) => void
   openChat: (projectId: string, chatId: string) => void // the Chats page: open a project AND switch to a chat
   createProject: (name: string, templateId?: string) => void
   openProject: (id: string) => void
@@ -271,11 +286,25 @@ export const useStore = create<UiState>((set, get) => {
   const resolveParam = (param: string, projects: ProjectInfo[]) =>
     projects.find((p) => projectParam(p) === param) ?? projects.find((p) => param.endsWith(`-${shortId(p.id)}`) || param === shortId(p.id))
   const pathForPage = (page: Page) => (page === 'home' ? '/' : `/${page}`)
+  // The limit the LAST trace request asked for. Kept in the closure rather than in state: it is a detail
+  // of the in-flight request, not something the UI renders, and putting it in state would re-render on
+  // every poll for no visible reason.
+  let lastLimit = TRACE_PAGE
   const pushUrl = (path: string) => {
     if (typeof location !== 'undefined' && location.pathname !== path) history.pushState({}, '', path)
   }
   // Parse the address bar and reflect it into the store WITHOUT pushing history (used on load + popstate).
   const applyPath = (path: string) => {
+    // /observatory/<traceId> — a trace is a shareable, bookmarkable thing, and without this Back from an
+    // open trace left the Observatory entirely instead of returning to the list.
+    const t = path.match(/^\/observatory\/([^/]+)/)
+    if (t) {
+      const traceId = decodeURIComponent(t[1])
+      set({ page: 'observatory', pendingSlug: null, slugNotFound: null, openTraceId: traceId, selectedSpanId: null })
+      // Fetch directly rather than via openTrace(): that would push the URL we are currently REACTING to.
+      get().send({ type: 'trace', action: 'spans', traceId })
+      return
+    }
     const m = path.match(/^\/project\/([^/]+)/)
     if (m) {
       const param = decodeURIComponent(m[1])
@@ -293,7 +322,9 @@ export const useStore = create<UiState>((set, get) => {
       return
     }
     const page: Page = path === '/projects' ? 'projects' : path === '/chats' ? 'chats' : path === '/settings' ? 'settings' : path === '/mcp' ? 'mcp' : path === '/observatory' ? 'observatory' : 'home'
-    set({ page, pendingSlug: null, slugNotFound: null })
+    // openTraceId is cleared here on purpose: navigating to bare /observatory (or anywhere else) must not
+    // leave a stale trace open — that is precisely the Back-button case this block handles.
+    set({ page, pendingSlug: null, slugNotFound: null, openTraceId: null, selectedSpanId: null })
   }
 
   return {
@@ -314,9 +345,14 @@ export const useStore = create<UiState>((set, get) => {
     allChats: [],
     traces: [],
     tracesLoaded: false,
+    tracesExhausted: false,
+    traceFilter: {},
+    traceModels: [],
     openTraceId: null,
     traceSpans: {},
     selectedSpanId: null,
+    spanSearch: null,
+    spanResults: null,
     items: [],
     streaming: null,
     status: null,
@@ -516,7 +552,27 @@ export const useStore = create<UiState>((set, get) => {
           set({ allChats: e.groups })
           break
         case 'traces': // ADR-081: the Observatory's list (polled while the page is open)
-          set({ traces: e.traces, tracesLoaded: true })
+          set((s) => ({
+            // A PAGE appends; a fresh list (including every poll) replaces. Dedupe on append anyway: a
+            // trace that grew past the cursor between the two requests would otherwise arrive twice.
+            traces: e.append ? [...s.traces, ...e.traces.filter((t) => !s.traces.some((x) => x.traceId === t.traceId))] : e.traces,
+            tracesLoaded: true,
+            // A short page means there is nothing older left. Only a PAGE can decide this — a filtered
+            // first page is often short and says nothing about what lies beyond the cursor.
+            // A SHORT reply means there is nothing older left — measured against the limit WE ASKED FOR,
+            // since the poll asks for everything loaded and a fixed comparison would mark a healthy
+            // 150-row refresh as exhausted.
+            //
+            // MONOTONIC once true, cleared only by a filter change (see setTraceFilter). Exhaustion is a
+            // fact about what lies past the cursor, and a poll refreshing the loaded window says nothing
+            // about that — letting it reset the flag left "Load older" on screen forever, still there
+            // after a click that returned nothing.
+            tracesExhausted: s.tracesExhausted || e.traces.length < lastLimit,
+            traceModels: e.models ?? s.traceModels,
+          }))
+          break
+        case 'spanResults':
+          set({ spanResults: e.spans })
           break
         case 'traceSpans':
           // Keyed by trace, not stored as "the open one": a poll for a LIVE trace refreshes its waterfall
@@ -716,14 +772,48 @@ export const useStore = create<UiState>((set, get) => {
     requestAllChats: () => get().send({ type: 'chats', action: 'listAll' }),
 
     // ── ADR-081 Observatory ────────────────────────────────────────────────────────────────────────────
-    requestTraces: (projectId) => get().send({ type: 'traces', action: 'list', projectId }),
+    // The FIRST page under the current filter. Also what the 3s poll calls, which is why the reply
+    // REPLACES rather than appends: a poll must not duplicate rows the previous poll already delivered.
+    requestTraces: () => {
+      // Refresh EVERYTHING already loaded, not just the first page. The 3s poll calls this, and with a
+      // fixed page size it silently threw away every row the user had paged in — click "load older", wait
+      // three seconds, watch them vanish. Capped so a long session can't grow the query without bound.
+      lastLimit = Math.min(Math.max(TRACE_PAGE, get().traces.length), TRACE_MAX)
+      get().send({ type: 'traces', action: 'list', ...get().traceFilter, limit: lastLimit })
+    },
+    setTraceFilter: (patch) => {
+      // Filters reset the cursor: keeping paged-in rows from the previous filter would mix result sets.
+      set((s) => ({ traceFilter: { ...s.traceFilter, ...patch }, traces: [], tracesLoaded: false, tracesExhausted: false }))
+      get().requestTraces()
+    },
+    loadMoreTraces: () => {
+      const { traces, tracesExhausted, traceFilter } = get()
+      if (tracesExhausted || !traces.length) return
+      // The cursor is the OLDEST row we hold — offset-based paging would skip or repeat rows as new
+      // traces land at the top, which they do constantly while a build runs.
+      lastLimit = TRACE_PAGE
+      get().send({ type: 'traces', action: 'list', ...traceFilter, limit: TRACE_PAGE, before: traces[traces.length - 1].startedAt, beforeId: traces[traces.length - 1].traceId })
+    },
+    searchSpans: (patch) => {
+      if (!patch) {
+        set({ spanSearch: null, spanResults: null })
+        return
+      }
+      const next = { ...(get().spanSearch ?? { q: '' }), ...patch }
+      set({ spanSearch: next, spanResults: null })
+      get().send({ type: 'spans', action: 'search', q: next.q, kind: next.kind, status: next.status, projectId: get().traceFilter.projectId })
+    },
     openTrace: (traceId) => {
       // Show the trace IMMEDIATELY from cache if we have it, and refetch regardless: a trace whose turn is
       // still running grows, so the cached copy is a head start, never the final answer.
       set({ openTraceId: traceId, selectedSpanId: null })
       get().send({ type: 'trace', action: 'spans', traceId })
+      pushUrl(`/observatory/${encodeURIComponent(traceId)}`) // shareable, bookmarkable, Back-able
     },
-    closeTrace: () => set({ openTraceId: null, selectedSpanId: null }),
+    closeTrace: () => {
+      set({ openTraceId: null, selectedSpanId: null })
+      pushUrl('/observatory')
+    },
     selectSpan: (selectedSpanId) => set({ selectedSpanId }),
     openChat: (projectId, chatId) => {
       // Open the project first, then switch to the chat — same socket, ordered, so the server processes

@@ -153,6 +153,15 @@ the socket to render a page nobody may have open. The client polls (3s) *only wh
 flushed. Two commands (`traces`/`trace`) and two events; the server filters out traces whose project was
 deleted, because a row you cannot open is worse than no row.
 
+**Beyond a viewer (2026-08-07).** A per-trace view answers "what happened in this turn" and structurally
+cannot answer "is this the third time Bash failed this way". So `TraceStore` gained `searchSpans` (a
+cross-trace span query) and `listTraces` gained filters — errors-only, project, model, and free text over
+the user's own prompt. Trace filtering happens in `HAVING`, not `WHERE`: a trace is an aggregate, and
+filtering its rows corrupts its own span count and duration. Paging uses a keyset cursor
+`(startedAt, traceId)` — the tie-break is load-bearing, since turns share a millisecond routinely
+(measured: 150 traces paged out as 136 without it). A trace is deep-linkable at `/observatory/<id>` and
+carries its `chatId`, so the Observatory is not a dead end.
+
 **Running is not a status.** A trace carries `status` (ok/error) *and* `running` separately: a turn can be
 in flight and already carrying a failed tool call, and collapsing the two hides one or the other. A
 running trace reports **no** `durationMs` — the closed spans' extent reads as a suspiciously fast turn.

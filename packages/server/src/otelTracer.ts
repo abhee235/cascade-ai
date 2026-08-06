@@ -155,6 +155,9 @@ export class OtelTracer implements Tracer {
 	 *  chats without rebuilding the session). */
 	setSession(id: string | undefined): void {
 		this.session = id || undefined
+		// The fold stamps `cascade.chat_id` too, so the same fact is available under both vocabularies —
+		// `session.id` is what Phoenix's Sessions view reads, `cascade.chat_id` is what our own store filters.
+		this.fold.setSession(id)
 	}
 
 	/** The session id goes on EACH span, not just the root: the root is the last thing to end, so during a

@@ -70,6 +70,24 @@ describe('spanFold — structure', () => {
     expect(by['tool Read']).toBe(50)
   })
 
+  it('mints ids that do not collide across tracer instances', () => {
+    // Measured in the running app: 150 seeded turns landed as 147 rows. The id was a per-process counter
+    // plus the last four base-36 digits of Date.now() — the counter restarts each launch and four digits
+    // only carry ~28 minutes of clock, so two runs close together minted identical ids. The store upserts
+    // by span id, so the collisions silently OVERWROTE unrelated spans, with no error anywhere.
+    const ids = new Set<string>()
+    for (let i = 0; i < 50; i++) {
+      const t = createSpanTracer((s) => {
+        ids.add(s.spanId)
+        ids.add(s.traceId)
+      })
+      t.event({ t: 'submit', text: 'x' } as never)
+      t.event({ t: 'tool_call', id: 'a', name: 'Read' } as never)
+      t.event({ t: 'turn_done', turns: 1 } as never)
+    }
+    expect(ids.size).toBe(50 * 3) // 50 traces × (trace id + root span + tool span)
+  })
+
   it('gives every submit its OWN trace — a trace is a turn, not a session', () => {
     const all: TraceSpan[] = []
     const tracer = createSpanTracer((s) => all.push(s), { projectId: 'p1' }) // unpinned: the product path
@@ -141,6 +159,31 @@ describe('spanFold — the observables diagnosis depends on', () => {
     c.emit({ t: 'submit', text: 'x' })
     c.emit({ t: 'tool_call', id: 'a', name: 'Edit', input: {}, repaired: true })
     expect(c.byKind('TOOL')[0].attributes?.argsRepaired).toBe(true)
+  })
+
+  it('stamps the chat on EVERY span, not just the root', () => {
+    // The root closes last, so a chat id set only there would leave a live turn unattributed for exactly
+    // as long as it is still interesting — and the Observatory could not offer "open chat" until it ended.
+    const c = collect()
+    c.tracer.setSession('chat-abc')
+    c.emit({ t: 'submit', text: 'x' })
+    c.emit({ t: 'tool_call', id: 'a', name: 'Read' })
+    expect(c.latest().every((s) => s.attributes?.['cascade.chat_id'] === 'chat-abc')).toBe(true)
+  })
+
+  it('a chat switch re-attributes FOLLOWING turns, and clearing stops stamping', () => {
+    // loadChat switches the active chat without rebuilding the session, so the tracer outlives the chat.
+    const c = collect()
+    c.tracer.setSession('chat-one')
+    c.emit({ t: 'submit', text: 'a' })
+    c.emit({ t: 'turn_done', turns: 1 })
+    c.tracer.setSession('chat-two')
+    c.emit({ t: 'submit', text: 'b' })
+    c.emit({ t: 'turn_done', turns: 1 })
+    c.tracer.setSession(undefined)
+    c.emit({ t: 'submit', text: 'c' })
+    c.emit({ t: 'turn_done', turns: 1 })
+    expect(c.byKind('AGENT').map((s) => s.attributes?.['cascade.chat_id'])).toEqual(['chat-one', 'chat-two', undefined])
   })
 
   it('KEEPS the submit text on the root after the turn closes', () => {

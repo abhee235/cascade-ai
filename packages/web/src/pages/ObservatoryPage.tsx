@@ -9,16 +9,18 @@
 // socket to render a page nobody may have open. The poll below runs ONLY while this page is mounted,
 // which also makes a running turn watchable — spans are readable as soon as they are flushed.
 
-import { useEffect, useMemo } from 'react'
-import { ArrowLeft, Radar, RefreshCw } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { ArrowLeft, MessagesSquare, Radar, RefreshCw, Search, X } from 'lucide-react'
 import type { SpanInfo, TraceSummaryInfo } from '@cascade/app-protocol'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { SpanKindIcon, StatusDot } from '@/components/observatory/SpanKind'
+import { Input } from '@/components/ui/input'
+import { SpanKindIcon, SpanKindToken, StatusDot } from '@/components/observatory/SpanKind'
 import { SpanDetail } from '@/components/observatory/SpanDetail'
 import { TraceTree } from '@/components/observatory/TraceTree'
-import { formatDuration, formatTimeAgo, formatTokens } from '@/components/observatory/constants'
+import { durationOf, formatDuration, formatTimeAgo, formatTokens, isRunning } from '@/components/observatory/constants'
+import { traceWindow } from '@/components/observatory/tree'
 
 const POLL_MS = 3000
 
@@ -61,6 +63,155 @@ function StatsBar({ traces }: { traces: TraceSummaryInfo[] }) {
   )
 }
 
+/** A pill that reads as a toggle. Used for every filter so "what is narrowing this list" is one glance. */
+function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'shrink-0 rounded-full border px-2.5 py-1 text-xs transition-colors',
+        active ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground',
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+/**
+ * The filter bar. Every control here answers a question the trace list alone cannot:
+ * "which turns failed", "what was this project doing", "how did the model I just switched to behave".
+ * The free-text box is deliberately dual-purpose — it searches TRACES by prompt, and one click turns the
+ * same text into a cross-trace SPAN search, because those are the same hunt from the user's side.
+ */
+function FilterBar({ projects }: { projects: { id: string; name: string }[] }) {
+  const { traceFilter, traceModels, setTraceFilter, spanSearch, searchSpans } = useStore()
+  const [text, setText] = useState(traceFilter.q ?? '')
+
+  const submit = () => setTraceFilter({ q: text.trim() || undefined })
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b px-6 py-3">
+      <div className="relative min-w-[16rem] flex-1">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit()
+            if (e.key === 'Escape') {
+              setText('')
+              setTraceFilter({ q: undefined })
+              searchSpans(null)
+            }
+          }}
+          onBlur={submit}
+          placeholder="Search prompts…"
+          className="h-8 pl-8 text-sm"
+        />
+      </div>
+
+      <Chip active={!!spanSearch} onClick={() => (spanSearch ? searchSpans(null) : searchSpans({ q: text.trim() }))}>
+        {spanSearch ? 'Searching spans' : 'Search spans instead'}
+      </Chip>
+
+      <span className="mx-1 h-4 w-px bg-border" />
+
+      <Chip active={traceFilter.status === 'error'} onClick={() => setTraceFilter({ status: traceFilter.status === 'error' ? undefined : 'error' })}>
+        Errors only
+      </Chip>
+
+      {projects.length > 1 && (
+        <select
+          value={traceFilter.projectId ?? ''}
+          onChange={(e) => setTraceFilter({ projectId: e.target.value || undefined })}
+          className="h-8 shrink-0 rounded-md border bg-background px-2 text-xs text-muted-foreground"
+        >
+          <option value="">All projects</option>
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      )}
+
+      {traceModels.length > 1 && (
+        <select
+          value={traceFilter.model ?? ''}
+          onChange={(e) => setTraceFilter({ model: e.target.value || undefined })}
+          className="h-8 shrink-0 rounded-md border bg-background px-2 font-mono text-xs text-muted-foreground"
+        >
+          <option value="">All models</option>
+          {traceModels.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Cross-trace span results — the view that makes this more than a viewer. "Is this the third time Bash
+ * failed this way?" cannot be asked one trace at a time, and it is the question you actually have after
+ * watching a build go wrong twice.
+ */
+function SpanResults({ spans, names, onOpen }: { spans: SpanInfo[] | null; names: Map<string, string>; onOpen: (traceId: string, spanId: string) => void }) {
+  const { spanSearch, searchSpans } = useStore()
+  const KINDS = ['LLM', 'TOOL', 'CHAIN']
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex flex-wrap items-center gap-2 border-b px-6 py-2">
+        <span className="text-xs text-muted-foreground">{spans ? `${spans.length} span${spans.length === 1 ? '' : 's'}` : 'Searching…'}</span>
+        <span className="mx-1 h-4 w-px bg-border" />
+        {KINDS.map((k) => (
+          <Chip key={k} active={spanSearch?.kind === k} onClick={() => searchSpans({ kind: spanSearch?.kind === k ? undefined : k })}>
+            {k.toLowerCase()}
+          </Chip>
+        ))}
+        <Chip active={spanSearch?.status === 'error'} onClick={() => searchSpans({ status: spanSearch?.status === 'error' ? undefined : 'error' })}>
+          Failed only
+        </Chip>
+      </div>
+
+      {spans && !spans.length ? (
+        <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+          No spans match. Try a tool name (<span className="font-mono">Bash</span>), a file path, or an error message.
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-auto px-3 pb-6">
+          {(spans ?? []).map((s) => (
+            <button
+              key={s.spanId}
+              type="button"
+              onClick={() => onOpen(s.traceId, s.spanId)}
+              className="grid w-full grid-cols-[auto_auto_minmax(0,1fr)_auto_auto] items-center gap-x-3 rounded-md px-3 py-2 text-left transition-colors hover:bg-accent"
+            >
+              <StatusDot status={s.status} running={isRunning(s)} />
+              <SpanKindToken kind={s.kind} />
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-medium">{s.name}</span>
+                {/* The matched context, not just the name — otherwise 40 rows called "tool Bash" are
+                    indistinguishable and you have to open every one. */}
+                <span className="block truncate font-mono text-[11px] text-muted-foreground">
+                  {String(s.attributes?.output ?? s.attributes?.input ?? '').slice(0, 160) || (s.attributes?.['cascade.project_id'] ? (names.get(String(s.attributes['cascade.project_id'])) ?? '') : '')}
+                </span>
+              </span>
+              <span className="justify-self-end font-mono text-xs text-muted-foreground">{isRunning(s) ? '…' : formatDuration(durationOf(s))}</span>
+              <span className="justify-self-end text-xs text-muted-foreground">{formatTimeAgo(s.startedAt)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function TraceList({ traces, loaded, names, onOpen }: { traces: TraceSummaryInfo[]; loaded: boolean; names: Map<string, string>; onOpen: (id: string) => void }) {
   if (!loaded)
     return (
@@ -71,14 +222,38 @@ function TraceList({ traces, loaded, names, onOpen }: { traces: TraceSummaryInfo
       </div>
     )
 
-  if (!traces.length)
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-        <Radar className="h-8 w-8 text-muted-foreground/40" />
-        <p className="text-sm text-muted-foreground">No traces yet.</p>
-        <p className="max-w-sm text-xs text-muted-foreground/70">Every message you send a project is recorded here — the model calls it made, the tools it ran, and how long each took.</p>
-      </div>
-    )
+  if (!traces.length) return <EmptyList />
+
+  return <TraceRows traces={traces} names={names} onOpen={onOpen} />
+}
+
+/** "Nothing recorded" and "nothing MATCHES" are different facts, and telling a user the first when the
+ *  second is true reads as data loss. The filter state decides which one this is. */
+function EmptyList() {
+  const { traceFilter, setTraceFilter } = useStore()
+  const filtered = Boolean(traceFilter.q || traceFilter.status || traceFilter.projectId || traceFilter.model)
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+      <Radar className="h-8 w-8 text-muted-foreground/40" />
+      {filtered ? (
+        <>
+          <p className="text-sm text-muted-foreground">No turns match these filters.</p>
+          <Button variant="ghost" size="sm" className="mt-1" onClick={() => setTraceFilter({ q: undefined, status: undefined, projectId: undefined, model: undefined })}>
+            <X className="mr-1 h-3.5 w-3.5" /> Clear filters
+          </Button>
+        </>
+      ) : (
+        <>
+          <p className="text-sm text-muted-foreground">No traces yet.</p>
+          <p className="max-w-sm text-xs text-muted-foreground/70">Every message you send a project is recorded here — the model calls it made, the tools it ran, and how long each took.</p>
+        </>
+      )}
+    </div>
+  )
+}
+
+function TraceRows({ traces, names, onOpen }: { traces: TraceSummaryInfo[]; names: Map<string, string>; onOpen: (id: string) => void }) {
+  const { tracesExhausted, loadMoreTraces } = useStore()
 
   return (
     <div className="min-h-0 flex-1 overflow-auto px-3 pb-6">
@@ -112,13 +287,46 @@ function TraceList({ traces, loaded, names, onOpen }: { traces: TraceSummaryInfo
           <span className="justify-self-end text-xs text-muted-foreground">{formatTimeAgo(t.startedAt)}</span>
         </button>
       ))}
+      {/* Explicit, not infinite-scroll: the list polls every 3s, and a scroll-triggered fetch racing a
+          poll is how duplicate and skipped rows happen. One button, one page. */}
+      {!tracesExhausted && (
+        <div className="px-3 pt-3">
+          <Button variant="outline" size="sm" className="w-full" onClick={loadMoreTraces}>
+            Load older turns
+          </Button>
+        </div>
+      )}
     </div>
   )
+}
+
+/**
+ * Rebuild the headline from the SPANS when the summary row isn't loaded — which is the normal case for a
+ * shared/bookmarked `/observatory/<id>` URL, and for a jump out of span search (where the trace list was
+ * never fetched). Without it the header read "Trace · duration —" with no name and no chat link, i.e. the
+ * deep link worked and then landed you somewhere anonymous.
+ */
+function summaryFromSpans(traceId: string, spans: SpanInfo[]): TraceSummaryInfo {
+  const root = spans.find((s) => !s.parentSpanId) ?? spans[0]
+  const { ms } = traceWindow(spans)
+  return {
+    traceId,
+    name: root?.name ?? 'Trace',
+    startedAt: root?.startedAt ?? 0,
+    durationMs: spans.some(isRunning) ? undefined : ms,
+    spanCount: spans.length,
+    status: spans.some((s) => s.status === 'error') ? 'error' : 'ok',
+    running: spans.some(isRunning),
+    projectId: root?.attributes?.['cascade.project_id'] as string | undefined,
+    model: root?.attributes?.['cascade.model'] as string | undefined,
+    chatId: root?.attributes?.['cascade.chat_id'] as string | undefined,
+  }
 }
 
 function TraceDetail({ trace, spans, onBack }: { trace: TraceSummaryInfo | undefined; spans: SpanInfo[] | undefined; onBack: () => void }) {
   const selectedSpanId = useStore((s) => s.selectedSpanId)
   const selectSpan = useStore((s) => s.selectSpan)
+  const openChat = useStore((s) => s.openChat)
 
   // Land on the root span rather than an empty panel — for most turns the root IS the summary you want.
   useEffect(() => {
@@ -139,6 +347,13 @@ function TraceDetail({ trace, spans, onBack }: { trace: TraceSummaryInfo | undef
           <StatItem label="Spans" value={String(spans?.length ?? trace?.spanCount ?? 0)} />
           <StatItem label="Duration" value={trace?.running ? 'running…' : formatDuration(trace?.durationMs)} />
           <StatItem label="Output" value={formatTokens(tokens)} />
+          {/* A trace is a TURN, and a turn came from a conversation. Without this the Observatory is a
+              dead end: you diagnose the failure and then have to hunt for the chat by hand. */}
+          {trace?.projectId && trace.chatId && (
+            <Button variant="outline" size="sm" className="h-7" onClick={() => openChat(trace.projectId!, trace.chatId!)}>
+              <MessagesSquare className="mr-1.5 h-3.5 w-3.5" /> Open chat
+            </Button>
+          )}
         </div>
       </div>
 
@@ -171,13 +386,17 @@ function TraceDetail({ trace, spans, onBack }: { trace: TraceSummaryInfo | undef
 }
 
 export function ObservatoryPage() {
-  const { traces, tracesLoaded, openTraceId, traceSpans, projects, requestTraces, openTrace, closeTrace } = useStore()
+  const { traces, tracesLoaded, openTraceId, traceSpans, projects, spanSearch, spanResults, requestTraces, openTrace, closeTrace, selectSpan } = useStore()
 
   // Poll while mounted. Re-requesting the OPEN trace too keeps a live turn's waterfall growing on screen;
   // both requests are cheap reads against a local DB, and the interval dies with the page.
+  //
+  // The poll is SUSPENDED while a span search is showing: a search is a considered question with a stable
+  // answer, and having its results reshuffle under the cursor every 3s makes it unusable.
   useEffect(() => {
     requestTraces()
     const t = setInterval(() => {
+      if (useStore.getState().spanSearch) return
       requestTraces()
       const id = useStore.getState().openTraceId
       if (id) useStore.getState().send({ type: 'trace', action: 'spans', traceId: id })
@@ -188,7 +407,12 @@ export function ObservatoryPage() {
   const names = useMemo(() => new Map(projects.map((p) => [p.id, p.name])), [projects])
   const openTraceSummary = traces.find((t) => t.traceId === openTraceId)
 
-  if (openTraceId) return <TraceDetail trace={openTraceSummary} spans={traceSpans[openTraceId]} onBack={closeTrace} />
+  if (openTraceId) {
+    const loaded = traceSpans[openTraceId]
+    // Prefer the list row (it aggregates server-side), fall back to the spans we already hold.
+    const summary = openTraceSummary ?? (loaded?.length ? summaryFromSpans(openTraceId, loaded) : undefined)
+    return <TraceDetail trace={summary} spans={loaded} onBack={closeTrace} />
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -204,8 +428,24 @@ export function ObservatoryPage() {
           <RefreshCw className="h-4 w-4" />
         </Button>
       </div>
-      <StatsBar traces={traces} />
-      <TraceList traces={traces} loaded={tracesLoaded} names={names} onOpen={openTrace} />
+      <FilterBar projects={projects} />
+      {spanSearch ? (
+        <SpanResults
+          spans={spanResults}
+          names={names}
+          onOpen={(traceId, spanId) => {
+            // Jump from a search hit INTO its trace with that span selected — the result is a pointer to
+            // a moment, and landing on the trace root would make you hunt for it a second time.
+            openTrace(traceId)
+            selectSpan(spanId)
+          }}
+        />
+      ) : (
+        <>
+          <StatsBar traces={traces} />
+          <TraceList traces={traces} loaded={tracesLoaded} names={names} onOpen={openTrace} />
+        </>
+      )}
     </div>
   )
 }

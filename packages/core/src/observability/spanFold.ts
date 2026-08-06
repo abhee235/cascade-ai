@@ -71,8 +71,15 @@ const MARK_LABELS: Record<string, (e: Record<string, unknown>) => string> = {
 const CAP = 4_000 // attribute payload cap — viewers truncate anyway; keep spans light
 const cut = (s: unknown): string => String(s ?? '').slice(0, CAP)
 
+// Span/trace ids must be unique ACROSS PROCESSES, not just within one. The first version was
+// `counter + last-4-of-Date.now()`, which restarts the counter on every launch and only carries ~28
+// minutes of clock in those four base-36 digits — so two runs close together mint the SAME ids. The store
+// upserts by span id, so a colliding span silently OVERWRITES an unrelated older one: measured, 150
+// seeded turns landed as 147 rows, and the three that vanished did so with no error anywhere.
+// A per-process random prefix plus a monotonic counter removes the clock from the equation entirely.
+const RUN = Math.random().toString(36).slice(2, 8)
 let counter = 0
-const newId = (p: string) => `${p}${(++counter).toString(36)}${Date.now().toString(36).slice(-4)}`
+const newId = (p: string) => `${p}${RUN}${(++counter).toString(36)}`
 
 export interface SpanFoldOptions {
   /** PIN the trace id (tests, replay/backfill). Omit in the product: every submit mints its own, because
@@ -93,6 +100,11 @@ export interface SpanFoldOptions {
 export type SpanSink = (span: TraceSpan) => void
 
 export interface SpanTracer extends Tracer {
+  /** Bind following turns to a CHAT. Every submit is its own trace by design, so without this a build and
+   *  its follow-ups arrive as unrelated traces with nothing tying them to the conversation they came from
+   *  — and "show me what this chat actually did" is unanswerable. Set per submit, because a session's
+   *  active chat can change under it (loadChat switches chats without rebuilding the session). */
+  setSession(chatId: string | undefined): void
   /** End everything still open because the PROCESS is going down. A hard exit never runs the loop's
    *  `finally`, so `turn_done` never fires — and an open span otherwise reads as RUNNING FOREVER in the
    *  Observatory (and is never exported at all over OTLP). This turns "gone" into "interrupted", which
@@ -109,7 +121,11 @@ export function createSpanTracer(emit: SpanSink, opts: SpanFoldOptions = {}): Sp
   const now = opts.now ?? (() => Date.now())
   let traceId = opts.traceId ?? newId('t')
   const rootName = opts.rootName ?? 'agent'
-  const base = { 'cascade.project_id': opts.projectId, 'cascade.model': opts.model } as Record<string, unknown>
+  let chatId: string | undefined
+  // Read at WRITE time, not captured: the chat can change mid-session, and the id must land on every span
+  // rather than only the root — the root is the last thing to close, so a live turn would be unattributed
+  // for exactly as long as it is still interesting.
+  const base = () => ({ 'cascade.project_id': opts.projectId, 'cascade.model': opts.model, 'cascade.chat_id': chatId }) as Record<string, unknown>
 
   let rootId: string | undefined
   let rootStart = 0
@@ -125,7 +141,7 @@ export function createSpanTracer(emit: SpanSink, opts: SpanFoldOptions = {}): Sp
   const pendingPermission = new Map<string, Record<string, unknown>>()
   let window: number | undefined
 
-  const write = (s: Omit<TraceSpan, 'traceId'>) => emit({ traceId, ...s, attributes: { ...base, ...s.attributes } })
+  const write = (s: Omit<TraceSpan, 'traceId'>) => emit({ traceId, ...s, attributes: { ...base(), ...s.attributes } })
 
   const closeOpen = (at: number, reason?: string) => {
     for (const [, t] of tools) {
@@ -144,6 +160,10 @@ export function createSpanTracer(emit: SpanSink, opts: SpanFoldOptions = {}): Sp
   }
 
   return {
+    setSession(id: string | undefined): void {
+      chatId = id || undefined
+    },
+
     endOpenSpans(reason: string): void {
       closeOpen(now(), reason)
     },

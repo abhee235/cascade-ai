@@ -39,15 +39,25 @@ class MockWs extends EventEmitter {
   }
 }
 
-/** An in-memory TraceStore — the port, not the SQLite adapter. The server must not care which it got. */
-function memoryStore(traces: TraceSummary[], spans: SpanRecord[] = []): TraceStore {
+/** An in-memory TraceStore — the port, not the SQLite adapter. The server must not care which it got.
+ *  `seen` records the options it was called with, so the tests can assert the SERVER forwards filters
+ *  rather than re-implementing filtering here (which would test the fake, not the server). */
+function memoryStore(traces: TraceSummary[], spans: SpanRecord[] = [], seen: Record<string, unknown> = {}): TraceStore {
   return {
     record() {},
     async listTraces(opts) {
+      seen.list = opts
       return traces.filter((t) => !opts?.projectId || t.projectId === opts.projectId)
     },
     async spans(traceId) {
       return spans.filter((s) => s.traceId === traceId)
+    },
+    async searchSpans(opts) {
+      seen.search = opts
+      return spans
+    },
+    async models() {
+      return ['qwen', 'gpt-oss']
     },
     async prune() {
       return 0
@@ -122,6 +132,53 @@ describe('Observatory protocol (ADR-081)', () => {
     const got = last(ws, 'traceSpans')!
     expect(got.traceId).toBe('T1')
     expect((got.spans as { spanId: string }[]).map((s) => s.spanId)).toEqual(['s1', 's2']) // T2's span stayed out
+  })
+
+  it('forwards every filter to the store, and sends the model list only on the FIRST page', async () => {
+    // The filters are the store's job; the server's job is not to swallow them. And the model list is the
+    // filter's option set — re-sending it on every 3s poll is noise on a socket that is also carrying a build.
+    const ws = new MockWs()
+    const seen: Record<string, unknown> = {}
+    handleConnection(ws as never, manager(), undefined, undefined, undefined, undefined, undefined, undefined, memoryStore([summary({ traceId: 'T1' })], [], seen))
+
+    send(ws, { type: 'traces', action: 'list', model: 'qwen', status: 'error', q: 'favourites', limit: 25 })
+    await waitFor(() => !!last(ws, 'traces'))
+    expect(seen.list).toMatchObject({ model: 'qwen', status: 'error', q: 'favourites', limit: 25 })
+    expect(last(ws, 'traces')?.models).toEqual(['qwen', 'gpt-oss'])
+    expect(last(ws, 'traces')?.append).toBe(false)
+
+    ws.sent.length = 0
+    send(ws, { type: 'traces', action: 'list', before: 1000 })
+    await waitFor(() => !!last(ws, 'traces'))
+    expect(last(ws, 'traces')?.append).toBe(true) // a PAGE: the client concatenates
+    expect(last(ws, 'traces')?.models).toBeUndefined()
+  })
+
+  it('searches spans ACROSS traces, and still hides deleted projects', async () => {
+    const ws = new MockWs()
+    const mgr = manager()
+    const alive = mgr.create('Alive')
+    const spans: SpanRecord[] = [
+      { traceId: 'T1', spanId: 'live', name: 'tool Bash', kind: 'TOOL', startedAt: 1, status: 'error', attributes: { 'cascade.project_id': alive.id } },
+      { traceId: 'T2', spanId: 'ghost', name: 'tool Bash', kind: 'TOOL', startedAt: 2, status: 'error', attributes: { 'cascade.project_id': 'deleted' } },
+      { traceId: 'T3', spanId: 'orphan', name: 'tool Bash', kind: 'TOOL', startedAt: 3, status: 'error' },
+    ]
+    const seen: Record<string, unknown> = {}
+    handleConnection(ws as never, mgr, undefined, undefined, undefined, undefined, undefined, undefined, memoryStore([], spans, seen))
+
+    send(ws, { type: 'spans', action: 'search', q: 'Bash', kind: 'TOOL', status: 'error' })
+    await waitFor(() => !!last(ws, 'spanResults'))
+    expect(seen.search).toMatchObject({ q: 'Bash', kind: 'TOOL', status: 'error' })
+    // The ghost's project is gone; the orphan has none (an eval run) and is still worth reading.
+    expect((last(ws, 'spanResults')?.spans as { spanId: string }[]).map((s) => s.spanId)).toEqual(['live', 'orphan'])
+  })
+
+  it('with NO store a span search answers empty rather than failing', async () => {
+    const ws = new MockWs()
+    handleConnection(ws as never, manager())
+    send(ws, { type: 'spans', action: 'search', q: 'x' })
+    await waitFor(() => !!last(ws, 'spanResults'))
+    expect(last(ws, 'spanResults')?.spans).toEqual([])
   })
 
   it('with NO store the page gets an empty list, not a broken socket', async () => {

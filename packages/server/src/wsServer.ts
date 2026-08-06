@@ -679,16 +679,28 @@ export function handleConnection(
             send({ type: 'traces', traces: [] })
             break
           }
-          const list = await traces.listTraces({ projectId: msg.projectId, limit: msg.limit ?? 100 })
+          const list = await traces.listTraces({ projectId: msg.projectId, model: msg.model, status: msg.status, q: msg.q, before: msg.before, beforeId: msg.beforeId, limit: msg.limit ?? 100 })
           // Drop traces whose project no longer exists: a deleted project's spans linger until retention
           // prunes them, and a row you cannot open is worse than no row.
           const live = new Set(manager.list().map((p) => p.id))
-          send({ type: 'traces', traces: list.filter((t) => !t.projectId || live.has(t.projectId)) })
+          // The model list rides along with the FIRST page only: it is the filter's option list, it does
+          // not change between pages, and re-sending it on every 3s poll is pure noise on the wire.
+          send({ type: 'traces', traces: list.filter((t) => !t.projectId || live.has(t.projectId)), append: msg.before !== undefined, ...(msg.before === undefined ? { models: await traces.models() } : {}) })
           break
         }
         case 'trace': {
           if (!traces) break
           send({ type: 'traceSpans', traceId: msg.traceId, spans: await traces.spans(msg.traceId) })
+          break
+        }
+        case 'spans': {
+          if (!traces) {
+            send({ type: 'spanResults', spans: [] })
+            break
+          }
+          const hits = await traces.searchSpans({ projectId: msg.projectId, kind: msg.kind, status: msg.status, q: msg.q, limit: msg.limit ?? 200 })
+          const live = new Set(manager.list().map((p) => p.id))
+          send({ type: 'spanResults', spans: hits.filter((s) => !s.attributes?.['cascade.project_id'] || live.has(String(s.attributes['cascade.project_id']))) })
           break
         }
         case 'terminal': { // M7: open/close an interactive shell (one of possibly several sessions)
