@@ -14,6 +14,9 @@ import { join } from 'node:path'
 import { createTelemetryStorage } from '@cascade/storage-sqlite'
 import { createSpanTracer, type ModelProvider } from '@cascade/core'
 import { ProjectManager } from '../src/projectManager'
+import { handleConnection } from '../src/wsServer'
+import { ChatStore } from '../src/chatStore'
+import { EventEmitter } from 'node:events'
 
 /** Answers every turn with one line and no tool calls, so a submit completes without a backend. */
 const fakeProvider: ModelProvider = {
@@ -25,6 +28,24 @@ const fakeProvider: ModelProvider = {
     yield { type: 'text_delta', text: 'done' }
     yield { type: 'done', stopReason: 'end_turn' }
   },
+}
+
+/** The `ws` stand-in used by the wsServer tests — records everything sent. */
+class MockWs extends EventEmitter {
+  readonly OPEN = 1
+  readyState = 1
+  sent: Array<Record<string, unknown>> = []
+  send(data: string) {
+    this.sent.push(JSON.parse(data))
+  }
+}
+
+const waitFor = async (fn: () => boolean, timeout = 4000) => {
+  const t0 = Date.now()
+  while (!fn()) {
+    if (Date.now() - t0 > timeout) throw new Error('timeout')
+    await new Promise((r) => setTimeout(r, 5))
+  }
 }
 
 describe('ADR-081 telemetry wiring (product path)', () => {
@@ -67,6 +88,56 @@ describe('ADR-081 telemetry wiring (product path)', () => {
     // depended on. Its presence proves the fanout reached the store, not just that a root was written.
     const spans = await storage.traces.spans(traces[0].traceId)
     expect(spans.map((s) => s.kind)).toContain('LLM')
+
+    await storage.dispose()
+    await mgr.dispose()
+  })
+
+  it('a REAL submit over the socket lands its spans in a conversation', async () => {
+    // The last unproven link. `chatId` reaches a span only if the product's submit path calls
+    // setTraceSession, and every check so far called it by hand in a replay. If it does not fire, a real
+    // build produces spans with no chat — and the Observatory's Conversations view, which is the DEFAULT,
+    // would be empty while the turn list was full. Nothing else would look wrong.
+    //
+    // So this drives the actual socket: create → open → submit, through handleConnection, exactly as the
+    // web app does.
+    const storage = createTelemetryStorage({ file: join(mkdtempSync(join(tmpdir(), 'cascade-e2e-')), 'cascade.db') })
+    const mgr = new ProjectManager({
+      root: mkdtempSync(join(tmpdir(), 'cascade-pm-e2e-')),
+      model: 'fake',
+      // The plan stage runs too (a fresh project's first submit), on the SAME injected provider — so this
+      // covers the case the comment in tracerFor warns about: a tracer built mid-submit must adopt the
+      // chat already in flight, or the planner's spans land outside the conversation they belong to.
+      createProviderFn: () => fakeProvider,
+      sessionTracerFor: ({ projectId, kind, model }) => createSpanTracer((span) => storage.traces.record(span), { projectId, model, rootName: `agent (${kind})` }),
+    })
+    const ws = new MockWs()
+    handleConnection(ws as never, mgr, undefined, undefined, undefined, undefined, new ChatStore(), { sandbox: false, model: 'fake' }, storage.traces)
+
+    ws.emit('message', JSON.stringify({ type: 'project', action: 'create', name: 'Solar System' }))
+    await waitFor(() => ws.sent.some((e) => e.type === 'projects' && (e.projects as unknown[]).length === 1))
+    const id = ((ws.sent.filter((e) => e.type === 'projects').pop() as { projects: { id: string }[] }).projects[0]).id
+
+    ws.emit('message', JSON.stringify({ type: 'project', action: 'open', id }))
+    await waitFor(() => ws.sent.some((e) => e.type === 'projects' && e.activeId === id))
+
+    ws.emit('message', JSON.stringify({ type: 'submit', text: 'Build a 3D solar system' }))
+    await waitFor(() => ws.sent.some((e) => e.type === 'turnDone'), 8000)
+
+    // The turn is grouped: it appears as a CONVERSATION, not just as a loose trace.
+    const sessions = await storage.traces.listSessions()
+    expect(sessions).toHaveLength(1)
+    expect(sessions[0].chatId).toBeTruthy()
+    expect(sessions[0].projectId).toBe(id)
+    expect(sessions[0].firstPrompt).toBe('Build a 3D solar system')
+    // Planner turn + builder turn, grouped as ONE conversation — not two loose traces.
+    expect(sessions[0].turnCount).toBe(2)
+
+    // …and every span carries the chat, not only the root — a live turn must be attributable while it runs.
+    const [trace] = await storage.traces.listTraces()
+    const spans = await storage.traces.spans(trace.traceId)
+    expect(spans.length).toBeGreaterThan(1)
+    expect(spans.every((s) => s.attributes?.['cascade.chat_id'] === sessions[0].chatId)).toBe(true)
 
     await storage.dispose()
     await mgr.dispose()
