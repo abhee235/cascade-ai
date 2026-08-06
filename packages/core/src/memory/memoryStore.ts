@@ -149,7 +149,7 @@ export function forgetMemory(cwd: string, text: string): { ok: boolean; path: st
     const lines = readFileSync(project, 'utf8').split('\n')
     const idx = lines.findIndex((l) => l.includes(text))
     if (idx === -1) return { ok: false, path: project }
-    lines.splice(idx, 1)
+    lines.splice(idx, 1)  
     writeFileSync(project, lines.join('\n'), 'utf8')
     return { ok: true, path: project }
   } catch {

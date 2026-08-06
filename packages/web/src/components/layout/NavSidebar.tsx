@@ -1,7 +1,7 @@
 // NavSidebar.tsx — the persistent left rail, built on the shadcn Sidebar. New · Home · Projects ·
 // Chats · Settings, a Recent-projects list, and the user profile + connection + theme toggle at the bottom.
 
-import { Folder, FolderKanban, Home, MessagesSquare, Moon, Plug, Plus, Settings, Sparkles, Sun, X, type LucideIcon } from 'lucide-react'
+import { Folder, FolderKanban, Home, MessagesSquare, Moon, Plug, Plus, Settings, Sun, X, type LucideIcon } from 'lucide-react'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import type { Page } from '@/lib/types'
@@ -42,9 +42,18 @@ export function NavSidebar() {
       <SidebarHeader className="gap-2">
         {/* Brand: the wordmark hides in rail mode, the mark stays as the visual anchor. */}
         <div className="flex items-center gap-2 rounded-md px-2 py-1.5 group-data-[collapsible=icon]:px-0 group-data-[collapsible=icon]:justify-center">
-          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <Sparkles className="h-3.5 w-3.5" />
-          </div>
+          {/* Brand mark: three descending bars (the cascade), sky→teal — same mark as the site. */}
+          <svg viewBox="0 0 32 32" fill="none" aria-hidden="true" className="h-6 w-6 shrink-0">
+            <defs>
+              <linearGradient id="cascade-mark-grad" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stopColor="#38bdf8" />
+                <stop offset="1" stopColor="#2dd4bf" />
+              </linearGradient>
+            </defs>
+            <rect x="3" y="3" width="7" height="19" rx="3.5" fill="url(#cascade-mark-grad)" />
+            <rect x="12.5" y="8" width="7" height="19" rx="3.5" fill="url(#cascade-mark-grad)" opacity="0.75" />
+            <rect x="22" y="13" width="7" height="16" rx="3.5" fill="url(#cascade-mark-grad)" opacity="0.5" />
+          </svg>
           <span className="font-semibold tracking-tight group-data-[collapsible=icon]:hidden">Cascade</span>
           {/* The ONLY toggle outside ProjectPage: without it, collapsing on Home/Projects/Chats/Connectors/
               Settings left no way back — you had to open a project to find a trigger. Sits inline when
