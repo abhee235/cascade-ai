@@ -5,7 +5,7 @@
 // Observatory a product feature — and it needs a queryable store, not a JSONL file the UI has to
 // parse. This is that store; the JSONL and OTLP tracers stay as-is and fan out alongside it.
 
-import type { SpanRecord, TraceStore, TraceSummary } from '@cascade/storage'
+import type { SessionSummary, SpanRecord, TraceStore, TraceSummary } from '@cascade/storage'
 import { BufferedWriter, type Db } from './db.js'
 
 /** The DB row shape. `attributes` is JSON; project/model are lifted OUT of it into real columns
@@ -94,6 +94,10 @@ export function createTraceStore(db: Db): TraceStore {
         where.push('project_id = ?')
         params.push(opts.projectId)
       }
+      if (opts?.chatId) {
+        where.push('chat_id = ?')
+        params.push(opts.chatId)
+      }
       if (opts?.before) {
         // Keyset cursor with a tie-breaker. `MIN(started_at) < ?` alone drops every trace that shares the
         // boundary millisecond — measured: 150 traces paged out as 136, silently. The ORDER BY below sorts
@@ -128,6 +132,7 @@ export function createTraceStore(db: Db): TraceStore {
                  MAX(COALESCE(ended_at, started_at))                AS ended_at,
                  COUNT(*)                                           AS span_count,
                  MAX(CASE WHEN parent_id IS NULL THEN name END)     AS root_name,
+                 MAX(CASE WHEN parent_id IS NULL THEN json_extract(attributes, '$.input') END) AS prompt,
                  MAX(CASE WHEN status = 'error' THEN 1 ELSE 0 END)  AS has_error,
                  MAX(CASE WHEN ended_at IS NULL THEN 1 ELSE 0 END)  AS has_open,
                  MAX(project_id)                                    AS project_id,
@@ -145,6 +150,7 @@ export function createTraceStore(db: Db): TraceStore {
       return rows.map((r) => ({
         traceId: r.trace_id as string,
         name: (r.root_name as string) ?? '(trace)',
+        prompt: (r.prompt as string) ?? undefined,
         startedAt: r.started_at as number,
         // A running trace has NO duration: MAX(COALESCE(ended_at, started_at)) over open spans measures
         // only the part that already closed, which reads as a fast turn when it is in fact an unfinished
@@ -157,6 +163,104 @@ export function createTraceStore(db: Db): TraceStore {
         model: (r.model as string) ?? undefined,
         chatId: (r.chat_id as string) ?? undefined,
       }))
+    },
+
+    async listSessions(opts): Promise<SessionSummary[]> {
+      writer.flush()
+      const where = ['chat_id IS NOT NULL']
+      const params: unknown[] = []
+      if (opts?.projectId) {
+        where.push('project_id = ?')
+        params.push(opts.projectId)
+      }
+      const limit = opts?.limit ?? 50
+
+      // The aggregate. errorTurns counts distinct TRACES containing a failure, not failed spans — "3 of
+      // 12 turns went wrong" is the useful number; "9 failed spans" is not, since one bad turn can
+      // produce several.
+      const rows = db
+        .prepare(`
+          SELECT chat_id,
+                 MAX(project_id)                                     AS project_id,
+                 COUNT(DISTINCT trace_id)                            AS turn_count,
+                 COUNT(DISTINCT CASE WHEN status = 'error' THEN trace_id END) AS error_turns,
+                 MIN(started_at)                                     AS started_at,
+                 MAX(COALESCE(ended_at, started_at))                 AS ended_at,
+                 MAX(CASE WHEN ended_at IS NULL THEN 1 ELSE 0 END)   AS has_open
+          FROM spans
+          WHERE ${where.join(' AND ')}
+          GROUP BY chat_id
+          ORDER BY MAX(COALESCE(ended_at, started_at)) DESC
+          LIMIT ?
+        `)
+        .all(...([...params, limit] as never[])) as Record<string, unknown>[]
+      if (!rows.length) return []
+
+      const ids = rows.map((r) => r.chat_id as string)
+      const slots = ids.map(() => '?').join(',')
+
+      // First prompt and last output, two rows per session rather than every root span, via window
+      // functions. Fetching all roots and reducing in JS would pull one row per TURN — fine at 20 turns,
+      // wasteful at 500, and this list is the landing page.
+      const edges = db
+        .prepare(`
+          SELECT chat_id, kind, attributes, rn_first, rn_last FROM (
+            SELECT chat_id, kind, attributes,
+                   -- rowid breaks ties, and ties are the common case: turns inside one conversation can
+                   -- share a millisecond, and started_at alone then lets SQLite pick arbitrarily — which
+                   -- showed turn 5 of 6 as a conversation's "last output". rowid is insertion order,
+                   -- i.e. emission order, which is exactly the sequence we mean by first and last.
+                   ROW_NUMBER() OVER (PARTITION BY chat_id, kind ORDER BY started_at ASC,  rowid ASC)  AS rn_first,
+                   ROW_NUMBER() OVER (PARTITION BY chat_id, kind ORDER BY started_at DESC, rowid DESC) AS rn_last
+            FROM spans
+            WHERE chat_id IN (${slots}) AND kind IN ('AGENT', 'LLM') AND attributes IS NOT NULL
+          ) WHERE rn_first = 1 OR rn_last = 1
+        `)
+        .all(...(ids as never[])) as Record<string, unknown>[]
+
+      const first = new Map<string, string>()
+      const last = new Map<string, string>()
+      for (const e of edges) {
+        const a = JSON.parse((e.attributes as string) ?? '{}') as Record<string, unknown>
+        // The opening PROMPT is the earliest AGENT root's input; the closing answer is the latest LLM
+        // span's output (the root carries no output — it is a container).
+        if (e.kind === 'AGENT' && e.rn_first === 1 && typeof a.input === 'string') first.set(e.chat_id as string, a.input)
+        if (e.kind === 'LLM' && e.rn_last === 1 && typeof a.output === 'string') last.set(e.chat_id as string, a.output)
+      }
+
+      // Models + output tokens per session. Separate because both need to scan LLM spans, and folding
+      // them into the aggregate above would force that scan for sessions we then discard by LIMIT.
+      const stats = db
+        .prepare(`
+          SELECT chat_id, model, COUNT(*) AS n, SUM(COALESCE(json_extract(attributes, '$.outputTokens'), 0)) AS out_tokens
+          FROM spans WHERE chat_id IN (${slots}) AND kind = 'LLM'
+          GROUP BY chat_id, model ORDER BY n DESC
+        `)
+        .all(...(ids as never[])) as Record<string, unknown>[]
+      const models = new Map<string, string[]>()
+      const tokens = new Map<string, number>()
+      for (const s of stats) {
+        const id = s.chat_id as string
+        if (s.model) models.set(id, [...(models.get(id) ?? []), s.model as string])
+        tokens.set(id, (tokens.get(id) ?? 0) + Number(s.out_tokens ?? 0))
+      }
+
+      return rows.map((r) => {
+        const id = r.chat_id as string
+        return {
+          chatId: id,
+          projectId: (r.project_id as string) ?? undefined,
+          firstPrompt: first.get(id),
+          lastOutput: last.get(id),
+          turnCount: r.turn_count as number,
+          startedAt: r.started_at as number,
+          endedAt: r.ended_at as number,
+          errorTurns: r.error_turns as number,
+          outputTokens: tokens.get(id) ?? 0,
+          models: models.get(id) ?? [],
+          running: !!r.has_open,
+        }
+      })
     },
 
     async spans(traceId: string): Promise<SpanRecord[]> {

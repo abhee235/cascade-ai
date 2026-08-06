@@ -52,6 +52,10 @@ function memoryStore(traces: TraceSummary[], spans: SpanRecord[] = [], seen: Rec
     async spans(traceId) {
       return spans.filter((s) => s.traceId === traceId)
     },
+    async listSessions(opts) {
+      seen.sessions = opts
+      return [{ chatId: 'c1', projectId: traces[0]?.projectId, turnCount: 3, startedAt: 1, endedAt: 2, errorTurns: 1, outputTokens: 40, models: ['qwen'] }]
+    },
     async searchSpans(opts) {
       seen.search = opts
       return spans

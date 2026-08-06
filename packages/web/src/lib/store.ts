@@ -8,7 +8,7 @@ import type { WireEvent, WireMessage } from './wsClient'
 import { extractMessage, type BottomTab, type Item, type Page, type PreviewDevice, type PreviewState, type Recovering, type RightTab, type RuntimeError, type Streaming } from './types'
 import { StreamingOptimizer } from './streamingOptimizer'
 import { applyAccent, applyTheme, getInitialAccent, getInitialTheme, type Theme } from './theme'
-import type { ChatMeta, EnabledModelInfo, FileNode, McpServerInfo, ModelLimits, Problem, ProjectInfo, SpanInfo, TemplateInfo, TraceSummaryInfo, Version } from '@cascade/app-protocol'
+import type { ChatMeta, EnabledModelInfo, FileNode, McpServerInfo, ModelLimits, Problem, ProjectInfo, SessionInfo, SpanInfo, TemplateInfo, TraceSummaryInfo, Version } from '@cascade/app-protocol'
 
 // ADR-068: events that mutate the active-chat transcript/streaming. Gated to the viewed project so a
 // background turn (another project) can't bleed into this one. Everything else (projects, files, preview,
@@ -59,7 +59,7 @@ interface UiState {
   traces: TraceSummaryInfo[]
   tracesLoaded: boolean // distinguishes "none yet" from "not asked" — an empty table must not read as data loss
   tracesExhausted: boolean // the last page came back short ⇒ nothing older to load
-  traceFilter: { projectId?: string; model?: string; status?: 'error'; q?: string }
+  traceFilter: { projectId?: string; model?: string; status?: 'error'; q?: string; chatId?: string }
   traceModels: string[] // the models actually present, for the filter's options
   openTraceId: string | null
   traceSpans: Record<string, SpanInfo[]>
@@ -67,6 +67,14 @@ interface UiState {
   /** Cross-trace span search: null ⇒ not searching (the trace list is shown instead). */
   spanSearch: { q: string; kind?: string; status?: 'error' } | null
   spanResults: SpanInfo[] | null
+  /** ADR-081: turns grouped into conversations. 'sessions' is the DEFAULT view — building an app is one
+   *  conversation of many turns, so the flat list buries it. 'turns' is still what you want when hunting
+   *  across the whole history (all errors, one model). */
+  observatoryView: 'sessions' | 'turns'
+  sessions: SessionInfo[]
+  sessionsLoaded: boolean
+  /** Drilled into one conversation: its turns are shown, filtered to this chat. */
+  openSessionId: string | null
   // transcript (per active project; cleared on open)
   items: Item[]
   streaming: Streaming | null
@@ -165,6 +173,9 @@ interface UiState {
   closeTrace: () => void
   selectSpan: (spanId: string | null) => void
   searchSpans: (patch: { q?: string; kind?: string; status?: 'error' } | null) => void
+  requestSessions: () => void
+  setObservatoryView: (view: 'sessions' | 'turns') => void
+  openSession: (chatId: string | null) => void
   openChat: (projectId: string, chatId: string) => void // the Chats page: open a project AND switch to a chat
   createProject: (name: string, templateId?: string) => void
   openProject: (id: string) => void
@@ -353,6 +364,10 @@ export const useStore = create<UiState>((set, get) => {
     selectedSpanId: null,
     spanSearch: null,
     spanResults: null,
+    observatoryView: 'sessions',
+    sessions: [],
+    sessionsLoaded: false,
+    openSessionId: null,
     items: [],
     streaming: null,
     status: null,
@@ -574,6 +589,9 @@ export const useStore = create<UiState>((set, get) => {
         case 'spanResults':
           set({ spanResults: e.spans })
           break
+        case 'sessions':
+          set({ sessions: e.sessions, sessionsLoaded: true })
+          break
         case 'traceSpans':
           // Keyed by trace, not stored as "the open one": a poll for a LIVE trace refreshes its waterfall
           // in place, and going back then forward again renders instantly instead of blanking.
@@ -774,6 +792,21 @@ export const useStore = create<UiState>((set, get) => {
     // ── ADR-081 Observatory ────────────────────────────────────────────────────────────────────────────
     // The FIRST page under the current filter. Also what the 3s poll calls, which is why the reply
     // REPLACES rather than appends: a poll must not duplicate rows the previous poll already delivered.
+    requestSessions: () => get().send({ type: 'sessions', action: 'list', projectId: get().traceFilter.projectId }),
+    setObservatoryView: (observatoryView) => {
+      // Leaving a session drill-down when switching to the flat view: the chat filter belongs to the
+      // grouped view, and carrying it across would silently show one conversation labelled "all turns".
+      set((s) => ({ observatoryView, openSessionId: null, traceFilter: { ...s.traceFilter, chatId: undefined }, traces: [], tracesLoaded: false, tracesExhausted: false }))
+      if (observatoryView === 'sessions') get().requestSessions()
+      else get().requestTraces()
+    },
+    openSession: (chatId) => {
+      // Drilling in is just the turn list scoped to one conversation — same rows, same detail view, so
+      // there is nothing new to learn and nothing new to maintain.
+      set((s) => ({ openSessionId: chatId, traceFilter: { ...s.traceFilter, chatId: chatId ?? undefined }, traces: [], tracesLoaded: false, tracesExhausted: false }))
+      if (chatId) get().requestTraces()
+      else get().requestSessions()
+    },
     requestTraces: () => {
       // Refresh EVERYTHING already loaded, not just the first page. The 3s poll calls this, and with a
       // fixed page size it silently threw away every row the user had paged in — click "load older", wait
@@ -784,7 +817,13 @@ export const useStore = create<UiState>((set, get) => {
     setTraceFilter: (patch) => {
       // Filters reset the cursor: keeping paged-in rows from the previous filter would mix result sets.
       set((s) => ({ traceFilter: { ...s.traceFilter, ...patch }, traces: [], tracesLoaded: false, tracesExhausted: false }))
-      get().requestTraces()
+      // Refresh whichever view is showing. The project filter applies to BOTH, and only re-fetching the
+      // turn list would leave the conversation list showing the previous project's rows.
+      const { observatoryView, openSessionId } = get()
+      if (observatoryView === 'sessions' && !openSessionId) {
+        set({ sessionsLoaded: false })
+        get().requestSessions()
+      } else get().requestTraces()
     },
     loadMoreTraces: () => {
       const { traces, tracesExhausted, traceFilter } = get()

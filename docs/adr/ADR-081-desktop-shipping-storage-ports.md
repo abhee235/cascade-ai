@@ -153,6 +153,18 @@ the socket to render a page nobody may have open. The client polls (3s) *only wh
 flushed. Two commands (`traces`/`trace`) and two events; the server filters out traces whose project was
 deleted, because a row you cannot open is worse than no row.
 
+**Conversations are the default view (2026-08-07).** A trace is one TURN — Phoenix, LangSmith and
+Langfuse all model it that way, and so do we. The consequence is that building one app produces dozens
+of traces, and a flat list of them answers "what happened in some turn" while burying "what did this
+build do". All three tools solve this with a grouping layer keyed on a session id (Phoenix *Sessions*,
+LangSmith *Threads*, Langfuse *Sessions*), and all three lead the group row with **first input → last
+output**, because that identifies a conversation far better than an id. `listSessions` is ours, and it
+leads rather than sitting in a side tab: for Cascade the conversation IS the unit of work. The flat
+"All turns" view stays one click away — it is what you want when hunting *across* history.
+
+Corollary: a turn row is titled by its own **prompt**, not by the root span's name. Every root is called
+`agent (builder)`, so a list titled by name is a column of identical rows.
+
 **Beyond a viewer (2026-08-07).** A per-trace view answers "what happened in this turn" and structurally
 cannot answer "is this the third time Bash failed this way". So `TraceStore` gained `searchSpans` (a
 cross-trace span query) and `listTraces` gained filters — errors-only, project, model, and free text over

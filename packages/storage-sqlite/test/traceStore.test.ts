@@ -218,6 +218,95 @@ describe('sqlite TraceStore (ADR-081)', () => {
     expect((await after.listTraces())[0].chatId).toBeUndefined()
   })
 
+  // ── Sessions: turns grouped into conversations ───────────────────────────────────────────────────────
+
+  /** One conversation, three turns — the shape a real app build actually has. */
+  const conversation = () => {
+    const store = createTraceStore(openDb(tmpDb()))
+    const turn = (i: number, prompt: string, output: string, failed = false) => {
+      const base = { 'cascade.project_id': 'p1', 'cascade.chat_id': 'chat-a', 'cascade.model': 'qwen' }
+      store.record(span({ traceId: `t${i}`, spanId: `r${i}`, parentSpanId: undefined, name: 'agent (builder)', kind: 'AGENT', startedAt: 1000 + i * 100, endedAt: 1050 + i * 100, status: 'ok', attributes: { ...base, input: prompt } }))
+      store.record(span({ traceId: `t${i}`, spanId: `l${i}`, parentSpanId: `r${i}`, name: 'llm turn 0', kind: 'LLM', startedAt: 1010 + i * 100, endedAt: 1040 + i * 100, status: 'ok', attributes: { ...base, output, outputTokens: 100 } }))
+      if (failed) store.record(span({ traceId: `t${i}`, spanId: `b${i}`, parentSpanId: `r${i}`, name: 'tool Bash', kind: 'TOOL', startedAt: 1020 + i * 100, endedAt: 1030 + i * 100, status: 'error', attributes: base }))
+    }
+    turn(0, 'build a trading-card marketplace', 'Created the browse view.')
+    turn(1, 'add a seller dashboard', 'Build failed.', true)
+    turn(2, 'fix the build', 'All green now.')
+    return store
+  }
+
+  it('groups turns into ONE conversation — the whole point of the view', async () => {
+    // A trace is one TURN (Phoenix, LangSmith and Langfuse all model it that way), so building an app
+    // produces dozens of traces. Flat, that buries what you were doing; this is the grouping layer.
+    const [s] = await conversation().listSessions()
+    expect(s.chatId).toBe('chat-a')
+    expect(s.turnCount).toBe(3)
+    expect(s.projectId).toBe('p1')
+  })
+
+  it('titles a conversation by its FIRST prompt and shows where it ended up', async () => {
+    // An id identifies nothing to a human, and every root is called "agent (builder)". What you remember
+    // is what you asked for — the same columns Phoenix and LangSmith lead their session tables with.
+    const [s] = await conversation().listSessions()
+    expect(s.firstPrompt).toBe('build a trading-card marketplace')
+    expect(s.lastOutput).toBe('All green now.')
+  })
+
+  it('picks first/last correctly when turns share a MILLISECOND', async () => {
+    // Caught in the running app: a 6-turn conversation showed turn 5's answer as its last output. Turns
+    // inside one conversation routinely land in the same millisecond, and started_at alone left SQLite
+    // free to pick any of them. rowid (insertion = emission order) makes it deterministic.
+    const store = createTraceStore(openDb(tmpDb()))
+    const at = 7000
+    for (const [i, text] of ['first', 'middle', 'last'].entries()) {
+      store.record(span({ traceId: `t${i}`, spanId: `r${i}`, parentSpanId: undefined, kind: 'AGENT', startedAt: at, endedAt: at, attributes: { 'cascade.chat_id': 'c', input: `${text} prompt` } }))
+      store.record(span({ traceId: `t${i}`, spanId: `l${i}`, parentSpanId: `r${i}`, kind: 'LLM', startedAt: at, endedAt: at, attributes: { 'cascade.chat_id': 'c', output: `${text} answer` } }))
+    }
+    const [s] = await store.listSessions()
+    expect(s.firstPrompt).toBe('first prompt')
+    expect(s.lastOutput).toBe('last answer')
+  })
+
+  it('counts FAILED TURNS, not failed spans', async () => {
+    // "1 of 3 turns went wrong" is actionable; "2 failed spans" is not, since one bad turn can produce
+    // several and the number then tracks nothing you can act on.
+    const [s] = await conversation().listSessions()
+    expect(s.errorTurns).toBe(1)
+  })
+
+  it('sums output tokens and lists the models used', async () => {
+    const [s] = await conversation().listSessions()
+    expect(s.outputTokens).toBe(300)
+    expect(s.models).toEqual(['qwen'])
+  })
+
+  it('orders conversations by most RECENT activity, not by when they started', async () => {
+    // A long-running build you came back to must not sink below a chat you opened once and abandoned.
+    const store = createTraceStore(openDb(tmpDb()))
+    store.record(span({ traceId: 'old', spanId: 'o', parentSpanId: undefined, kind: 'AGENT', startedAt: 100, endedAt: 200, attributes: { 'cascade.chat_id': 'started-first' } }))
+    store.record(span({ traceId: 'new', spanId: 'n', parentSpanId: undefined, kind: 'AGENT', startedAt: 150, endedAt: 900, attributes: { 'cascade.chat_id': 'active-recently' } }))
+    expect((await store.listSessions()).map((s) => s.chatId)).toEqual(['active-recently', 'started-first'])
+  })
+
+  it('a conversation with an open span is RUNNING', async () => {
+    const store = createTraceStore(openDb(tmpDb()))
+    store.record(span({ traceId: 't', spanId: 'r', parentSpanId: undefined, kind: 'AGENT', startedAt: 1, endedAt: undefined, attributes: { 'cascade.chat_id': 'c' } }))
+    expect((await store.listSessions())[0].running).toBe(true)
+  })
+
+  it('ignores spans with NO chat — they predate chat tracking and belong to the flat view', async () => {
+    const store = createTraceStore(openDb(tmpDb()))
+    store.record(span({ spanId: 'orphan', parentSpanId: undefined, kind: 'AGENT' }))
+    expect(await store.listSessions()).toEqual([])
+  })
+
+  it('drilling in filters the TURN list to one conversation', async () => {
+    const store = conversation()
+    store.record(span({ traceId: 'other', spanId: 'x', parentSpanId: undefined, kind: 'AGENT', attributes: { 'cascade.chat_id': 'chat-b' } }))
+    const turns = await store.listTraces({ chatId: 'chat-a' })
+    expect(turns.map((t) => t.traceId).sort()).toEqual(['t0', 't1', 't2'])
+  })
+
   it('batches: 5000 spans land in one flush without blocking', async () => {
     const store = createTraceStore(openDb(tmpDb()))
     const t0 = Date.now()

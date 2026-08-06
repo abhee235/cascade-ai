@@ -11,7 +11,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, MessagesSquare, Radar, RefreshCw, Search, X } from 'lucide-react'
-import type { SpanInfo, TraceSummaryInfo } from '@cascade/app-protocol'
+import type { SessionInfo, SpanInfo, TraceSummaryInfo } from '@cascade/app-protocol'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -86,13 +86,34 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
  * same text into a cross-trace SPAN search, because those are the same hunt from the user's side.
  */
 function FilterBar({ projects }: { projects: { id: string; name: string }[] }) {
-  const { traceFilter, traceModels, setTraceFilter, spanSearch, searchSpans } = useStore()
+  const { traceFilter, traceModels, setTraceFilter, spanSearch, searchSpans, observatoryView, setObservatoryView, openSessionId } = useStore()
   const [text, setText] = useState(traceFilter.q ?? '')
 
   const submit = () => setTraceFilter({ q: text.trim() || undefined })
+  const grouped = observatoryView === 'sessions' && !openSessionId
 
   return (
     <div className="flex flex-wrap items-center gap-2 border-b px-6 py-3">
+      {/* Conversations vs individual turns. Grouped leads because the conversation is the unit of work;
+          flat is what you switch to when hunting ACROSS the history (every error, one model). */}
+      <div className="flex shrink-0 rounded-md border p-0.5">
+        {(['sessions', 'turns'] as const).map((v) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => setObservatoryView(v)}
+            className={cn('rounded px-2.5 py-1 text-xs transition-colors', observatoryView === v ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}
+          >
+            {v === 'sessions' ? 'Conversations' : 'All turns'}
+          </button>
+        ))}
+      </div>
+
+      {/* The prompt/error filters narrow TURNS; in the grouped view there is nothing for them to narrow. */}
+      {grouped ? (
+        <div className="flex-1" />
+      ) : (
+      <>
       <div className="relative min-w-[16rem] flex-1">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
@@ -121,6 +142,8 @@ function FilterBar({ projects }: { projects: { id: string; name: string }[] }) {
       <Chip active={traceFilter.status === 'error'} onClick={() => setTraceFilter({ status: traceFilter.status === 'error' ? undefined : 'error' })}>
         Errors only
       </Chip>
+      </>
+      )}
 
       {projects.length > 1 && (
         <select
@@ -212,6 +235,69 @@ function SpanResults({ spans, names, onOpen }: { spans: SpanInfo[] | null; names
   )
 }
 
+/**
+ * Conversations, not turns — the DEFAULT view.
+ *
+ * A trace is one turn (Phoenix, LangSmith and Langfuse all model it that way, and so do we), which means
+ * building one app produces dozens of traces. A flat list of them answers "what happened in some turn"
+ * while burying "what did this build do", and the second question is the one you actually arrive with.
+ * All three of those tools solve it with a grouping layer keyed on a session id; this is ours, and it
+ * leads because for Cascade the conversation IS the unit of work.
+ */
+function SessionList({ sessions, loaded, names, onOpen }: { sessions: SessionInfo[]; loaded: boolean; names: Map<string, string>; onOpen: (chatId: string) => void }) {
+  if (!loaded)
+    return (
+      <div className="space-y-2 p-6">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="h-16 animate-pulse rounded-md bg-muted/50" />
+        ))}
+      </div>
+    )
+
+  if (!sessions.length)
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+        <MessagesSquare className="h-8 w-8 text-muted-foreground/40" />
+        <p className="text-sm text-muted-foreground">No conversations recorded yet.</p>
+        <p className="max-w-md text-xs text-muted-foreground/70">
+          Each chat with a project becomes one conversation here, with every turn it took inside it. Turns recorded before conversation tracking existed appear under <span className="font-medium">All turns</span>.
+        </p>
+      </div>
+    )
+
+  return (
+    <div className="min-h-0 flex-1 overflow-auto px-3 pb-6">
+      {sessions.map((s) => (
+        <button
+          key={s.chatId}
+          type="button"
+          onClick={() => onOpen(s.chatId)}
+          className="flex w-full items-start gap-3 rounded-md px-3 py-3 text-left transition-colors hover:bg-accent"
+        >
+          <StatusDot status={s.errorTurns ? 'error' : 'ok'} running={s.running} size={9} />
+          <span className="min-w-0 flex-1">
+            {/* The opening PROMPT is the title. An id identifies nothing to a human, and "agent (builder)"
+                is the same on every row — what you remember is what you asked for. */}
+            <span className="block truncate text-sm font-medium">{s.firstPrompt || '(no prompt recorded)'}</span>
+            {s.lastOutput && <span className="mt-0.5 block truncate text-xs text-muted-foreground">→ {s.lastOutput}</span>}
+            <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+              {s.projectId && <span className="font-medium">{names.get(s.projectId) ?? 'unknown project'}</span>}
+              <span>
+                {s.turnCount} turn{s.turnCount === 1 ? '' : 's'}
+              </span>
+              {s.errorTurns > 0 && <span className="text-red-500">{s.errorTurns} failed</span>}
+              <span className="font-mono">{formatDuration(s.endedAt - s.startedAt)}</span>
+              {s.outputTokens > 0 && <span className="font-mono">{formatTokens(s.outputTokens)} out</span>}
+              {s.models.length > 0 && <span className="truncate font-mono">{s.models.join(', ')}</span>}
+            </span>
+          </span>
+          <span className="shrink-0 pt-0.5 text-xs text-muted-foreground">{formatTimeAgo(s.endedAt)}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function TraceList({ traces, loaded, names, onOpen }: { traces: TraceSummaryInfo[]; loaded: boolean; names: Map<string, string>; onOpen: (id: string) => void }) {
   if (!loaded)
     return (
@@ -277,8 +363,14 @@ function TraceRows({ traces, names, onOpen }: { traces: TraceSummaryInfo[]; name
         >
           <StatusDot status={t.status} running={t.running} />
           <span className="min-w-0">
-            <span className="block truncate text-sm font-medium">{t.name}</span>
-            {t.projectId && <span className="block truncate text-xs text-muted-foreground">{names.get(t.projectId) ?? 'unknown project'}</span>}
+            {/* The PROMPT leads, the agent label follows. Every root is called "agent (builder)", so a
+                list titled by name is a column of identical rows — which is exactly what made the flat
+                view unreadable in the first place. */}
+            <span className="block truncate text-sm font-medium">{t.prompt || t.name}</span>
+            <span className="block truncate text-xs text-muted-foreground">
+              {t.prompt ? `${t.name}${t.projectId ? ' · ' : ''}` : ''}
+              {t.projectId ? (names.get(t.projectId) ?? 'unknown project') : ''}
+            </span>
           </span>
           <span className="justify-self-end font-mono text-xs text-muted-foreground">{t.spanCount}</span>
           {/* A running turn has no total yet — showing the closed spans' extent would read as a fast turn. */}
@@ -387,6 +479,7 @@ function TraceDetail({ trace, spans, onBack }: { trace: TraceSummaryInfo | undef
 
 export function ObservatoryPage() {
   const { traces, tracesLoaded, openTraceId, traceSpans, projects, spanSearch, spanResults, requestTraces, openTrace, closeTrace, selectSpan } = useStore()
+  const { observatoryView, sessions, sessionsLoaded, openSessionId, requestSessions, openSession } = useStore()
 
   // Poll while mounted. Re-requesting the OPEN trace too keeps a live turn's waterfall growing on screen;
   // both requests are cheap reads against a local DB, and the interval dies with the page.
@@ -394,15 +487,17 @@ export function ObservatoryPage() {
   // The poll is SUSPENDED while a span search is showing: a search is a considered question with a stable
   // answer, and having its results reshuffle under the cursor every 3s makes it unusable.
   useEffect(() => {
-    requestTraces()
-    const t = setInterval(() => {
-      if (useStore.getState().spanSearch) return
-      requestTraces()
-      const id = useStore.getState().openTraceId
-      if (id) useStore.getState().send({ type: 'trace', action: 'spans', traceId: id })
-    }, POLL_MS)
+    const tick = () => {
+      const s = useStore.getState()
+      if (s.spanSearch) return
+      if (s.observatoryView === 'sessions' && !s.openSessionId) s.requestSessions()
+      else s.requestTraces()
+      if (s.openTraceId) s.send({ type: 'trace', action: 'spans', traceId: s.openTraceId })
+    }
+    tick()
+    const t = setInterval(tick, POLL_MS)
     return () => clearInterval(t)
-  }, [requestTraces])
+  }, [])
 
   const names = useMemo(() => new Map(projects.map((p) => [p.id, p.name])), [projects])
   const openTraceSummary = traces.find((t) => t.traceId === openTraceId)
@@ -424,12 +519,27 @@ export function ObservatoryPage() {
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">Every turn the agent has taken — the model calls, the tools, and where the time went.</p>
         </div>
-        <Button variant="ghost" size="icon-sm" onClick={() => requestTraces()} title="Refresh">
+        <Button variant="ghost" size="icon-sm" onClick={() => (observatoryView === 'sessions' && !openSessionId ? requestSessions() : requestTraces())} title="Refresh">
           <RefreshCw className="h-4 w-4" />
         </Button>
       </div>
       <FilterBar projects={projects} />
-      {spanSearch ? (
+      {openSessionId && (
+        // Drilled into one conversation. A back affordance, plus the prompt that opened it, so the turn
+        // list underneath has a subject rather than being 12 rows all called "agent (builder)".
+        <div className="flex items-center gap-2 border-b bg-muted/30 px-6 py-2">
+          <Button variant="ghost" size="icon-sm" onClick={() => openSession(null)} title="Back to conversations">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <span className="min-w-0 flex-1 truncate text-sm">
+            <span className="text-muted-foreground">Conversation · </span>
+            {sessions.find((s) => s.chatId === openSessionId)?.firstPrompt ?? openSessionId}
+          </span>
+        </div>
+      )}
+      {observatoryView === 'sessions' && !openSessionId ? (
+        <SessionList sessions={sessions} loaded={sessionsLoaded} names={names} onOpen={openSession} />
+      ) : spanSearch ? (
         <SpanResults
           spans={spanResults}
           names={names}

@@ -98,6 +98,8 @@ export interface McpServerInfo {
 export interface TraceSummaryInfo {
   traceId: string
   name: string
+  /** What was asked. Every root is called "agent (builder)" — the prompt is what tells turns apart. */
+  prompt?: string
   /** Epoch ms. The client formats; the server does not guess a timezone. */
   startedAt: number
   /** Absent while the turn is still running — see `running`. */
@@ -129,6 +131,25 @@ export interface SpanInfo {
   attributes?: Record<string, unknown>
 }
 
+/** ADR-081: one CONVERSATION, many turns. A trace is one turn (Phoenix, LangSmith and Langfuse all model
+ *  it that way), so an app build produces dozens of traces and a flat list buries what you were doing.
+ *  Every one of those tools answers this with a grouping layer keyed on a session id; this is ours.
+ *  `firstPrompt`/`lastOutput` are the columns they converge on — they identify a conversation far better
+ *  than an id does. */
+export interface SessionInfo {
+  chatId: string
+  projectId?: string
+  firstPrompt?: string
+  lastOutput?: string
+  turnCount: number
+  startedAt: number
+  endedAt: number
+  errorTurns: number
+  outputTokens: number
+  models: string[]
+  running?: boolean
+}
+
 export type BuilderEvent =
   | { type: 'serverInfo'; sandbox: boolean; model: string; provider?: string; providers?: { id: string; configured: boolean }[] } // greeting: Docker up, active provider/model, and the provider menu (ADR-067)
   | { type: 'mcpServers'; servers: McpServerInfo[] } // ADR-071: configured MCP servers + live connection status (the MCP panel)
@@ -158,6 +179,7 @@ export type BuilderEvent =
   | { type: 'traces'; traces: TraceSummaryInfo[]; append?: boolean; models?: string[] }
   | { type: 'traceSpans'; traceId: string; spans: SpanInfo[] } // ADR-081: one trace's spans (the waterfall)
   | { type: 'spanResults'; spans: SpanInfo[] } // ADR-081: cross-trace span search hits
+  | { type: 'sessions'; sessions: SessionInfo[] } // ADR-081: turns grouped into conversations
 
 /** Client → builder. App/workspace-level commands, distinct from a session's InboundMessages.
  *  Future variants (added in their phases): preview start/stop/refresh, terminal input/resize,
@@ -198,7 +220,8 @@ export type BuilderCommand =
   // ADR-081: the Observatory. `projectId` omitted ⇒ every project's traces (the page is global, like Chats).
   // `before` is the pagination cursor: the oldest startedAt already held. With it the reply is a PAGE
   // (append), without it a fresh result set.
-  | { type: 'traces'; action: 'list'; projectId?: string; model?: string; status?: 'ok' | 'error'; q?: string; limit?: number; before?: number; beforeId?: string }
+  | { type: 'traces'; action: 'list'; projectId?: string; model?: string; status?: 'ok' | 'error'; q?: string; chatId?: string; limit?: number; before?: number; beforeId?: string }
+  | { type: 'sessions'; action: 'list'; projectId?: string; limit?: number } // ADR-081: the grouped view
   | { type: 'trace'; action: 'spans'; traceId: string } // one trace's spans (→ traceSpans)
   // Spans across ALL traces — "every failed Bash", "every turn that mentions RecipeGrid". The question a
   // per-trace viewer structurally cannot answer.

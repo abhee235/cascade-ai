@@ -106,6 +106,9 @@ export interface SpanRecord {
 export interface TraceSummary {
   traceId: string
   name: string
+  /** What was ASKED — the root span's input. Every root is called "agent (builder)", so a list of turns
+   *  is unreadable without this: the prompt is what distinguishes one from the next. */
+  prompt?: string
   startedAt: number
   /** Only meaningful once the trace is finished — a running trace has no total yet (see `running`). */
   durationMs?: number
@@ -130,6 +133,8 @@ export interface TraceQuery {
   status?: 'ok' | 'error'
   /** Free text over the trace name and the user's prompt (the root span's input). */
   q?: string
+  /** Narrow to one conversation — how the Sessions view drills into its turns. */
+  chatId?: string
   limit?: number
   /** Keyset cursor: the startedAt of the oldest row already held. */
   before?: number
@@ -137,6 +142,35 @@ export interface TraceQuery {
    *  of recorded timestamps), and a plain `started_at < cursor` silently DROPS every row that ties with
    *  the boundary. Measured: 150 traces paged out as 136. Pass the oldest row's traceId with `before`. */
   beforeId?: string
+}
+
+/**
+ * One CONVERSATION's headline row — many turns, grouped.
+ *
+ * A trace is one turn (Phoenix, LangSmith and Langfuse all model it this way), so building an app
+ * produces dozens of traces and a flat list buries the thing you were actually doing. Every one of those
+ * tools answers this with a grouping layer keyed on a session id; this is ours. `firstPrompt` and
+ * `lastOutput` are the columns they converge on, because "what did I ask for, and where did it end up"
+ * identifies a conversation far better than an id does.
+ */
+export interface SessionSummary {
+  chatId: string
+  projectId?: string
+  /** What opened the conversation — the title, in practice. */
+  firstPrompt?: string
+  /** Where it ended up, from the most recent model response. */
+  lastOutput?: string
+  turnCount: number
+  startedAt: number
+  endedAt: number
+  /** Turns that contain at least one failed span. */
+  errorTurns: number
+  /** Completion tokens across the session — the local-model stand-in for cost. */
+  outputTokens: number
+  /** Distinct models used. A mid-session model switch is a fact worth seeing at this level. */
+  models: string[]
+  /** Any span still open ⇒ this conversation has a turn in flight. */
+  running?: boolean
 }
 
 /** A cross-trace span query. This is the difference between a trace VIEWER and something that answers
@@ -156,6 +190,8 @@ export interface TraceStore {
   /** Buffered by the adapter — see ChatStore.append. The agent loop never awaits telemetry. */
   record(span: SpanRecord): void
   listTraces(opts?: TraceQuery): Promise<TraceSummary[]>
+  /** Turns grouped into conversations, newest first. The Observatory's default view. */
+  listSessions(opts?: { projectId?: string; limit?: number }): Promise<SessionSummary[]>
   spans(traceId: string): Promise<SpanRecord[]>
   /** Spans across ALL traces, newest first. See SpanQuery for why this exists. */
   searchSpans(opts?: SpanQuery): Promise<SpanRecord[]>

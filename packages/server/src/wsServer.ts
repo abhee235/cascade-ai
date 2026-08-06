@@ -679,13 +679,23 @@ export function handleConnection(
             send({ type: 'traces', traces: [] })
             break
           }
-          const list = await traces.listTraces({ projectId: msg.projectId, model: msg.model, status: msg.status, q: msg.q, before: msg.before, beforeId: msg.beforeId, limit: msg.limit ?? 100 })
+          const list = await traces.listTraces({ projectId: msg.projectId, model: msg.model, status: msg.status, q: msg.q, chatId: msg.chatId, before: msg.before, beforeId: msg.beforeId, limit: msg.limit ?? 100 })
           // Drop traces whose project no longer exists: a deleted project's spans linger until retention
           // prunes them, and a row you cannot open is worse than no row.
           const live = new Set(manager.list().map((p) => p.id))
           // The model list rides along with the FIRST page only: it is the filter's option list, it does
           // not change between pages, and re-sending it on every 3s poll is pure noise on the wire.
           send({ type: 'traces', traces: list.filter((t) => !t.projectId || live.has(t.projectId)), append: msg.before !== undefined, ...(msg.before === undefined ? { models: await traces.models() } : {}) })
+          break
+        }
+        case 'sessions': {
+          if (!traces) {
+            send({ type: 'sessions', sessions: [] })
+            break
+          }
+          const live = new Set(manager.list().map((p) => p.id))
+          const all = await traces.listSessions({ projectId: msg.projectId, limit: msg.limit ?? 50 })
+          send({ type: 'sessions', sessions: all.filter((s) => !s.projectId || live.has(s.projectId)) })
           break
         }
         case 'trace': {
