@@ -9,6 +9,10 @@
 // Spike (2026-07-26, this machine): 5000 inserts inside ONE transaction = 4ms (~1.25M rows/sec). Our
 // measured load is hundreds of rows over MINUTES, which is why ADR-081 rejects a queue system.
 
+// The reference is load-bearing, not decorative: consumers (packages/server) compile this file as part of
+// THEIR program via the workspace `exports` → src mapping, and an ambient .d.ts that is merely sitting in
+// this directory is not in that program. Referencing it here makes the declaration travel with the import.
+/// <reference path="./node-sqlite.d.ts" />
 import { DatabaseSync } from 'node:sqlite'
 
 export type Db = DatabaseSync

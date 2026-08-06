@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { execFileSync } from 'node:child_process'
 import { basename, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { createProvider, createSession, JsonlTracer, type AgentDef, type CascadeSession, type Sandbox } from '@cascade/core'
+import { createProvider, createSession, JsonlTracer, type AgentDef, type CascadeSession, type Sandbox, type Tracer } from '@cascade/core'
 import { fanout, OtelTracer } from './otelTracer.js'
 import type { ProjectInfo } from '@cascade/app-protocol'
 import { applyTemplate, readAiRules } from './templates.js'
@@ -68,7 +68,16 @@ export interface ProjectManagerOptions {
   mcpServers?: () => Record<string, import('@cascade/core').McpServerConfig>
   /** ADR-071: how to connect an MCP server (the real stdio adapter is `sdkConnect`; injected for tests). */
   mcpConnect?: import('@cascade/core').McpConnect
+  /** ADR-081: an EXTRA tracer to fan the session's event stream into, built by the deployment's
+   *  composition root (desktop: the SQLite span store behind the Observatory). Injected rather than
+   *  constructed here so the server never learns which storage backend it got — see the boundary test.
+   *  Called once per session; returning undefined simply leaves the fanout as it was. */
+  sessionTracerFor?: SessionTracerFactory
 }
+
+/** Builds the per-session extra tracer. Gets `model` because a span's model is the one that ANSWERED —
+ *  the active selection changes at runtime (ADR-067), so it can't be captured once at startup. */
+export type SessionTracerFactory = (info: { dir: string; kind: 'builder' | 'planner'; model?: string }) => Tracer | undefined
 
 /** Builder behavior injected ahead of every project's AI rules (as generic `extraInstructions`). The core
  *  base prompt is concise-chat-tuned, which makes the model explore then stop; the builder needs the opposite:
@@ -163,10 +172,13 @@ export function setTraceSession(dir: string, chatId: string | undefined): void {
   else traceSessions.delete(dir)
   for (const kind of ['builder', 'planner'] as const) otelTracers.get(`${dir}:${kind}`)?.setSession(chatId)
 }
-export const tracerFor = (dir: string, kind: 'builder' | 'planner') => {
+export const tracerFor = (dir: string, kind: 'builder' | 'planner', extra?: Tracer): Tracer => {
   const jsonl = new JsonlTracer(join(dir, '.cascade', 'traces', `${kind}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.jsonl`))
+  // JSONL stays FIRST in every fanout: it is the forensic record, and neither a viewer being down nor a
+  // storage adapter throwing may cost us it.
+  const tracers: Tracer[] = [jsonl]
   const endpoint = process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
-  if (!endpoint) return jsonl
+  if (!endpoint) return extra ? fanout(jsonl, extra) : jsonl
   const key = `${dir}:${kind}`
   let otel = otelTracers.get(key)
   if (!otel) {
@@ -183,7 +195,9 @@ export const tracerFor = (dir: string, kind: 'builder' | 'planner') => {
   // The PLANNER's tracer is created mid-submit — after setTraceSession has already run — so a tracer born
   // now must adopt the session in flight, or the plan stage lands outside the conversation it belongs to.
   otel.setSession(traceSessions.get(dir))
-  return fanout(jsonl, otel)
+  tracers.push(otel)
+  if (extra) tracers.push(extra)
+  return fanout(...tracers)
 }
 
 export class ProjectManager {
@@ -244,7 +258,9 @@ export class ProjectManager {
           // (not read from a file here) so a config change + session-invalidation surfaces on the next open.
           mcpServers: this.opts.mcpServers?.(),
           mcpConnect: this.opts.mcpConnect,
-          tracer: tracerFor(dir, 'builder'), // product forensics (walkthrough lesson: no trace = no diagnosis)
+          // Product forensics (walkthrough lesson: no trace = no diagnosis). ADR-081: the deployment's own
+          // tracer joins the fanout here — on the desktop that is the SQLite store the Observatory reads.
+          tracer: tracerFor(dir, 'builder', this.opts.sessionTracerFor?.({ dir, kind: 'builder', model: this.active.model })),
           // ADR-074: ON. The original OFF had two reasons — (a) curation adds hidden model calls (dead air),
           // (b) recall mutated the system-prompt PREFIX, breaking the KV cache. (b) is now gone: dynamic recall
           // appends surfaced facts at the message TAIL (dynamicRecall.ts), leaving the cached prefix intact, and
@@ -327,7 +343,7 @@ export class ProjectManager {
           maxOutputTokens: this.active.maxOutputTokens,
           skillDirs: skillDirsFor(dir),
           sandbox,
-          tracer: tracerFor(dir, 'planner'), // stage forensics in the product too
+          tracer: tracerFor(dir, 'planner', this.opts.sessionTracerFor?.({ dir, kind: 'planner', model: this.active.model })), // stage forensics in the product too
         }))
     return build(project.dir, def, project.sandbox)
   }

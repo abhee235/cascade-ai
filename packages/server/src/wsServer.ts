@@ -11,13 +11,12 @@
 import './loadDotEnv.js' // FIRST import: .env → process.env before the CASCADE_* consts below read it
 import { dirname, join } from 'node:path'
 import { appendFileSync, mkdirSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomBytes } from 'node:crypto'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { CascadeSession, InboundMessage } from '@cascade/core'
 import type { BuilderCommand } from '@cascade/app-protocol'
-import { flushTracers, ProjectManager, setTraceSession } from './projectManager.js'
+import { flushTracers, ProjectManager, setTraceSession, type SessionTracerFactory } from './projectManager.js'
 import { ensurePlanPersisted } from './planStage.js'
 import { DockerSandbox, dockerAvailable, sweepSandboxContainers } from './dockerSandbox.js'
 import { ensureVisualEditConfig, listTemplates } from './templates.js'
@@ -783,7 +782,17 @@ function verifyWsClient(
   return token === WS_TOKEN ? cb(true) : cb(false, 401, 'Invalid token')
 }
 
-async function start() {
+/** What the DEPLOYMENT supplies (ADR-081 §6). The composition root — `main.ts` on the desktop — builds
+ *  these; nothing in this file knows what backs them. A hosted deployment passes different objects and
+ *  changes no code below. */
+export interface ServerDeps {
+  /** Fans each session's trace events into the deployment's own store (desktop: SQLite → Observatory). */
+  sessionTracerFor?: SessionTracerFactory
+  /** Release storage resources on shutdown. Runs BEFORE process.exit — buffered writes are memory-only. */
+  dispose?: () => Promise<void>
+}
+
+export async function start(deps: ServerDeps = {}) {
   // 13.3: isolate each project's command execution in its own Docker container when Docker is available.
   // Opt out with CASCADE_SANDBOX=off. Without Docker we fall back to HOST exec (usable, but not isolated).
   const sandboxEnabled = process.env.CASCADE_SANDBOX !== 'off'
@@ -809,6 +818,7 @@ async function start() {
     // ADR-071: a thunk so each new session reads the CURRENT enabled set (after add/remove/toggle + invalidate).
     mcpServers: enabledMcpServers,
     mcpConnect: sdkConnect,
+    sessionTracerFor: deps.sessionTracerFor, // ADR-081: undefined in tests/headless ⇒ the fanout is unchanged
   })
   // ADR-067: restore the model the user last SELECTED. The env vars are the first-run default, not a
   // standing override — otherwise every restart silently moved the session back to CASCADE_MODEL (measured:
@@ -836,7 +846,9 @@ async function start() {
   // SIGKILL skips this — the startup sweep above is the backstop.)
   // flushTracers FIRST: the exporter batches, so the spans describing whatever we're about to tear down are
   // still in memory — exiting without it loses the tail of every session (and `tsx watch` restarts often).
-  const shutdown = () => void flushTracers().finally(() => Promise.allSettled([manager.dispose(), sweepSandboxContainers()]).finally(() => process.exit(0)))
+  // deps.dispose joins the same teardown: the storage adapter buffers writes in memory (ADR-081 §3), so
+  // exiting without it drops the tail of the run — exactly the failure flushTracers exists to prevent.
+  const shutdown = () => void flushTracers().finally(() => Promise.allSettled([manager.dispose(), sweepSandboxContainers(), deps.dispose?.()]).finally(() => process.exit(0)))
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
   // A CRASH must leave evidence. Measured 2026-07-23: a build stopped dead mid-turn, and the cause was
@@ -857,7 +869,8 @@ async function start() {
     console.error(`💥 ${kind} — recorded to ${crashLog}\n${detail}`)
     // Flush whatever spans are buffered, and close the open turn so the viewer shows it as interrupted
     // rather than losing it, then exit non-zero so the watcher/supervisor treats it as a failure.
-    void flushTracers(1_000).finally(() => process.exit(1))
+    // A crash is the case where the buffered tail matters MOST — it holds the spans describing the crash.
+    void Promise.allSettled([flushTracers(1_000), deps.dispose?.()]).finally(() => process.exit(1))
   }
   process.on('uncaughtException', (err) => recordCrash('uncaughtException', err))
   process.on('unhandledRejection', (reason) => recordCrash('unhandledRejection', reason))
@@ -870,5 +883,5 @@ async function start() {
     console.warn('⚠️  Docker not available — agent commands run on the HOST (no isolation). Install/start Docker Desktop for per-project sandboxing.')
 }
 
-// Run only when invoked directly (tsx src/wsServer.ts) — NOT when imported by a test.
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) start()
+// No self-start: `main.ts` is the entry point (ADR-081 §6). Starting here too would give you a server
+// with NO storage wired, silently — the desktop's telemetry would just be missing.

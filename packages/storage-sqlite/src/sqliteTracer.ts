@@ -47,6 +47,9 @@ let counter = 0
 const id = (p: string) => `${p}${(++counter).toString(36)}${Date.now().toString(36).slice(-4)}`
 
 export interface SqliteTracerOptions {
+  /** PIN the trace id (tests, replay/backfill). Omit in the product: every submit mints its own, because
+   *  a TRACE is one turn — a session lives for days, and lumping its turns into one trace gives the
+   *  Observatory a single ever-growing row with N roots instead of the per-turn waterfall you read. */
   traceId?: string
   /** Stamped on every span so the Observatory can filter by project without joining. */
   projectId?: string
@@ -62,8 +65,10 @@ export interface SqliteTracerOptions {
  */
 export function createSqliteTracer(store: TraceStore, opts: SqliteTracerOptions = {}): TracerLike {
   const now = opts.now ?? (() => Date.now())
-  const traceId = opts.traceId ?? id('t')
-  const base = { traceId, attributes: { 'cascade.project_id': opts.projectId, 'cascade.model': opts.model } as Record<string, unknown> }
+  // Mutable: reassigned per submit unless pinned (see SqliteTracerOptions.traceId). Seeded so a mark
+  // arriving before the first submit still lands somewhere rather than being dropped.
+  let traceId = opts.traceId ?? id('t')
+  const attributes = { 'cascade.project_id': opts.projectId, 'cascade.model': opts.model } as Record<string, unknown>
 
   let rootId: string | undefined
   let rootStart = 0
@@ -73,7 +78,8 @@ export function createSqliteTracer(store: TraceStore, opts: SqliteTracerOptions 
   let llm: { spanId: string; start: number; attrs: Record<string, unknown> } | undefined
   const tools = new Map<string, { spanId: string; start: number }>()
 
-  const write = (s: Omit<SpanRecord, 'traceId'>) => store.record({ ...base, ...s, attributes: { ...base.attributes, ...s.attributes } })
+  // traceId is read at CALL time, not captured — a new submit must redirect subsequent spans.
+  const write = (s: Omit<SpanRecord, 'traceId'>) => store.record({ traceId, ...s, attributes: { ...attributes, ...s.attributes } })
 
   return {
     event(raw: never): void {
@@ -81,6 +87,7 @@ export function createSqliteTracer(store: TraceStore, opts: SqliteTracerOptions 
       const at = now()
       switch (e.t) {
         case 'submit': {
+          if (!opts.traceId) traceId = id('t') // one trace per TURN — a session spans days
           rootId = id('s')
           rootStart = at
           // Left OPEN until turn_done; the store upserts by span_id, so closing later just updates it.

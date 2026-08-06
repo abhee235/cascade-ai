@@ -11,8 +11,14 @@ import { join, relative } from 'node:path'
 
 const SRC = join(import.meta.dirname, '..', 'src')
 
-// Modules that tie the server to ONE deployment.
-const FORBIDDEN = [/from ['"]node:fs['"]/, /from ['"]fs['"]/, /from ['"]better-sqlite3['"]/, /from ['"]electron['"]/, /from ['"]node:sqlite['"]/]
+// Modules that tie the server to ONE deployment. `@cascade/storage-sqlite` is on the list for the same
+// reason as the raw drivers: importing the ADAPTER anywhere but the entry point re-couples the server to
+// the desktop, and it would do so while still looking tidy.
+const FORBIDDEN = [/from ['"]node:fs['"]/, /from ['"]fs['"]/, /from ['"]better-sqlite3['"]/, /from ['"]electron['"]/, /from ['"]node:sqlite['"]/, /from ['"]@cascade\/storage-sqlite['"]/]
+
+// The composition root — the one file whose JOB is to name a backend and inject it (ADR-081 §6). A hosted
+// deployment adds a sibling here; the set must stay this small, or the boundary is decorative.
+const COMPOSITION_ROOT = new Set(['main.ts'])
 
 // Files that legitimately touch the filesystem TODAY and are scheduled to move behind a port.
 // Shrinking this list is the migration; it must never grow. (ADR-081 implementation order 4–5.)
@@ -59,12 +65,22 @@ describe('ADR-081 storage boundary', () => {
     const offenders: string[] = []
     for (const file of walk(SRC)) {
       const name = relative(SRC, file).split(/[/\\]/).pop()!
-      if (PENDING_PORTS.has(name) || PROJECT_FILES_OK.has(name)) continue
+      if (PENDING_PORTS.has(name) || PROJECT_FILES_OK.has(name) || COMPOSITION_ROOT.has(name)) continue
       const src = readFileSync(file, 'utf8')
       if (FORBIDDEN.some((re) => re.test(src))) offenders.push(relative(SRC, file))
     }
     // A new offender means either: put it behind a port, or justify it in one of the sets above.
     expect(offenders).toEqual([])
+  })
+
+  it('the composition root actually composes — the wiring cannot be lost silently', () => {
+    // The inverse of the rule above. If main.ts stopped building the adapter, every test here would still
+    // pass and the desktop would simply run with no telemetry — a failure with no symptom until someone
+    // opens an empty Observatory. Assert the wiring exists, not just that nobody else has it.
+    const main = readFileSync(join(SRC, 'main.ts'), 'utf8')
+    expect(main).toMatch(/createTelemetryStorage\(/)
+    expect(main).toMatch(/sessionTracerFor:/)
+    expect(main).toMatch(/dispose:/) // buffered spans are memory-only until this runs
   })
 
   it('the pending-port list only names files that still exist (no stale exemptions)', () => {

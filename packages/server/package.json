@@ -3,10 +3,10 @@
   "version": "0.0.0",
   "description": "Cascade server — hosts @cascade/core and relays the ActivityEvent protocol over WebSocket. The remote frontend (web app) drives the SAME engine the extension drives in-process. (ADR-018)",
   "type": "module",
-  "main": "./src/wsServer.ts",
+  "main": "./src/main.ts",
   "scripts": {
-    "dev": "tsx watch src/wsServer.ts",
-    "start": "tsx src/wsServer.ts",
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -15,6 +15,8 @@
     "@babel/traverse": "^7.25.0",
     "@cascade/app-protocol": "*",
     "@cascade/core": "*",
+    "@cascade/storage": "*",
+    "@cascade/storage-sqlite": "*",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/exporter-trace-otlp-proto": "^0.220.0",
     "@opentelemetry/resources": "^2.9.0",

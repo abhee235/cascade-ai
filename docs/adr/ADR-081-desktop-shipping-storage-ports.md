@@ -118,16 +118,33 @@ packages/desktop/          Electron main + forge config + makers
 Project files need no new port: they are already behind `Sandbox`, and they must remain real files in
 every deployment (git, edits, installs). `HostSandbox` simply joins `DockerSandbox`.
 
+**The composition root.** `packages/server/src/main.ts` is the process entry point and the ONE file
+allowed to name a backend: it opens the DB, builds the per-session tracer, and passes both to
+`start(deps)` in `wsServer.ts`, which no longer self-starts (a second entry point would silently
+produce a server with no storage wired). A hosted deployment adds a sibling `mainCloud.ts`; nothing
+below it changes. `ProjectManager` takes a `sessionTracerFor` factory — the same injection shape as
+`sandboxFor` and `mcpConnect` — and `tracerFor` appends its result to the existing fanout, with the
+JSONL tracer still first so neither a dead viewer nor a throwing adapter can cost us the forensic
+record.
+
+**A trace is a TURN, not a session.** `SqliteTracer` mints a fresh trace id on every `submit`. The
+tracer's lifetime is the session's (it holds that session's open spans), and a session lives for days —
+without this, turn 40 appends to turn 1's trace and the Observatory shows one unreadable row with 40
+roots instead of 40 waterfalls. `traceId` stays pinnable for tests and backfill.
+
 **The rule that keeps this honest:**
 
-> `packages/server` must not import `node:fs`, `better-sqlite3`, or `electron`.
+> `packages/server` must not import `node:fs`, `better-sqlite3`, `electron`, or `@cascade/storage-sqlite`
+> — outside `main.ts`.
 
 Everything arrives by constructor injection — exactly how `mcpConnect` and `sandboxFor` already work.
 Enforced mechanically by `packages/server/test/storageBoundary.test.ts` rather than by discipline: a
 test (not a lint rule) because there is no root biome config to hang one on, and because a test fails
-the suite while keeping the exemption list explicit and reviewable. It carries two sets — files that
-still owe a port (shrinking that list IS the migration) and files that touch the PROJECT's files,
-which stay real files in every deployment. The test of the abstraction: **writing the Postgres adapter
+the suite while keeping the exemption list explicit and reviewable. It carries three sets — the
+composition root, files that still owe a port (shrinking that list IS the migration), and files that
+touch the PROJECT's files, which stay real files in every deployment. It also asserts the *inverse*:
+that `main.ts` still composes. Without that, deleting the wiring would pass every test and simply ship
+a desktop app with an empty Observatory. The test of the abstraction: **writing the Postgres adapter
 should require zero changes to `server`.**
 
 `packages/desktop` stays thin — boot the existing server in-process, open a `BrowserWindow` on the

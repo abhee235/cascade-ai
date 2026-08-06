@@ -100,6 +100,24 @@ describe('SqliteTracer — event stream → span tree', () => {
     expect(byName['tool Read']).toBe(50)
   })
 
+  it('gives every submit its OWN trace — a trace is a turn, not a session', async () => {
+    // The tracer lives as long as the session (days). Without this, turn 40 appends to the same trace as
+    // turn 1 and the Observatory shows one unreadable row with 40 roots instead of 40 waterfalls.
+    const store = createTraceStore(openDb(join(mkdtempSync(join(tmpdir(), 'cascade-tr-')), 'x.db')))
+    const tracer = createSqliteTracer(store, { projectId: 'p1' }) // no pinned traceId — the product path
+    // biome-ignore lint/suspicious/noExplicitAny: the tracer takes core's TraceEvent; tests feed literals
+    const emit = (e: Record<string, unknown>) => tracer.event(e as any)
+    for (const text of ['first turn', 'second turn']) {
+      emit({ t: 'submit', text })
+      emit({ t: 'tool_call', id: 'c1', name: 'Write' })
+      emit({ t: 'tool_result', id: 'c1', name: 'Write', ok: true, ms: 1, content: '' })
+      emit({ t: 'turn_done', turns: 1 })
+    }
+    const traces = await store.listTraces()
+    expect(traces).toHaveLength(2)
+    expect(traces.every((t) => t.spanCount === 2)).toBe(true) // each turn kept its own root + tool
+  })
+
   it('stamps project and model on every span so the Observatory can filter without a join', async () => {
     const { store, emit } = setup()
     emit({ t: 'submit', text: 'x' })
