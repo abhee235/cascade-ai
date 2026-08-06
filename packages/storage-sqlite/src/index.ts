@@ -4,3 +4,4 @@
 export { openDb, BufferedWriter, type Db } from './db.js'
 export { createTraceStore } from './traceStore.js'
 export { createSqliteTracer, type SqliteTracerOptions, type TracerLike } from './sqliteTracer.js'
+export { createTelemetryStorage, type TelemetryStorage, type CreateStorageOptions } from './createStorage.js'
