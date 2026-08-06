@@ -1,7 +1,7 @@
 // NavSidebar.tsx — the persistent left rail, built on the shadcn Sidebar. New · Home · Projects ·
 // Chats · Settings, a Recent-projects list, and the user profile + connection + theme toggle at the bottom.
 
-import { Folder, FolderKanban, Home, MessagesSquare, Moon, Plug, Plus, Settings, Sun, X, type LucideIcon } from 'lucide-react'
+import { Folder, FolderKanban, Home, MessagesSquare, Moon, Plug, Plus, Radar, Settings, Sun, X, type LucideIcon } from 'lucide-react'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import type { Page } from '@/lib/types'
@@ -27,6 +27,7 @@ const NAV: { page: Page; label: string; icon: LucideIcon }[] = [
   { page: 'projects', label: 'Projects', icon: FolderKanban },
   { page: 'chats', label: 'Chats', icon: MessagesSquare },
   { page: 'mcp', label: 'Connectors', icon: Plug },
+  { page: 'observatory', label: 'Observatory', icon: Radar },
   { page: 'settings', label: 'Settings', icon: Settings },
 ]
 

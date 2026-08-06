@@ -92,6 +92,41 @@ export interface McpServerInfo {
   error?: string
 }
 
+/** ADR-081: one trace's headline row for the Observatory list. A TRACE is one TURN (the tracer mints a
+ *  fresh id per submit), so this row answers "what happened when I hit send". `projectId` is the project
+ *  ID — the host dir never crosses the wire, so spans are stamped with the id at write time. */
+export interface TraceSummaryInfo {
+  traceId: string
+  name: string
+  /** Epoch ms. The client formats; the server does not guess a timezone. */
+  startedAt: number
+  /** Absent while the turn is still running — see `running`. */
+  durationMs?: number
+  spanCount: number
+  status?: 'ok' | 'error'
+  /** At least one span is still open. Separate from `status`: a turn can be in flight AND already carry a
+   *  failed tool call, and collapsing the two hides one or the other. */
+  running?: boolean
+  projectId?: string
+  model?: string
+}
+
+/** ADR-081: one span. Flat (parent by id) rather than nested — the client builds the tree, so a span with a
+ *  missing parent can still be shown instead of vanishing with its subtree. `attributes` carries the
+ *  observables diagnosis actually uses: tokens, prefill/decode ms, context window, tool input/output. */
+export interface SpanInfo {
+  traceId: string
+  spanId: string
+  parentSpanId?: string
+  name: string
+  /** 'AGENT' | 'LLM' | 'TOOL' | 'CHAIN'. Open on purpose — a new tracer kind must not break the client. */
+  kind: string
+  startedAt: number
+  endedAt?: number
+  status?: 'ok' | 'error'
+  attributes?: Record<string, unknown>
+}
+
 export type BuilderEvent =
   | { type: 'serverInfo'; sandbox: boolean; model: string; provider?: string; providers?: { id: string; configured: boolean }[] } // greeting: Docker up, active provider/model, and the provider menu (ADR-067)
   | { type: 'mcpServers'; servers: McpServerInfo[] } // ADR-071: configured MCP servers + live connection status (the MCP panel)
@@ -116,6 +151,8 @@ export type BuilderEvent =
   | { type: 'allChats'; groups: { project: ProjectInfo; chats: ChatMeta[] }[] } // every project's chats, for the Chats page
   | { type: 'terminalData'; id: string; data: string } // a chunk of a terminal session's PTY output (M7)
   | { type: 'terminalExit'; id: string } // a terminal session's shell ended (M7)
+  | { type: 'traces'; traces: TraceSummaryInfo[] } // ADR-081: the Observatory's trace list
+  | { type: 'traceSpans'; traceId: string; spans: SpanInfo[] } // ADR-081: one trace's spans (the waterfall)
 
 /** Client → builder. App/workspace-level commands, distinct from a session's InboundMessages.
  *  Future variants (added in their phases): preview start/stop/refresh, terminal input/resize,
@@ -153,3 +190,6 @@ export type BuilderCommand =
   | { type: 'terminalResize'; id: string; cols: number; rows: number } // a session's xterm resized (M7)
   | { type: 'chat'; action: 'list' | 'new' | 'switch' | 'delete' | 'rename'; id?: string; title?: string } // multi-chat (M11)
   | { type: 'chats'; action: 'listAll' } // request every project's chat list (the Chats page)
+  // ADR-081: the Observatory. `projectId` omitted ⇒ every project's traces (the page is global, like Chats).
+  | { type: 'traces'; action: 'list'; projectId?: string; limit?: number }
+  | { type: 'trace'; action: 'spans'; traceId: string } // one trace's spans (→ traceSpans)

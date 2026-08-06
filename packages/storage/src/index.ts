@@ -107,9 +107,14 @@ export interface TraceSummary {
   traceId: string
   name: string
   startedAt: number
+  /** Only meaningful once the trace is finished — a running trace has no total yet (see `running`). */
   durationMs?: number
   spanCount: number
   status?: 'ok' | 'error'
+  /** At least one span has not closed. Kept SEPARATE from `status` because a turn can be both in flight
+   *  and already carrying a failed tool call, and a list that collapses the two either hides live turns or
+   *  hides their errors. Without this a running build is indistinguishable from a finished one. */
+  running?: boolean
   projectId?: string
   model?: string
 }

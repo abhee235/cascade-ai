@@ -72,6 +72,10 @@ export function createSqliteTracer(store: TraceStore, opts: SqliteTracerOptions 
 
   let rootId: string | undefined
   let rootStart = 0
+  // Carried for the same reason as `llm.attrs` below: the store upserts by span_id and REPLACES the
+  // attribute blob, so closing the root at turn_done would erase the submit text written when it opened —
+  // losing the user's own prompt from every finished trace, which is the first thing you click.
+  let rootAttrs: Record<string, unknown> = {}
   // `attrs` is carried so CLOSING the span can re-send them: the store upserts by span_id and
   // REPLACES the attribute blob, so request-time fields (provider/contextWindow) would otherwise be
   // erased by the response write — losing exactly the observables diagnosis depends on.
@@ -90,8 +94,9 @@ export function createSqliteTracer(store: TraceStore, opts: SqliteTracerOptions 
           if (!opts.traceId) traceId = id('t') // one trace per TURN — a session spans days
           rootId = id('s')
           rootStart = at
+          rootAttrs = { input: String(e.text ?? '').slice(0, 2000) }
           // Left OPEN until turn_done; the store upserts by span_id, so closing later just updates it.
-          write({ spanId: rootId, name: opts.rootName ?? 'agent', kind: 'AGENT', startedAt: at, attributes: { input: String(e.text ?? '').slice(0, 2000) } })
+          write({ spanId: rootId, name: opts.rootName ?? 'agent', kind: 'AGENT', startedAt: at, attributes: rootAttrs })
           break
         }
         case 'model_request': {
@@ -141,15 +146,19 @@ export function createSqliteTracer(store: TraceStore, opts: SqliteTracerOptions 
           break
         }
         case 'turn_done': {
-          if (rootId) write({ spanId: rootId, name: opts.rootName ?? 'agent', kind: 'AGENT', startedAt: rootStart, endedAt: at, status: 'ok', attributes: { turns: e.turns } })
+          if (rootId) write({ spanId: rootId, name: opts.rootName ?? 'agent', kind: 'AGENT', startedAt: rootStart, endedAt: at, status: 'ok', attributes: { ...rootAttrs, turns: e.turns } })
           rootId = undefined
+          rootAttrs = {}
           break
         }
         default: {
           // Zero-duration mark so a gate/breaker firing is visible in the waterfall at the right moment.
           if (MARK_EVENTS.has(e.t)) {
             const { t, ...rest } = e
-            write({ spanId: id('m'), parentSpanId: rootId, name: t, kind: 'CHAIN', startedAt: at, endedAt: at, status: t === 'error' ? 'error' : 'ok', attributes: rest })
+            // Status is left UNSET for a non-error mark, deliberately. A read loop or a compaction is a
+            // NOTICE, not a success — stamping it 'ok' put a green tick beside "read_loop", which reads as
+            // "this went well" on precisely the rows that say something went wrong.
+            write({ spanId: id('m'), parentSpanId: rootId, name: t, kind: 'CHAIN', startedAt: at, endedAt: at, status: t === 'error' ? 'error' : undefined, attributes: rest })
           }
         }
       }

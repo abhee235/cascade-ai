@@ -15,7 +15,7 @@ export type RightTab = 'preview' | 'code' | 'versions' // top builder pane (Cons
 /** Preview viewport: shows the built app at real device widths so responsive work is visible. */
 export type PreviewDevice = 'desktop' | 'tablet' | 'mobile'
 export type BottomTab = 'terminal' | 'problems' | 'output' | 'ports' // VS Code-style bottom panel (M7)
-export type Page = 'home' | 'project' | 'projects' | 'chats' | 'settings' | 'mcp'
+export type Page = 'home' | 'project' | 'projects' | 'chats' | 'settings' | 'mcp' | 'observatory'
 export type PreviewState = { status: 'installing' | 'starting' | 'running' | 'error' | 'stopped'; url?: string
   /** Why it failed (e.g. dev-server port drift) — shown in the pane instead of a bare 'unreachable'. */
   error?: string

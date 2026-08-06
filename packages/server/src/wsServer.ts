@@ -28,6 +28,7 @@ import { sdkConnect } from '@cascade/core'
 import type { McpServerInfo } from '@cascade/app-protocol'
 import type { ChatHistoryItem } from '@cascade/app-protocol'
 import type { Message } from '@cascade/core'
+import type { TraceStore } from '@cascade/storage'
 import { createFile, deletePath, editJsxTextAtLoc, makeDir, readDiff, readFile, readTree, renamePath, setClassAtLoc, writeFile } from './fileService.js'
 import { PreviewManager } from './previewManager.js'
 import { PreviewProxy } from './previewProxy.js'
@@ -132,6 +133,10 @@ export function handleConnection(
   versions?: VersionManager,
   chatStore?: ChatStore,
   serverInfo?: { sandbox: boolean; model: string },
+  /** ADR-081: the deployment's span store, for the Observatory. A PORT (`@cascade/storage`), never the
+   *  adapter — this file must not know whether it is reading SQLite or Postgres. Absent ⇒ the Observatory
+   *  simply reports no traces, which is the correct answer for a deployment that stores none. */
+  traces?: TraceStore,
 ): void {
   const send = (msg: unknown) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg))
@@ -665,6 +670,27 @@ export function handleConnection(
           send({ type: 'allChats', groups })
           break
         }
+        // ADR-081: the Observatory. Read-only and pull-based — a build writes hundreds of spans a minute,
+        // so pushing them live would flood the socket to render a page nobody may be looking at. The client
+        // polls while the page is open, which is also what makes a RUNNING turn visible: spans are readable
+        // the moment they are flushed, and an unfinished span simply has no end yet.
+        case 'traces': {
+          if (!traces) {
+            send({ type: 'traces', traces: [] })
+            break
+          }
+          const list = await traces.listTraces({ projectId: msg.projectId, limit: msg.limit ?? 100 })
+          // Drop traces whose project no longer exists: a deleted project's spans linger until retention
+          // prunes them, and a row you cannot open is worse than no row.
+          const live = new Set(manager.list().map((p) => p.id))
+          send({ type: 'traces', traces: list.filter((t) => !t.projectId || live.has(t.projectId)) })
+          break
+        }
+        case 'trace': {
+          if (!traces) break
+          send({ type: 'traceSpans', traceId: msg.traceId, spans: await traces.spans(msg.traceId) })
+          break
+        }
         case 'terminal': { // M7: open/close an interactive shell (one of possibly several sessions)
           if (!activeId) break
           if (msg.action === 'stop') {
@@ -788,6 +814,8 @@ function verifyWsClient(
 export interface ServerDeps {
   /** Fans each session's trace events into the deployment's own store (desktop: SQLite → Observatory). */
   sessionTracerFor?: SessionTracerFactory
+  /** The READ side of the same store — what the Observatory queries. A port, never an adapter. */
+  traces?: TraceStore
   /** Release storage resources on shutdown. Runs BEFORE process.exit — buffered writes are memory-only. */
   dispose?: () => Promise<void>
 }
@@ -840,7 +868,7 @@ export async function start(deps: ServerDeps = {}) {
   // WS upgrade's Origin + token (see handleHttp / verifyWsClient).
   const httpServer = createServer(handleHttp)
   const wss = new WebSocketServer({ server: httpServer, verifyClient: verifyWsClient })
-  wss.on('connection', (ws) => handleConnection(ws, manager, preview, previewProxy, PREVIEW_PORT, versions, chatStore, { sandbox: hasDocker, model: MODEL }))
+  wss.on('connection', (ws) => handleConnection(ws, manager, preview, previewProxy, PREVIEW_PORT, versions, chatStore, { sandbox: hasDocker, model: MODEL }, deps.traces))
   httpServer.listen(PORT, HOST)
   // Graceful exit (Ctrl-C / SIGTERM): dispose sessions + remove this run's sandbox containers. (A hard
   // SIGKILL skips this — the startup sweep above is the backstop.)

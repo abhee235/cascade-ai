@@ -90,6 +90,7 @@ export function createTraceStore(db: Db): TraceStore {
                  COUNT(*)                                           AS span_count,
                  MAX(CASE WHEN parent_id IS NULL THEN name END)     AS root_name,
                  MAX(CASE WHEN status = 'error' THEN 1 ELSE 0 END)  AS has_error,
+                 MAX(CASE WHEN ended_at IS NULL THEN 1 ELSE 0 END)  AS has_open,
                  MAX(project_id)                                    AS project_id,
                  MAX(model)                                         AS model
           FROM spans
@@ -104,9 +105,13 @@ export function createTraceStore(db: Db): TraceStore {
         traceId: r.trace_id as string,
         name: (r.root_name as string) ?? '(trace)',
         startedAt: r.started_at as number,
-        durationMs: Math.max(0, (r.ended_at as number) - (r.started_at as number)),
+        // A running trace has NO duration: MAX(COALESCE(ended_at, started_at)) over open spans measures
+        // only the part that already closed, which reads as a fast turn when it is in fact an unfinished
+        // one. Undefined is the honest answer; the UI shows it as running.
+        durationMs: r.has_open ? undefined : Math.max(0, (r.ended_at as number) - (r.started_at as number)),
         spanCount: r.span_count as number,
         status: r.has_error ? 'error' : 'ok',
+        running: !!r.has_open,
         projectId: (r.project_id as string) ?? undefined,
         model: (r.model as string) ?? undefined,
       }))

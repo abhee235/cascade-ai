@@ -1,0 +1,156 @@
+// SpanDetail.tsx — everything known about one span (ADR-081).
+//
+// The layout follows what the traces were actually USED for this cycle. Every weak-model diagnosis came
+// from a small set of numbers — context window vs input tokens, prefill vs decode, which tool was called
+// with what — so those get named fields at the top, and the raw attribute bag goes behind a tab rather
+// than being the first thing you read.
+
+import { useState } from 'react'
+import { Check, Copy } from 'lucide-react'
+import type { SpanInfo } from '@cascade/app-protocol'
+import { cn } from '@/lib/utils'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { SpanKindIcon, SpanKindToken, StatusDot } from './SpanKind'
+import { durationOf, formatDuration, formatRate, formatTokens, isRunning } from './constants'
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      type="button"
+      title="Copy"
+      className="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      onClick={() => {
+        void navigator.clipboard.writeText(text).then(() => {
+          setCopied(true)
+          setTimeout(() => setCopied(false), 1500)
+        })
+      }}
+    >
+      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  )
+}
+
+function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div className="min-w-0" title={hint}>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="truncate font-mono text-sm">{value}</div>
+    </div>
+  )
+}
+
+/** Long text (a prompt, a tool result) in a scrollable block. Tracer-side truncation at 2000 chars means
+ *  this never has to defend against a megabyte, but it still scrolls rather than growing the panel. */
+function TextBlock({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border">
+      <div className="flex items-center justify-between border-b px-3 py-1.5">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>
+        <CopyButton text={value} />
+      </div>
+      <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed">{value}</pre>
+    </div>
+  )
+}
+
+/** Attributes the named fields above already show — hidden from the raw list so it stays scannable. */
+const PROMOTED = new Set(['input', 'output', 'inputTokens', 'outputTokens', 'promptEvalMs', 'decodeMs', 'contextWindow', 'provider', 'model', 'cascade.project_id', 'cascade.model'])
+
+export function SpanDetail({ span }: { span: SpanInfo | null }) {
+  if (!span)
+    return (
+      <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">Select a span to see its detail.</div>
+    )
+
+  const a = span.attributes ?? {}
+  const running = isRunning(span)
+  const input = typeof a.input === 'string' ? a.input : undefined
+  const output = typeof a.output === 'string' ? a.output : undefined
+  const inTok = a.inputTokens as number | undefined
+  const outTok = a.outputTokens as number | undefined
+  const window = a.contextWindow as number | undefined
+  const rest = Object.entries(a).filter(([k]) => !PROMOTED.has(k))
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      {/* Header */}
+      <div className="shrink-0 border-b px-4 py-3">
+        <div className="flex items-center gap-2">
+          <SpanKindIcon kind={span.kind} size={18} />
+          <span className="min-w-0 flex-1 truncate font-semibold">{span.name}</span>
+          <SpanKindToken kind={span.kind} />
+          <StatusDot status={span.status} running={running} />
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Stat label="Duration" value={running ? 'running…' : formatDuration(durationOf(span))} />
+          {span.kind === 'LLM' ? (
+            <>
+              <Stat label="Tokens" value={`${formatTokens(inTok)} → ${formatTokens(outTok)}`} hint="prompt → completion" />
+              {/* Context OCCUPANCY, not throughput. Summing tokens across calls looks alarming (344k over a
+                  dozen calls) while real occupancy never left a third of the window — this is the ratio
+                  that actually predicts compaction. */}
+              <Stat
+                label="Context"
+                value={window ? `${Math.round(((inTok ?? 0) / window) * 100)}% of ${formatTokens(window)}` : '—'}
+                hint="how full the window was for THIS call"
+              />
+              <Stat label="Decode" value={formatRate(outTok, a.decodeMs as number | undefined)} hint="output tokens per second" />
+            </>
+          ) : (
+            <>
+              <Stat label="Started" value={new Date(span.startedAt).toLocaleTimeString()} />
+              {/* 'note' rather than a defaulted 'ok': a mark carries no status, and claiming success for it
+                  is the same mistake the green dot made. */}
+              <Stat label="Status" value={running ? 'running' : (span.status ?? 'note')} />
+              <Stat label="Span" value={span.spanId} />
+            </>
+          )}
+        </div>
+        {span.kind === 'LLM' && a.promptEvalMs != null && (
+          // Prefill vs decode is the local-inference split that explains a slow turn: a big prefill is a
+          // cold cache (re-sending context), slow decode is the model itself.
+          <div className="mt-2 font-mono text-[11px] text-muted-foreground">
+            prefill {formatDuration(a.promptEvalMs as number)} · decode {formatDuration(a.decodeMs as number | undefined)}
+            {a.provider ? ` · ${a.provider}` : ''}
+            {a.model ? `/${a.model}` : ''}
+          </div>
+        )}
+      </div>
+
+      {/* Body */}
+      <Tabs defaultValue="io" className="flex min-h-0 flex-1 flex-col">
+        <TabsList className="mx-4 mt-3 w-fit shrink-0">
+          <TabsTrigger value="io">Input / Output</TabsTrigger>
+          <TabsTrigger value="attrs">Attributes{rest.length ? ` (${rest.length})` : ''}</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="io" className="min-h-0 flex-1 space-y-3 overflow-auto px-4 pb-4">
+          {input && <TextBlock label={span.kind === 'TOOL' ? 'Tool input' : 'Input'} value={input} />}
+          {output && <TextBlock label={span.kind === 'TOOL' ? 'Tool result' : 'Output'} value={output} />}
+          {!input && !output && (
+            <div className={cn('py-8 text-center text-sm text-muted-foreground')}>
+              {running ? 'Still running — output arrives when the span closes.' : 'This span carries no input or output.'}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="attrs" className="min-h-0 flex-1 overflow-auto px-4 pb-4">
+          {rest.length ? (
+            <div className="divide-y rounded-lg border">
+              {rest.map(([k, v]) => (
+                <div key={k} className="grid grid-cols-[minmax(0,10rem)_1fr] gap-3 px-3 py-2">
+                  <span className="truncate font-mono text-xs text-muted-foreground">{k}</span>
+                  <span className="break-words font-mono text-xs">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="py-8 text-center text-sm text-muted-foreground">No further attributes.</div>
+          )}
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}

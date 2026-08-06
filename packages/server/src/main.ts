@@ -25,13 +25,7 @@ const storage = createTelemetryStorage({ file: DB_FILE })
 await start({
   // One tracer per SESSION, not per turn: it holds that session's open spans, and it mints a fresh trace
   // on every submit (see sqliteTracer) so the Observatory lists turns, not sessions.
-  sessionTracerFor: ({ dir, kind, model }) =>
-    createSqliteTracer(storage.traces, {
-      // The dir IS the project's identity here — it is what tracerFor keys on and what the JSONL traces
-      // sit under, so a span and its .jsonl are joinable without another id crossing the wire.
-      projectId: dir,
-      model,
-      rootName: `agent (${kind})`,
-    }),
+  sessionTracerFor: ({ projectId, kind, model }) => createSqliteTracer(storage.traces, { projectId, model, rootName: `agent (${kind})` }),
+  traces: storage.traces, // the READ side — what the Observatory queries
   dispose: () => storage.dispose(),
 })

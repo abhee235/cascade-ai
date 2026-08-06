@@ -30,7 +30,7 @@ const fakeProvider: ModelProvider = {
 describe('ADR-081 telemetry wiring (product path)', () => {
   it('a real submit lands spans in the SQLite store the Observatory reads', async () => {
     const storage = createTelemetryStorage({ file: join(mkdtempSync(join(tmpdir(), 'cascade-wire-')), 'cascade.db') })
-    const seen: { dir: string; kind: string; model?: string }[] = []
+    const seen: { projectId?: string; kind: string; model?: string }[] = []
     const mgr = new ProjectManager({
       root: mkdtempSync(join(tmpdir(), 'cascade-pm-wire-')),
       model: 'fake',
@@ -39,7 +39,7 @@ describe('ADR-081 telemetry wiring (product path)', () => {
       createProviderFn: () => fakeProvider,
       sessionTracerFor: (info) => {
         seen.push(info)
-        return createSqliteTracer(storage.traces, { projectId: info.dir, model: info.model, rootName: `agent (${info.kind})` })
+        return createSqliteTracer(storage.traces, { projectId: info.projectId, model: info.model, rootName: `agent (${info.kind})` })
       },
     })
 
@@ -49,12 +49,18 @@ describe('ADR-081 telemetry wiring (product path)', () => {
       /* drain */
     }
 
-    expect(seen).toEqual([{ dir: expect.any(String), kind: 'builder', model: 'fake' }])
+    // The factory is handed the project ID and NOT the dir — the dir is absent from the type on purpose.
+    expect(seen).toEqual([{ projectId: p.id, kind: 'builder', model: 'fake' }])
 
     const traces = await storage.traces.listTraces()
     expect(traces).toHaveLength(1)
     expect(traces[0].name).toBe('agent (builder)')
     expect(traces[0].model).toBe('fake')
+    // The span is stamped with the project ID, never the host dir: these rows are read back BY A CLIENT,
+    // and a host path must not cross the wire (ProjectInfo). Storing the dir would mean either leaking it
+    // or translating on every query.
+    expect(traces[0].projectId).toBe(p.id)
+    expect(traces[0].projectId).not.toContain('cascade-pm-wire')
 
     // The LLM span is the one that matters: it carries the tokens/timings every diagnosis this cycle
     // depended on. Its presence proves the fanout reached the store, not just that a root was written.

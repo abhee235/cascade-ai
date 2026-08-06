@@ -67,6 +67,30 @@ describe('SqliteTracer — event stream → span tree', () => {
     expect((await store.listTraces())[0].status).toBe('error')
   })
 
+  it('KEEPS the submit text on the root after the turn closes', async () => {
+    // The store upserts by span_id and replaces the attribute blob, so closing the root at turn_done used
+    // to erase the prompt written when it opened — losing the user's own words from every finished trace,
+    // on the span you land on first. Caught in the live UI ("This span carries no input or output").
+    const { store, emit } = setup()
+    emit({ t: 'submit', text: 'Build a recipe app' })
+    emit({ t: 'turn_done', turns: 3 })
+    const root = (await store.spans('T')).find((s) => s.kind === 'AGENT')!
+    expect(root.attributes?.input).toBe('Build a recipe app')
+    expect(root.attributes?.turns).toBe(3) // and the close still adds its own
+  })
+
+  it('leaves a non-error mark WITHOUT a status — a breaker is a notice, not a success', async () => {
+    // 'ok' put a green tick beside "read_loop", which reads as "this went well" on the row that says it
+    // did not. Unset renders muted; only a real error goes red.
+    const { store, emit } = setup()
+    emit({ t: 'submit', text: 'x' })
+    emit({ t: 'read_loop', turn: 1, path: 'a.ts' })
+    emit({ t: 'error', message: 'boom' })
+    const marks = (await store.spans('T')).filter((s) => s.kind === 'CHAIN')
+    expect(marks.find((m) => m.name === 'read_loop')?.status).toBeUndefined()
+    expect(marks.find((m) => m.name === 'error')?.status).toBe('error')
+  })
+
   it('records loop breakers as marks — a firing gate must be visible on the waterfall', async () => {
     const { store, emit } = setup()
     emit({ t: 'submit', text: 'x' })

@@ -127,6 +127,17 @@ below it changes. `ProjectManager` takes a `sessionTracerFor` factory — the sa
 JSONL tracer still first so neither a dead viewer nor a throwing adapter can cost us the forensic
 record.
 
+**The Observatory is pull-based.** A build writes hundreds of spans a minute; pushing them would flood
+the socket to render a page nobody may have open. The client polls (3s) *only while the page is mounted*
+— which is also what makes a running turn watchable, since spans are readable the moment they are
+flushed. Two commands (`traces`/`trace`) and two events; the server filters out traces whose project was
+deleted, because a row you cannot open is worse than no row.
+
+**Running is not a status.** A trace carries `status` (ok/error) *and* `running` separately: a turn can be
+in flight and already carrying a failed tool call, and collapsing the two hides one or the other. A
+running trace reports **no** `durationMs` — the closed spans' extent reads as a suspiciously fast turn.
+Verified live: before this, every in-flight build showed a green tick and a plausible duration.
+
 **A trace is a TURN, not a session.** `SqliteTracer` mints a fresh trace id on every `submit`. The
 tracer's lifetime is the session's (it holds that session's open spans), and a session lives for days —
 without this, turn 40 appends to turn 1's trace and the Observatory shows one unreadable row with 40

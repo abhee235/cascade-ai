@@ -8,7 +8,7 @@ import type { WireEvent, WireMessage } from './wsClient'
 import { extractMessage, type BottomTab, type Item, type Page, type PreviewDevice, type PreviewState, type Recovering, type RightTab, type RuntimeError, type Streaming } from './types'
 import { StreamingOptimizer } from './streamingOptimizer'
 import { applyAccent, applyTheme, getInitialAccent, getInitialTheme, type Theme } from './theme'
-import type { ChatMeta, EnabledModelInfo, FileNode, McpServerInfo, ModelLimits, Problem, ProjectInfo, TemplateInfo, Version } from '@cascade/app-protocol'
+import type { ChatMeta, EnabledModelInfo, FileNode, McpServerInfo, ModelLimits, Problem, ProjectInfo, SpanInfo, TemplateInfo, TraceSummaryInfo, Version } from '@cascade/app-protocol'
 
 // ADR-068: events that mutate the active-chat transcript/streaming. Gated to the viewed project so a
 // background turn (another project) can't bleed into this one. Everything else (projects, files, preview,
@@ -47,6 +47,14 @@ interface UiState {
   activeId: string | null
   // every project's chats, for the Chats page (requested on demand)
   allChats: { project: ProjectInfo; chats: ChatMeta[] }[]
+  // ADR-081: the Observatory. Pull-based — a build writes hundreds of spans a minute, so these are polled
+  // while the page is open rather than pushed. `traceSpans` is keyed by trace so re-opening one is instant
+  // and a poll can refresh a LIVE trace's waterfall in place.
+  traces: TraceSummaryInfo[]
+  tracesLoaded: boolean // distinguishes "none yet" from "not asked" — an empty table must not read as data loss
+  openTraceId: string | null
+  traceSpans: Record<string, SpanInfo[]>
+  selectedSpanId: string | null
   // transcript (per active project; cleared on open)
   items: Item[]
   streaming: Streaming | null
@@ -137,6 +145,11 @@ interface UiState {
   deleteChat: (id: string) => void // M11
   renameChat: (id: string, title: string) => void // M11
   requestAllChats: () => void // the Chats page: ask for every project's chat list
+  // ADR-081 Observatory
+  requestTraces: (projectId?: string) => void
+  openTrace: (traceId: string) => void // fetch + show one trace's waterfall
+  closeTrace: () => void
+  selectSpan: (spanId: string | null) => void
   openChat: (projectId: string, chatId: string) => void // the Chats page: open a project AND switch to a chat
   createProject: (name: string, templateId?: string) => void
   openProject: (id: string) => void
@@ -279,7 +292,7 @@ export const useStore = create<UiState>((set, get) => {
       }
       return
     }
-    const page: Page = path === '/projects' ? 'projects' : path === '/chats' ? 'chats' : path === '/settings' ? 'settings' : path === '/mcp' ? 'mcp' : 'home'
+    const page: Page = path === '/projects' ? 'projects' : path === '/chats' ? 'chats' : path === '/settings' ? 'settings' : path === '/mcp' ? 'mcp' : path === '/observatory' ? 'observatory' : 'home'
     set({ page, pendingSlug: null, slugNotFound: null })
   }
 
@@ -299,6 +312,11 @@ export const useStore = create<UiState>((set, get) => {
     templates: [],
     activeId: null,
     allChats: [],
+    traces: [],
+    tracesLoaded: false,
+    openTraceId: null,
+    traceSpans: {},
+    selectedSpanId: null,
     items: [],
     streaming: null,
     status: null,
@@ -497,6 +515,14 @@ export const useStore = create<UiState>((set, get) => {
         case 'allChats':
           set({ allChats: e.groups })
           break
+        case 'traces': // ADR-081: the Observatory's list (polled while the page is open)
+          set({ traces: e.traces, tracesLoaded: true })
+          break
+        case 'traceSpans':
+          // Keyed by trace, not stored as "the open one": a poll for a LIVE trace refreshes its waterfall
+          // in place, and going back then forward again renders instantly instead of blanking.
+          set((s) => ({ traceSpans: { ...s.traceSpans, [e.traceId]: e.spans } }))
+          break
         case 'projects': {
           set({ projects: e.projects })
           // If we arrived on a /project/<slug> URL before the list loaded, resolve it now.
@@ -688,6 +714,17 @@ export const useStore = create<UiState>((set, get) => {
       if (p) pushUrl(projectPath(p))
     },
     requestAllChats: () => get().send({ type: 'chats', action: 'listAll' }),
+
+    // ── ADR-081 Observatory ────────────────────────────────────────────────────────────────────────────
+    requestTraces: (projectId) => get().send({ type: 'traces', action: 'list', projectId }),
+    openTrace: (traceId) => {
+      // Show the trace IMMEDIATELY from cache if we have it, and refetch regardless: a trace whose turn is
+      // still running grows, so the cached copy is a head start, never the final answer.
+      set({ openTraceId: traceId, selectedSpanId: null })
+      get().send({ type: 'trace', action: 'spans', traceId })
+    },
+    closeTrace: () => set({ openTraceId: null, selectedSpanId: null }),
+    selectSpan: (selectedSpanId) => set({ selectedSpanId }),
     openChat: (projectId, chatId) => {
       // Open the project first, then switch to the chat — same socket, ordered, so the server processes
       // `open` (which attaches the session) before `chat switch`.

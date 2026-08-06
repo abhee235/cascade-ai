@@ -75,9 +75,13 @@ export interface ProjectManagerOptions {
   sessionTracerFor?: SessionTracerFactory
 }
 
-/** Builds the per-session extra tracer. Gets `model` because a span's model is the one that ANSWERED —
- *  the active selection changes at runtime (ADR-067), so it can't be captured once at startup. */
-export type SessionTracerFactory = (info: { dir: string; kind: 'builder' | 'planner'; model?: string }) => Tracer | undefined
+/** Builds the per-session extra tracer.
+ *  - `projectId`, NOT the host dir — and the dir is deliberately not offered. Spans written here are read
+ *    back by a client, where a host path must never appear (see ProjectInfo); passing the dir would put a
+ *    leak one keystroke away, and a dir is meaningless to a hosted adapter anyway.
+ *  - `model` because a span's model is the one that ANSWERED, and the active selection changes at
+ *    runtime (ADR-067), so it can't be captured once at startup. */
+export type SessionTracerFactory = (info: { projectId?: string; kind: 'builder' | 'planner'; model?: string }) => Tracer | undefined
 
 /** Builder behavior injected ahead of every project's AI rules (as generic `extraInstructions`). The core
  *  base prompt is concise-chat-tuned, which makes the model explore then stop; the builder needs the opposite:
@@ -260,7 +264,7 @@ export class ProjectManager {
           mcpConnect: this.opts.mcpConnect,
           // Product forensics (walkthrough lesson: no trace = no diagnosis). ADR-081: the deployment's own
           // tracer joins the fanout here — on the desktop that is the SQLite store the Observatory reads.
-          tracer: tracerFor(dir, 'builder', this.opts.sessionTracerFor?.({ dir, kind: 'builder', model: this.active.model })),
+          tracer: tracerFor(dir, 'builder', this.opts.sessionTracerFor?.({ projectId: this.idOfDir(dir), kind: 'builder', model: this.active.model })),
           // ADR-074: ON. The original OFF had two reasons — (a) curation adds hidden model calls (dead air),
           // (b) recall mutated the system-prompt PREFIX, breaking the KV cache. (b) is now gone: dynamic recall
           // appends surfaced facts at the message TAIL (dynamicRecall.ts), leaving the cached prefix intact, and
@@ -343,7 +347,7 @@ export class ProjectManager {
           maxOutputTokens: this.active.maxOutputTokens,
           skillDirs: skillDirsFor(dir),
           sandbox,
-          tracer: tracerFor(dir, 'planner', this.opts.sessionTracerFor?.({ dir, kind: 'planner', model: this.active.model })), // stage forensics in the product too
+          tracer: tracerFor(dir, 'planner', this.opts.sessionTracerFor?.({ projectId: this.idOfDir(dir), kind: 'planner', model: this.active.model })), // stage forensics in the product too
         }))
     return build(project.dir, def, project.sandbox)
   }
@@ -351,6 +355,14 @@ export class ProjectManager {
   /** The host dir of a project — SERVER-INTERNAL only (never crosses the wire). For the file service. */
   dirOf(id: string): string | undefined {
     return this.projects.get(id)?.dir
+  }
+
+  /** The inverse of dirOf. The session factories are handed a `dir` (that is what a session is rooted at),
+   *  but anything that will reach a client — a span's project stamp — must carry the ID instead. Linear,
+   *  and it runs once per session creation, not per event. */
+  private idOfDir(dir: string): string | undefined {
+    for (const p of this.projects.values()) if (p.dir === dir) return p.id
+    return undefined
   }
 
   /** ADR-071: drop cached sessions so the next open() rebuilds with fresh config (e.g. after an MCP server is

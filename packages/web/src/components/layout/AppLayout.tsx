@@ -13,6 +13,7 @@ import { ProjectsPage } from '@/pages/ProjectsPage'
 import { ChatsPage } from '@/pages/ChatsPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { McpPage } from '@/pages/McpPage'
+import { ObservatoryPage } from '@/pages/ObservatoryPage'
 
 export function AppLayout() {
   const page = useStore((s) => s.page)
@@ -37,6 +38,8 @@ export function AppLayout() {
           <ChatsPage />
         ) : page === 'mcp' ? (
           <McpPage />
+        ) : page === 'observatory' ? (
+          <ObservatoryPage />
         ) : (
           <SettingsPage />
         )}

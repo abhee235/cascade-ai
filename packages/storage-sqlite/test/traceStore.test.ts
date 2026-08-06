@@ -55,6 +55,35 @@ describe('sqlite TraceStore (ADR-081)', () => {
     expect(t.model).toBe('qwen')
   })
 
+  it('reports a trace as RUNNING while any span is still open, with no duration', async () => {
+    // Without this a live build is indistinguishable from a finished one in the list, and its duration —
+    // computed from only the spans that already closed — reads as a suspiciously fast turn.
+    const store = createTraceStore(openDb(tmpDb()))
+    store.record(span({ spanId: 'root', kind: 'AGENT', startedAt: 500, endedAt: undefined }))
+    store.record(span({ spanId: 'c1', parentSpanId: 'root', startedAt: 600, endedAt: 700 }))
+    const [t] = await store.listTraces()
+    expect(t.running).toBe(true)
+    expect(t.durationMs).toBeUndefined()
+  })
+
+  it('a finished trace is not running and keeps its duration', async () => {
+    const store = createTraceStore(openDb(tmpDb()))
+    store.record(span({ spanId: 'root', kind: 'AGENT', startedAt: 500, endedAt: 3000 }))
+    const [t] = await store.listTraces()
+    expect(t.running).toBe(false)
+    expect(t.durationMs).toBe(2500)
+  })
+
+  it('a running trace can ALSO be errored — the two facts are independent', async () => {
+    // A tool failed and the turn is still going. Collapsing status and running would hide one of them.
+    const store = createTraceStore(openDb(tmpDb()))
+    store.record(span({ spanId: 'root', kind: 'AGENT', startedAt: 1, endedAt: undefined }))
+    store.record(span({ spanId: 'bad', parentSpanId: 'root', status: 'error' }))
+    const [t] = await store.listTraces()
+    expect(t.running).toBe(true)
+    expect(t.status).toBe('error')
+  })
+
   it('marks a trace errored if ANY span failed', async () => {
     const store = createTraceStore(openDb(tmpDb()))
     store.record(span({ spanId: 'r', status: 'ok' }))
