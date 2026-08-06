@@ -12,7 +12,8 @@
 
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { createSqliteTracer, createTelemetryStorage } from '@cascade/storage-sqlite'
+import { createSpanTracer } from '@cascade/core'
+import { createTelemetryStorage } from '@cascade/storage-sqlite'
 import { start } from './wsServer.js'
 
 /** Where app state lives. On the desktop this becomes Electron's `app.getPath('userData')`, passed in by
@@ -23,9 +24,13 @@ const DB_FILE = process.env.CASCADE_DB || join(APP_DATA, 'cascade.db')
 const storage = createTelemetryStorage({ file: DB_FILE })
 
 await start({
-  // One tracer per SESSION, not per turn: it holds that session's open spans, and it mints a fresh trace
-  // on every submit (see sqliteTracer) so the Observatory lists turns, not sessions.
-  sessionTracerFor: ({ projectId, kind, model }) => createSqliteTracer(storage.traces, { projectId, model, rootName: `agent (${kind})` }),
+  // The desktop's telemetry sink: core's ONE event→span fold, writing straight into the store. There is
+  // no SQLite-specific tracer any more — `traces.record` is the whole sink, which is what stops this path
+  // and the OTLP one from drifting (ADR-081 amendment).
+  //
+  // One instance per SESSION, not per turn: it holds that session's open spans, and mints a fresh trace
+  // on every submit so the Observatory lists turns, not sessions.
+  sessionTracerFor: ({ projectId, kind, model }) => createSpanTracer((span) => storage.traces.record(span), { projectId, model, rootName: `agent (${kind})` }),
   traces: storage.traces, // the READ side — what the Observatory queries
   dispose: () => storage.dispose(),
 })

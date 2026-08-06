@@ -43,11 +43,11 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
 
 /** Long text (a prompt, a tool result) in a scrollable block. Tracer-side truncation at 2000 chars means
  *  this never has to defend against a megabyte, but it still scrolls rather than growing the panel. */
-function TextBlock({ label, value }: { label: string; value: string }) {
+function TextBlock({ label, value, tone }: { label: string; value: string; tone?: 'reasoning' }) {
   return (
-    <div className="rounded-lg border">
-      <div className="flex items-center justify-between border-b px-3 py-1.5">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>
+    <div className={cn('rounded-lg border', tone === 'reasoning' && 'border-violet-500/30 bg-violet-500/5')}>
+      <div className={cn('flex items-center justify-between border-b px-3 py-1.5', tone === 'reasoning' && 'border-violet-500/25')}>
+        <span className={cn('text-[11px] font-semibold uppercase tracking-wide', tone === 'reasoning' ? 'text-violet-600 dark:text-violet-400' : 'text-muted-foreground')}>{label}</span>
         <CopyButton text={value} />
       </div>
       <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed">{value}</pre>
@@ -56,7 +56,25 @@ function TextBlock({ label, value }: { label: string; value: string }) {
 }
 
 /** Attributes the named fields above already show — hidden from the raw list so it stays scannable. */
-const PROMOTED = new Set(['input', 'output', 'inputTokens', 'outputTokens', 'promptEvalMs', 'decodeMs', 'contextWindow', 'provider', 'model', 'cascade.project_id', 'cascade.model'])
+const PROMOTED = new Set([
+  'input',
+  'output',
+  'thinking',
+  'inputTokens',
+  'outputTokens',
+  'promptEvalMs',
+  'prefillTps',
+  'decodeMs',
+  'decodeTps',
+  'contextWindow',
+  'provider',
+  'model',
+  'latencyMs',
+  'durationMs',
+  'toolName',
+  'cascade.project_id',
+  'cascade.model',
+])
 
 export function SpanDetail({ span }: { span: SpanInfo | null }) {
   if (!span)
@@ -68,6 +86,7 @@ export function SpanDetail({ span }: { span: SpanInfo | null }) {
   const running = isRunning(span)
   const input = typeof a.input === 'string' ? a.input : undefined
   const output = typeof a.output === 'string' ? a.output : undefined
+  const thinking = typeof a.thinking === 'string' && a.thinking.trim() ? a.thinking : undefined
   const inTok = a.inputTokens as number | undefined
   const outTok = a.outputTokens as number | undefined
   const window = a.contextWindow as number | undefined
@@ -83,6 +102,14 @@ export function SpanDetail({ span }: { span: SpanInfo | null }) {
           <SpanKindToken kind={span.kind} />
           <StatusDot status={span.status} running={running} />
         </div>
+        {/* Signals that change how you read the row, so they belong beside the name rather than buried in
+            the attribute list: the harness had to fix the model's arguments, or a human was asked. */}
+        {Boolean(a.argsRepaired || a['cascade.permission_asked']) && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {a.argsRepaired ? <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">arguments repaired</span> : null}
+            {a['cascade.permission_asked'] ? <span className="rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">you were asked · {String(a['cascade.permission'])}</span> : null}
+          </div>
+        )}
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Stat label="Duration" value={running ? 'running…' : formatDuration(durationOf(span))} />
           {span.kind === 'LLM' ? (
@@ -96,7 +123,15 @@ export function SpanDetail({ span }: { span: SpanInfo | null }) {
                 value={window ? `${Math.round(((inTok ?? 0) / window) * 100)}% of ${formatTokens(window)}` : '—'}
                 hint="how full the window was for THIS call"
               />
-              <Stat label="Decode" value={formatRate(outTok, a.decodeMs as number | undefined)} hint="output tokens per second" />
+              {/* Prefill throughput is the KV-CACHE observable and decode is the model's raw speed — they
+                  fail for different reasons, so they get equal billing. Prompt token COUNTS include cached
+                  tokens, so a cache MISS shows up only here: ~500 tok/s means a full re-prefill, a hit runs
+                  10k+. Duration alone cannot tell those apart. */}
+              <Stat
+                label="Prefill / decode"
+                value={`${a.prefillTps ? `${formatTokens(a.prefillTps as number)}/s` : '—'} · ${a.decodeTps ? `${a.decodeTps}/s` : formatRate(outTok, a.decodeMs as number | undefined)}`}
+                hint="prefill tok/s (low ⇒ KV-cache miss) · decode tok/s"
+              />
             </>
           ) : (
             <>
@@ -108,13 +143,14 @@ export function SpanDetail({ span }: { span: SpanInfo | null }) {
             </>
           )}
         </div>
-        {span.kind === 'LLM' && a.promptEvalMs != null && (
-          // Prefill vs decode is the local-inference split that explains a slow turn: a big prefill is a
-          // cold cache (re-sending context), slow decode is the model itself.
+        {span.kind === 'LLM' && (a.promptEvalMs != null || a.model != null) && (
           <div className="mt-2 font-mono text-[11px] text-muted-foreground">
-            prefill {formatDuration(a.promptEvalMs as number)} · decode {formatDuration(a.decodeMs as number | undefined)}
-            {a.provider ? ` · ${a.provider}` : ''}
+            {a.promptEvalMs != null && `prefill ${formatDuration(a.promptEvalMs as number)} · decode ${formatDuration(a.decodeMs as number | undefined)} · `}
+            {a.provider ? `${a.provider}` : ''}
             {a.model ? `/${a.model}` : ''}
+            {/* A nonzero load mid-session means the RUNNER was evicted and reloaded — which looks exactly
+                like a slow model until you can see this number, so it is called out rather than buried. */}
+            {a.modelLoadMs != null && <span className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-600 dark:text-amber-400">model reloaded ({formatDuration(a.modelLoadMs as number)})</span>}
           </div>
         )}
       </div>
@@ -127,9 +163,13 @@ export function SpanDetail({ span }: { span: SpanInfo | null }) {
         </TabsList>
 
         <TabsContent value="io" className="min-h-0 flex-1 space-y-3 overflow-auto px-4 pb-4">
-          {input && <TextBlock label={span.kind === 'TOOL' ? 'Tool input' : 'Input'} value={input} />}
+          {input && <TextBlock label={span.kind === 'TOOL' ? 'Tool input' : span.kind === 'LLM' ? 'Prompt (last messages)' : 'Input'} value={input} />}
+          {/* Reasoning FIRST, because it came first and because it is the part that explains the rest. On a
+              tool-only turn the output degrades to the tool list, and the thinking that chose those tools is
+              the only account of why — precisely the turn you need when a local model goes somewhere odd. */}
+          {thinking && <TextBlock label="Reasoning" value={thinking} tone="reasoning" />}
           {output && <TextBlock label={span.kind === 'TOOL' ? 'Tool result' : 'Output'} value={output} />}
-          {!input && !output && (
+          {!input && !output && !thinking && (
             <div className={cn('py-8 text-center text-sm text-muted-foreground')}>
               {running ? 'Still running — output arrives when the span closes.' : 'This span carries no input or output.'}
             </div>

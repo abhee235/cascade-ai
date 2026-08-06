@@ -192,11 +192,68 @@ describe('OtelTracer — span tree from the forensic event stream', () => {
 		ev({ t: 'plan_nudge', turn: 0 })
 		ev({ t: 'delegate_nudge', turn: 0, readTokens: 40_000 })
 		ev({ t: 'verify_gate', turn: 0 })
+		// ADR-081 amendment: these three reached the Observatory but NOT here — otelTracer had no `case` for
+		// them, so the newest loop breakers hit `default: break` and never rendered in Phoenix at all. That
+		// gap is what motivated collapsing the two folds into one; they must never diverge again.
+		ev({ t: 'narration_loop', turn: 1 })
+		ev({ t: 'repeat_call', turn: 1, tool: 'Read' })
+		ev({ t: 'tool_cap', turn: 1, calls: 100 })
+		ev({ t: 'degenerate_cut', turn: 1, chars: 18_600 })
+		ev({ t: 'planning_stall', turn: 1, idle: 5 })
+		ev({ t: 'hook', event: 'PreToolUse', id: 'h', tool: 'Bash', decision: 'allow', ms: 12 })
 		// NOTE: the turn is deliberately still open — no turn_done. These must be exported anyway.
 		const names = exporter.getFinishedSpans().map((s) => s.name)
-		for (const expected of ['slow prefill (185s)', 'compaction (masked)', 'post-edit check: errors', 'nudge: read loop', 'gate: todos still open', 'nudge: stalled verify', 'degraded response — retried', 'nudge: plan first', 'nudge: delegate', 'gate: verify']) {
-			expect(names, `${expected} must reach the viewer`).toContain(expected)
+		// Prefix-matched: several labels carry their key datum inline ("read loop (src/App.tsx)") so the row
+		// is legible on a waterfall without being clicked. Pinning the exact string would make enriching a
+		// label a test failure, which is backwards — what must hold is that the event ARRIVES, readably.
+		for (const expected of [
+			'slow prefill (185s)',
+			'compaction (masked)',
+			'post-edit check: errors',
+			'nudge: read loop',
+			'gate: 3 todos still open',
+			'nudge: stalled verify',
+			'degraded response — retried',
+			'nudge: plan first',
+			'nudge: delegate',
+			'gate: verify',
+			'nudge: narration loop',
+			'nudge: repeat call',
+			'cap: 100 tool calls',
+			'cut: degenerate output loop',
+			'nudge: planning stall',
+			'hook PreToolUse → allow',
+		]) {
+			expect(names.some((n) => n.startsWith(expected)), `${expected} must reach the viewer — got ${JSON.stringify(names)}`).toBe(true)
 		}
+	})
+
+	// The gap that started the ADR-081 amendment, pinned from the other side: the Observatory had the LLM's
+	// OUTPUT but never its INPUT, so "what was the model looking at" — the question that explains a weak
+	// model's behaviour — had no answer in-app. One fold now feeds both, so asserting it here covers both.
+	it('carries the prompt, arg repair, permission and the KV-cache observables', () => {
+		const { tracer, exporter } = memoryTracer()
+		const ev = (e: object) => tracer.event(e as never)
+		ev({ t: 'submit', text: 'go' })
+		ev({ t: 'model_request', turn: 0, provider: 'ollama', model: 'q', contextWindow: 131072, system: '', tools: ['Read'], messages: [{ role: 'user', content: 'add a filter' }] })
+		ev({ t: 'model_response', turn: 0, text: 'ok', thinking: '', toolUses: [], usage: { inputTokens: 44210, outputTokens: 512, promptEvalMs: 8600, decodeMs: 16400, loadMs: 2400 } })
+		ev({ t: 'permission', id: 'a', tool: 'Edit', decision: 'allow', asked: true })
+		ev({ t: 'tool_call', id: 'a', name: 'Edit', input: { file_path: 'x.ts' }, repaired: true })
+		ev({ t: 'tool_result', id: 'a', name: 'Edit', ok: true, ms: 9, content: 'done' })
+
+		const llm = exporter.getFinishedSpans().find((s) => s.name === 'llm turn 0')!.attributes
+		expect(llm['input.value']).toContain('add a filter') // the PROMPT, not just the answer
+		// prefill_tps is the KV-cache observable: ~500 tok/s means a full re-prefill, a cache hit runs 10k+.
+		// Duration alone cannot tell those apart, which is why the raw ms is not enough.
+		expect(llm['cascade.prefill_tps']).toBe(Math.round((44210 / 8600) * 1000))
+		expect(llm['cascade.decode_tps']).toBe(31.2)
+		expect(llm['cascade.model_load_ms']).toBe(2400) // the runner was evicted and reloaded mid-session
+		expect(llm['cascade.context_used_pct']).toBe(34)
+
+		const tool = exporter.getFinishedSpans().find((s) => s.name === 'tool Edit')!.attributes
+		expect(tool['cascade.args_repaired']).toBe(true) // the harness had to fix the model's arguments
+		expect(tool['cascade.permission']).toBe('allow')
+		expect(tool['cascade.permission_asked']).toBe(true)
 	})
 
 	it('a permission decision rides on the tool span it authorised (not a span of its own)', () => {

@@ -11,8 +11,8 @@ import { describe, it, expect } from 'vitest'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createSqliteTracer, createTelemetryStorage } from '@cascade/storage-sqlite'
-import type { ModelProvider } from '@cascade/core'
+import { createTelemetryStorage } from '@cascade/storage-sqlite'
+import { createSpanTracer, type ModelProvider } from '@cascade/core'
 import { ProjectManager } from '../src/projectManager'
 
 /** Answers every turn with one line and no tool calls, so a submit completes without a backend. */
@@ -39,7 +39,8 @@ describe('ADR-081 telemetry wiring (product path)', () => {
       createProviderFn: () => fakeProvider,
       sessionTracerFor: (info) => {
         seen.push(info)
-        return createSqliteTracer(storage.traces, { projectId: info.projectId, model: info.model, rootName: `agent (${info.kind})` })
+        // main.ts's wiring, verbatim: core's ONE fold, sinking straight into the store.
+        return createSpanTracer((span) => storage.traces.record(span), { projectId: info.projectId, model: info.model, rootName: `agent (${info.kind})` })
       },
     })
 

@@ -127,6 +127,26 @@ below it changes. `ProjectManager` takes a `sessionTracerFor` factory — the sa
 JSONL tracer still first so neither a dead viewer nor a throwing adapter can cost us the forensic
 record.
 
+**One fold, two sinks (amended 2026-08-07).** The Observatory originally had its own event→span mapping
+beside `OtelTracer`'s. Feeding both from a single replay and diffing measured the cost: **six** event
+types reached Phoenix and were dropped by the Observatory (`delegate_nudge`, `plan_nudge`,
+`degenerate_cut`, `planning_stall`, `hook`, `permission`); **three** reached the Observatory and were
+dropped by Phoenix (`narration_loop`, `repeat_call`, `tool_cap` — the newest breakers, which
+`otelTracer` had no `case` for); and the Observatory carried no LLM prompt, no reasoning, no prefill
+throughput, no arg-repair or model-load signal. None of it was a bug anyone wrote; it is what two
+parallel implementations of one mapping do.
+
+The mapping now lives once in `core/observability/spanFold.ts` and a tracer is a **sink**: `OtelTracer`
+turns spans into OTLP, the desktop passes `traces.record` directly. `storage-sqlite` lost its tracer
+entirely — the adapter no longer knows anything about the agent, which *strengthens* the boundary.
+
+*Why not OTLP end-to-end, with the desktop consuming its own exporter?* Two reasons, both about the
+transport rather than the mapping: OTLP exports a span only when it **ends**, so a turn in flight is
+structurally invisible — and watching a live build is the point; and consuming it locally would mean
+running an OTLP **receiver** (protobuf decode, a listening socket) inside a desktop app. Sharing the
+fold gets the consistency without either cost. Spans are emitted twice — on open and on close — and
+each sink decides: an upserting store takes both, OTLP ignores the open.
+
 **The Observatory is pull-based.** A build writes hundreds of spans a minute; pushing them would flood
 the socket to render a page nobody may have open. The client polls (3s) *only while the page is mounted*
 — which is also what makes a running turn watchable, since spans are readable the moment they are
