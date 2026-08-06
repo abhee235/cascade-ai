@@ -1,0 +1,15 @@
+{
+  "name": "@cascade/storage-sqlite",
+  "version": "0.0.0",
+  "description": "Desktop adapter for @cascade/storage — embedded SQLite via node:sqlite (zero native deps), WAL, in-process migrations, buffered writes. ADR-081.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./src/index.ts", "default": "./src/index.ts" } },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": { "@cascade/storage": "*" },
+  "devDependencies": { "typescript": "^5.5.0" }
+}
