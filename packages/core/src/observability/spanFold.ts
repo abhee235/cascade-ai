@@ -94,12 +94,46 @@ export interface SpanFoldOptions {
    *  both a planner turn and a builder turn; with both roots called "agent" they are indistinguishable. */
   rootName?: string
   now?: () => number
+  /** Set by `subAgent()`: this fold nests INSIDE another's trace instead of starting one. Returns the
+   *  parent's live trace + root span, read at submit time because the parent's turn changes under it. */
+  parentTurn?: () => { traceId: string; spanId: string } | undefined
+  /** Set by `subAgent()`: read the CHAT from the parent rather than holding one. A sub-agent that kept its
+   *  own would start unattributed — its spans would sit in the turn but outside the conversation, so
+   *  "everything in this chat" would quietly miss the planner's work. */
+  sessionOf?: () => string | undefined
 }
 
 /** What a sink implements: receive span records (open and close) as they are produced. */
 export type SpanSink = (span: TraceSpan) => void
 
 export interface SpanTracer extends Tracer {
+  /**
+   * A tracer for a SUB-AGENT of this one: its root becomes a child AGENT span inside this fold's
+   * current trace, rather than a trace of its own.
+   *
+   * This is what the conventions call for. OTel's GenAI semconv models a same-process agent invocation
+   * as an INTERNAL `invoke_agent` span, and general OTel rules make a nested operation a child span —
+   * so a sub-agent belongs in its parent's trace. The tools agree emphatically: Langfuse propagates a
+   * trace id across SERVICE boundaries (and will derive it from a shared seed) specifically so a
+   * supervisor delegating to a separate agent service still reconstructs as one tree. Two sessions in
+   * one process producing two traces was an artifact of their having two tracers, not a decision.
+   *
+   * Cascade's orchestrated plan stage is exactly this case: one user message, planner then builder.
+   * A model-invoked `Subagent {agent:"planner"}` already nests (it shares the parent's tracer); this
+   * makes the orchestrated path identical.
+   */
+  subAgent(name: string): Tracer
+  /**
+   * Open this turn's root span NOW, before the session itself submits.
+   *
+   * The orchestrated plan stage runs to completion BEFORE the builder submits, so without this there is
+   * no root for it to nest under and it would start a trace of its own — which is exactly the artifact
+   * being removed. The server opens the turn, the plan stage nests inside it, and the builder's own
+   * `submit` then ADOPTS the open root rather than starting a second one.
+   *
+   * Idempotent-ish: a second beginTurn closes the first as interrupted, same as a second submit would.
+   */
+  beginTurn(text: string): void
   /** Bind following turns to a CHAT. Every submit is its own trace by design, so without this a build and
    *  its follow-ups arrive as unrelated traces with nothing tying them to the conversation they came from
    *  — and "show me what this chat actually did" is unanswerable. Set per submit, because a session's
@@ -125,14 +159,20 @@ export function createSpanTracer(emit: SpanSink, opts: SpanFoldOptions = {}): Sp
   // Read at WRITE time, not captured: the chat can change mid-session, and the id must land on every span
   // rather than only the root — the root is the last thing to close, so a live turn would be unattributed
   // for exactly as long as it is still interesting.
-  const base = () => ({ 'cascade.project_id': opts.projectId, 'cascade.model': opts.model, 'cascade.chat_id': chatId }) as Record<string, unknown>
+  const base = () => ({ 'cascade.project_id': opts.projectId, 'cascade.model': opts.model, 'cascade.chat_id': opts.sessionOf ? opts.sessionOf() : chatId }) as Record<string, unknown>
 
   let rootId: string | undefined
   let rootStart = 0
+  // Carried so the CLOSE record repeats it: the SQLite sink upserts only end/status/attributes, but the
+  // OTLP sink acts on the close and needs to know where to hang the span.
+  let rootParent: string | undefined
   // Attributes are carried forward because a sink that upserts REPLACES the attribute blob: closing a
   // span without re-sending its open-time fields erases them. That cost us the user's own prompt off
   // every finished trace once already — the root's `input`, written at submit and wiped at turn_done.
   let rootAttrs: Record<string, unknown> = {}
+  // Set by beginTurn: the next `submit` belongs to the root we already opened, so it must adopt rather
+  // than close-and-reopen (which would orphan anything the plan stage already nested inside it).
+  let adopting = false
   let llm: { spanId: string; start: number; turn: number; attrs: Record<string, unknown> } | undefined
   const tools = new Map<string, { spanId: string; start: number; name: string; attrs: Record<string, unknown> }>()
   // Permission decisions arrive BEFORE the tool span exists, so they wait here and ride on the call they
@@ -153,18 +193,44 @@ export function createSpanTracer(emit: SpanSink, opts: SpanFoldOptions = {}): Sp
       llm = undefined
     }
     if (rootId) {
-      write({ spanId: rootId, name: rootName, kind: 'AGENT', startedAt: rootStart, endedAt: at, status: reason ? 'error' : 'ok', attributes: { ...rootAttrs, ...(reason ? { 'cascade.interrupted': reason } : {}) } })
+      write({ spanId: rootId, parentSpanId: rootParent, name: rootName, kind: 'AGENT', startedAt: rootStart, endedAt: at, status: reason ? 'error' : 'ok', attributes: { ...rootAttrs, ...(reason ? { 'cascade.interrupted': reason } : {}) } })
       rootId = undefined
+      rootParent = undefined
       rootAttrs = {}
     }
   }
 
   return {
+    beginTurn(text: string): void {
+      const at = now()
+      closeOpen(at, 'interrupted')
+      if (!opts.traceId) traceId = newId('t')
+      rootId = newId('s')
+      rootStart = at
+      rootParent = undefined
+      rootAttrs = { input: cut(text) }
+      adopting = true
+      write({ spanId: rootId, name: rootName, kind: 'AGENT', startedAt: at, attributes: rootAttrs })
+    },
+
+    subAgent(name: string): Tracer {
+      // Reads the parent's CURRENT turn at submit time, not at construction: the plan stage's tracer is
+      // built partway through a submit, and a tracer built between turns would otherwise capture nothing.
+      return createSpanTracer(emit, {
+        ...opts,
+        rootName: name,
+        traceId: undefined,
+        parentTurn: () => (rootId ? { traceId, spanId: rootId } : undefined),
+        sessionOf: () => (opts.sessionOf ? opts.sessionOf() : chatId),
+      })
+    },
+
     setSession(id: string | undefined): void {
       chatId = id || undefined
     },
 
     endOpenSpans(reason: string): void {
+      adopting = false
       closeOpen(now(), reason)
     },
 
@@ -174,14 +240,26 @@ export function createSpanTracer(emit: SpanSink, opts: SpanFoldOptions = {}): Sp
 
       switch (e.t) {
         case 'submit': {
+          // The server already opened this turn (see beginTurn) — adopt it. Closing and reopening here
+          // would strand whatever the plan stage nested inside the root it was given.
+          if (adopting) {
+            adopting = false
+            rootAttrs = { ...rootAttrs, input: cut(e.text) }
+            break
+          }
           // A previous turn that never terminated (a crash between its last event and `turn_done`) would
           // be stranded open forever if we simply overwrote the root.
           closeOpen(at, 'interrupted')
-          if (!opts.traceId) traceId = newId('t') // one trace per TURN — a session spans days
+          // NESTED: join the parent's trace and hang this agent's root off the parent's, rather than
+          // starting a trace of our own. `gen_ai.operation.name = invoke_agent`, INTERNAL kind.
+          const parent = opts.parentTurn?.()
+          if (parent) traceId = parent.traceId
+          else if (!opts.traceId) traceId = newId('t') // one trace per TURN — a session spans days
           rootId = newId('s')
           rootStart = at
-          rootAttrs = { input: cut(e.text) }
-          write({ spanId: rootId, name: rootName, kind: 'AGENT', startedAt: at, attributes: rootAttrs })
+          rootParent = parent?.spanId
+          rootAttrs = { input: cut(e.text), ...(parent ? { 'gen_ai.operation.name': 'invoke_agent' } : {}) }
+          write({ spanId: rootId, parentSpanId: parent?.spanId, name: rootName, kind: 'AGENT', startedAt: at, attributes: rootAttrs })
           break
         }
 

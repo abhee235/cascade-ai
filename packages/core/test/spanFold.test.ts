@@ -99,6 +99,82 @@ describe('spanFold — structure', () => {
   })
 })
 
+describe('spanFold — sub-agents nest, they do not fork the trace', () => {
+  // OTel's GenAI semconv models a same-process agent invocation as an INTERNAL `invoke_agent` span, and
+  // general OTel rules make a nested operation a child span. Langfuse/LangSmith go further and propagate
+  // trace ids across SERVICE boundaries to keep one tree. Two sessions in one process producing two
+  // traces was an artifact of their having two tracers — this is the contract that stops it recurring.
+  const nested = () => {
+    const all: TraceSpan[] = []
+    const parent = createSpanTracer((s) => all.push({ ...s, attributes: { ...s.attributes } }), { projectId: 'p1', rootName: 'agent (builder)' })
+    const latest = () => {
+      const m = new Map<string, TraceSpan>()
+      for (const s of all) m.set(s.spanId, s)
+      return [...m.values()]
+    }
+    return { parent, all, latest }
+  }
+
+  it('the server can open the turn BEFORE the session submits, and submit adopts it', () => {
+    // The plan stage runs to completion before the builder submits, so the turn must exist first or the
+    // planner has nothing to nest under — which is exactly how it became a separate trace.
+    const c = nested()
+    c.parent.beginTurn('build a shop')
+    const opened = c.latest().filter((s) => s.kind === 'AGENT')
+    expect(opened).toHaveLength(1)
+    c.parent.event({ t: 'submit', text: 'build a shop' } as never)
+    c.parent.event({ t: 'turn_done', turns: 1 } as never)
+    const roots = c.latest().filter((s) => s.kind === 'AGENT')
+    expect(roots).toHaveLength(1) // ADOPTED, not closed-and-reopened
+    expect(roots[0].endedAt).toBeDefined()
+    expect(roots[0].attributes?.input).toBe('build a shop')
+  })
+
+  it('a sub-agent becomes a CHILD span in the same trace', () => {
+    const c = nested()
+    c.parent.beginTurn('build a shop')
+    const planner = c.parent.subAgent('agent (planner)')
+    planner.event({ t: 'submit', text: 'plan it' } as never)
+    planner.event({ t: 'model_request', turn: 0, messages: [] } as never)
+    planner.event({ t: 'model_response', turn: 0, text: 'PLAN.md written' } as never)
+    planner.event({ t: 'turn_done', turns: 1 } as never)
+    c.parent.event({ t: 'submit', text: 'build a shop' } as never)
+    c.parent.event({ t: 'turn_done', turns: 3 } as never)
+
+    const spans = c.latest()
+    expect(new Set(spans.map((s) => s.traceId)).size).toBe(1) // ONE trace for one user message
+    const root = spans.find((s) => s.kind === 'AGENT' && !s.parentSpanId)!
+    const sub = spans.find((s) => s.name === 'agent (planner)')!
+    expect(root.name).toBe('agent (builder)')
+    expect(sub.parentSpanId).toBe(root.spanId)
+    expect(sub.attributes?.['gen_ai.operation.name']).toBe('invoke_agent')
+    // The sub-agent's OWN work hangs off the sub-agent. Nesting only the agent span would be cosmetic.
+    expect(spans.find((s) => s.kind === 'LLM')?.parentSpanId).toBe(sub.spanId)
+  })
+
+  it('a sub-agent inherits the CHAT — otherwise its work falls outside the conversation', () => {
+    // Caught by the end-to-end test: subAgent builds a fresh fold, and the chat lived in the parent's
+    // closure, so the planner's spans sat inside the turn but outside the conversation.
+    const c = nested()
+    c.parent.setSession('chat-abc')
+    c.parent.beginTurn('x')
+    const sub = c.parent.subAgent('agent (planner)')
+    sub.event({ t: 'submit', text: 'plan' } as never)
+    expect(c.latest().every((s) => s.attributes?.['cascade.chat_id'] === 'chat-abc')).toBe(true)
+  })
+
+  it('a sub-agent with no open parent turn still records, as its own trace', () => {
+    // The eval bench builds plan sessions directly, with no builder turn around them. Losing those spans
+    // would be worse than not nesting them.
+    const c = nested()
+    const orphan = c.parent.subAgent('agent (planner)')
+    orphan.event({ t: 'submit', text: 'plan' } as never)
+    const sub = c.latest().find((s) => s.name === 'agent (planner)')!
+    expect(sub).toBeDefined()
+    expect(sub.parentSpanId).toBeUndefined()
+  })
+})
+
 describe('spanFold — the observables diagnosis depends on', () => {
   it('records the PROMPT, not just the answer', () => {
     // The Observatory shipped with output only. "What was the model looking at" is the question that

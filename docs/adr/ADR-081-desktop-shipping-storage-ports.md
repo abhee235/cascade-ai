@@ -153,6 +153,22 @@ the socket to render a page nobody may have open. The client polls (3s) *only wh
 flushed. Two commands (`traces`/`trace`) and two events; the server filters out traces whose project was
 deleted, because a row you cannot open is worse than no row.
 
+**A sub-agent nests; it does not fork the trace (2026-08-07).** The orchestrated plan stage used to be a
+SECOND trace for the same user message — an artifact of the planner having its own session and therefore
+its own tracer, not a decision. The conventions are clear: OTel's GenAI semconv models a same-process
+agent invocation as an INTERNAL `invoke_agent` span, general OTel rules make a nested operation a child
+span, and Langfuse/LangSmith propagate trace ids across SERVICE boundaries specifically to keep one tree.
+A model-invoked `Subagent {agent:"planner"}` already nested (it shares the parent's tracer); the
+orchestrated path now matches via `SpanTracer.subAgent()`, with the server calling `beginTurn()` before
+the plan stage so there is a root to nest under and the builder's own submit ADOPTS it.
+
+    agent (builder)          ◀ one user message, one trace
+      ├─ agent (planner)     ◀ INTERNAL invoke_agent
+      │    ├─ llm turn 0
+      │    └─ tool Write PLAN.md
+      ├─ llm turn 0 … 2
+      └─ tool Write …
+
 **Conversations are the default view (2026-08-07).** A trace is one TURN — Phoenix, LangSmith and
 Langfuse all model it that way, and so do we. The consequence is that building one app produces dozens
 of traces, and a flat list of them answers "what happened in some turn" while burying "what did this

@@ -130,14 +130,29 @@ describe('ADR-081 telemetry wiring (product path)', () => {
     expect(sessions[0].chatId).toBeTruthy()
     expect(sessions[0].projectId).toBe(id)
     expect(sessions[0].firstPrompt).toBe('Build a 3D solar system')
-    // Planner turn + builder turn, grouped as ONE conversation — not two loose traces.
-    expect(sessions[0].turnCount).toBe(2)
+    // ONE turn for one user message. The plan stage used to be a second trace here — an artifact of the
+    // planner having its own session and therefore its own tracer. It is now a child span inside this turn.
+    expect(sessions[0].turnCount).toBe(1)
 
     // …and every span carries the chat, not only the root — a live turn must be attributable while it runs.
     const [trace] = await storage.traces.listTraces()
     const spans = await storage.traces.spans(trace.traceId)
     expect(spans.length).toBeGreaterThan(1)
     expect(spans.every((s) => s.attributes?.['cascade.chat_id'] === sessions[0].chatId)).toBe(true)
+
+    // The shape the conventions call for: the plan stage is an INTERNAL invoke_agent NESTED in the turn,
+    // not a sibling trace. OTel's GenAI semconv models a same-process agent invocation this way, and
+    // Langfuse/LangSmith go as far as propagating trace ids across services to preserve exactly this tree.
+    const agents = spans.filter((s) => s.kind === 'AGENT')
+    const root = agents.find((s) => !s.parentSpanId)!
+    const planner = agents.find((s) => s.name === 'agent (planner)')!
+    expect(root.name).toBe('agent (builder)')
+    expect(planner).toBeDefined()
+    expect(planner.parentSpanId).toBe(root.spanId)
+    expect(planner.attributes?.['gen_ai.operation.name']).toBe('invoke_agent')
+    // …and the planner's OWN work hangs off the planner, not off the turn root — otherwise nesting the
+    // agent span would be cosmetic while its llm/tool spans stayed flat siblings of it.
+    expect(spans.some((s) => s.kind === 'LLM' && s.parentSpanId === planner.spanId)).toBe(true)
 
     await storage.dispose()
     await mgr.dispose()

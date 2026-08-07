@@ -11,7 +11,7 @@ import { execFileSync } from 'node:child_process'
 import { basename, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createProvider, createSession, JsonlTracer, type AgentDef, type CascadeSession, type Sandbox, type Tracer } from '@cascade/core'
-import { fanout, OtelTracer } from './otelTracer.js'
+import { fanout, OtelTracer, type NestableTracer } from './otelTracer.js'
 import type { ProjectInfo } from '@cascade/app-protocol'
 import { applyTemplate, readAiRules } from './templates.js'
 import { createPlannerSession, needsPlanStage } from './planStage.js'
@@ -174,6 +174,9 @@ export async function flushTracers(timeoutMs = 2_000): Promise<void> {
 /** Extra (deployment) tracers by `dir:kind`, so a chat switch reaches them the same way it reaches the
  *  OTLP exporter. Duck-typed on `setSession`: a sink that doesn't care about chats simply won't have it. */
 const extraTracers = new Map<string, { setSession?: (id: string | undefined) => void }>()
+/** The BUILDER tracer per project dir. The orchestrated plan stage nests inside its turn rather than
+ *  opening a trace of its own (ADR-081 amendment) — which needs a handle on the turn's owner. */
+const builderTracers = new Map<string, NestableTracer>()
 
 export function setTraceSession(dir: string, chatId: string | undefined): void {
   if (chatId) traceSessions.set(dir, chatId)
@@ -183,6 +186,19 @@ export function setTraceSession(dir: string, chatId: string | undefined): void {
     extraTracers.get(`${dir}:${kind}`)?.setSession?.(chatId)
   }
 }
+/** Open the turn's root span BEFORE the plan stage runs, so the planner has a parent to nest under.
+ *  No builder tracer (a fresh project whose session isn't built yet) ⇒ a no-op, and the builder's own
+ *  submit opens the root as it always did. */
+export function beginTurn(dir: string, text: string): void {
+  builderTracers.get(dir)?.beginTurn(text)
+}
+
+/** A tracer for a sub-agent of the current turn — its root becomes a CHILD AGENT span. Undefined when
+ *  no builder tracer exists, and the caller then falls back to a standalone tracer. */
+export function subAgentTracer(dir: string, name: string): Tracer | undefined {
+  return builderTracers.get(dir)?.subAgent(name)
+}
+
 export const tracerFor = (dir: string, kind: 'builder' | 'planner', extra?: Tracer): Tracer => {
   const jsonl = new JsonlTracer(join(dir, '.cascade', 'traces', `${kind}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.jsonl`))
   // JSONL stays FIRST in every fanout: it is the forensic record, and neither a viewer being down nor a
@@ -195,7 +211,11 @@ export const tracerFor = (dir: string, kind: 'builder' | 'planner', extra?: Trac
     ;(extra as { setSession?: (id: string | undefined) => void }).setSession?.(traceSessions.get(dir))
   }
   const endpoint = process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
-  if (!endpoint) return extra ? fanout(jsonl, extra) : jsonl
+  const remember = (t: NestableTracer) => {
+    if (kind === 'builder') builderTracers.set(dir, t)
+    return t
+  }
+  if (!endpoint) return remember(fanout(jsonl, ...(extra ? [extra] : [])))
   const key = `${dir}:${kind}`
   let otel = otelTracers.get(key)
   if (!otel) {
@@ -214,7 +234,7 @@ export const tracerFor = (dir: string, kind: 'builder' | 'planner', extra?: Trac
   otel.setSession(traceSessions.get(dir))
   tracers.push(otel)
   if (extra) tracers.push(extra)
-  return fanout(...tracers)
+  return remember(fanout(...tracers))
 }
 
 export class ProjectManager {
@@ -360,7 +380,14 @@ export class ProjectManager {
           maxOutputTokens: this.active.maxOutputTokens,
           skillDirs: skillDirsFor(dir),
           sandbox,
-          tracer: tracerFor(dir, 'planner', this.opts.sessionTracerFor?.({ projectId: this.idOfDir(dir), kind: 'planner', model: this.active.model })), // stage forensics in the product too
+          // ADR-081 amendment: the plan stage is a SUB-AGENT of this turn, not a turn of its own. One
+          // user message, one trace — the planner's root becomes a child AGENT span inside the builder's,
+          // which is what OTel's GenAI conventions describe for a same-process agent invocation and what
+          // a model-invoked `Subagent {agent:"planner"}` already does. Falls back to a standalone tracer
+          // if no builder tracer exists (the eval bench builds plan sessions directly).
+          tracer:
+            subAgentTracer(dir, 'agent (planner)') ??
+            tracerFor(dir, 'planner', this.opts.sessionTracerFor?.({ projectId: this.idOfDir(dir), kind: 'planner', model: this.active.model })),
         }))
     return build(project.dir, def, project.sandbox)
   }

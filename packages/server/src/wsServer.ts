@@ -16,7 +16,7 @@ import { randomBytes } from 'node:crypto'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { CascadeSession, InboundMessage } from '@cascade/core'
 import type { BuilderCommand } from '@cascade/app-protocol'
-import { flushTracers, ProjectManager, setTraceSession, type SessionTracerFactory } from './projectManager.js'
+import { beginTurn, flushTracers, ProjectManager, setTraceSession, type SessionTracerFactory } from './projectManager.js'
 import { ensurePlanPersisted } from './planStage.js'
 import { DockerSandbox, dockerAvailable, sweepSandboxContainers } from './dockerSandbox.js'
 import { ensureVisualEditConfig, listTemplates } from './templates.js'
@@ -474,6 +474,11 @@ export function handleConnection(
           // ADR-053: group this turn's spans under the chat it belongs to, BEFORE anything is traced — the
           // plan stage builds its tracer partway through this handler and must inherit the same session.
           if (turnDir) setTraceSession(turnDir, turnChatId || undefined)
+          // ADR-081 amendment: open the turn's ROOT span now, before the plan stage runs. One user
+          // message is one trace; the plan stage nests inside it as a child AGENT span, and the builder's
+          // own submit then adopts this root instead of starting a second trace. Without this the planner
+          // would run first with nothing to nest under, which is how it became a separate trace.
+          if (turnDir) beginTurn(turnDir, msg.text)
           const turn = liveTurn.start(turnProjectId, turnChatId)
           // relay: fold into the live snapshot (for perfect re-attach) + flip phase on approval + fan out to
           // every attached connection viewing this project (including this one) + log. Note it does NOT write

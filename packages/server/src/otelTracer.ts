@@ -131,6 +131,9 @@ export class OtelTracer implements Tracer {
 	private root?: Span
 	private rootSpanId?: string
 	private rootStart = 0
+	/** Spans started but not yet ended — sub-agent roots, which must exist before their children can
+	 *  reference them. Keyed by the fold's span id so `parent()` can resolve an explicit parent. */
+	private readonly open = new Map<string, Span>()
 
 	constructor(opts: OtelTracerOptions) {
 		const processor: SpanProcessor = opts.processor ?? new BatchSpanProcessor(new OTLPTraceExporter({ url: opts.endpoint }))
@@ -179,7 +182,12 @@ export class OtelTracer implements Tracer {
 	private onSpan(s: TraceSpan): void {
 		const attrs = { ...this.common(), ...toOtelAttributes(s) }
 
-		if (s.kind === 'AGENT') {
+		// Only the TURN root drives this.root. A NESTED agent (a sub-agent's root, which carries a parent)
+		// must not: treating it as the turn root re-pointed this.root at the sub-agent and then cleared it
+		// when the sub-agent finished, so every later span found no parent and became its own trace.
+		// Measured in Phoenix: one message arrived as SIX traces. The SQLite sink was unaffected, which is
+		// why only opening the other viewer caught it.
+		if (s.kind === 'AGENT' && !s.parentSpanId) {
 			if (s.endedAt === undefined) {
 				this.rootSpanId = s.spanId
 				this.rootStart = s.startedAt
@@ -206,18 +214,50 @@ export class OtelTracer implements Tracer {
 			return
 		}
 
-		if (s.endedAt === undefined) return // an open LLM/TOOL span cannot be exported; wait for its close
-		const span = this.otel.startSpan(s.name, { startTime: s.startedAt, attributes: attrs }, this.parent())
+		if (s.endedAt === undefined) {
+			// A nested AGENT (a sub-agent's root) is the one open span worth materialising early: its
+			// children reference it as their parent, and OTLP has no way to attach to a span that does not
+			// exist yet. Started here and ended on its close record.
+			if (s.kind === 'AGENT' && s.parentSpanId) this.open.set(s.spanId, this.otel.startSpan(s.name, { startTime: s.startedAt, attributes: attrs }, this.parent(s.parentSpanId)))
+			return // every other open span cannot be exported; wait for its close
+		}
+		const existing = this.open.get(s.spanId)
+		if (existing) {
+			// Re-sending the attributes on close is deliberate: the fold carries them forward, and a sub-agent
+			// root written at open would otherwise never gain its turn count or interrupted reason.
+			existing.setAttributes(attrs)
+			if (s.status === 'error') existing.setStatus({ code: SpanStatusCode.ERROR, message: cut(s.attributes?.output).slice(0, 200) })
+			existing.end(s.endedAt)
+			this.open.delete(s.spanId)
+			return
+		}
+		const span = this.otel.startSpan(s.name, { startTime: s.startedAt, attributes: attrs }, this.parent(s.parentSpanId))
 		if (s.status === 'error') span.setStatus({ code: SpanStatusCode.ERROR, message: cut(s.attributes?.output).slice(0, 200) })
 		span.end(s.endedAt)
 	}
 
-	private parent() {
-		return this.root ? trace.setSpan(context.active(), this.root) : undefined
+	/** Honour the fold's OWN parent when it names one, falling back to the turn root.
+	 *  Before this, every span was parented flat under the root — which is fine while the only children
+	 *  ARE the root's, and wrong the moment an agent delegates: a sub-agent's llm/tool spans would have
+	 *  appeared as siblings of the sub-agent instead of inside it. */
+	private parent(parentSpanId?: string) {
+		const explicit = parentSpanId ? this.open.get(parentSpanId) : undefined
+		const anchor = explicit ?? this.root
+		return anchor ? trace.setSpan(context.active(), anchor) : undefined
 	}
 
 	event(e: TraceEvent): void {
 		this.fold.event(e)
+	}
+
+	/** A sub-agent tracer that exports into THIS exporter's span tree (see SpanTracer.subAgent). */
+	subAgent(name: string): Tracer {
+		return this.fold.subAgent(name)
+	}
+
+	/** Open the turn before the session submits, so an orchestrated sub-agent has a root to nest under. */
+	beginTurn(text: string): void {
+		this.fold.beginTurn(text)
 	}
 
 	/** End anything still open because the PROCESS is going down. An unended span is not merely truncated
@@ -237,7 +277,28 @@ export class OtelTracer implements Tracer {
 	}
 }
 
-/** Fan one event stream out to several tracers (e.g. JsonlTracer + OtelTracer). */
-export function fanout(...tracers: Tracer[]): Tracer {
-	return { event: (e) => { for (const t of tracers) t.event(e) } }
+/** A Tracer that can also spawn a nested sub-agent tracer (see SpanTracer.subAgent). */
+export interface NestableTracer extends Tracer {
+	subAgent(name: string): Tracer
+	/** Open the turn root ahead of the session's own submit (see SpanTracer.beginTurn). */
+	beginTurn(text: string): void
+}
+
+/**
+ * Fan one event stream out to several tracers (e.g. JsonlTracer + OtelTracer + the desktop store).
+ *
+ * `subAgent` fans out too, and it has to: each sink keeps its OWN span-id space, so a sub-agent must be
+ * nested independently in each. Sinks that don't know about nesting (JsonlTracer — a flat event log has
+ * no tree to nest in) simply receive the child's events as their own.
+ */
+export function fanout(...tracers: Tracer[]): NestableTracer {
+	return {
+		event: (e) => {
+			for (const t of tracers) t.event(e)
+		},
+		subAgent: (name) => fanout(...tracers.map((t) => ('subAgent' in t && typeof t.subAgent === 'function' ? (t as NestableTracer).subAgent(name) : t))),
+		beginTurn: (text) => {
+			for (const t of tracers) if ('beginTurn' in t && typeof t.beginTurn === 'function') (t as NestableTracer).beginTurn(text)
+		},
+	}
 }

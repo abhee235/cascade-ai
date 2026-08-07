@@ -228,6 +228,45 @@ describe('OtelTracer — span tree from the forensic event stream', () => {
 		}
 	})
 
+	// ADR-081 amendment: a sub-agent is a CHILD span in ONE trace, not a trace of its own.
+	//
+	// This test exists because the first attempt broke Phoenix while every unit test passed: the nested
+	// AGENT span was caught by the turn-root branch, which re-pointed `this.root` at the sub-agent and
+	// then cleared it when the sub-agent finished — so every span after the plan stage found no parent and
+	// became its OWN trace. One user message arrived as SIX traces. The SQLite sink was unaffected, so
+	// nothing failed until the other viewer was actually opened.
+	it('nests a sub-agent inside the turn — ONE trace, correct parents', () => {
+		const exporter = new InMemorySpanExporter()
+		const tracer = new OtelTracer({ endpoint: 'http://unused.invalid/v1/traces', service: 'test', kind: 'builder', processor: new SimpleSpanProcessor(exporter) })
+		const ev = (e: object) => tracer.event(e as never)
+
+		tracer.beginTurn('build a shop') // the server opens the turn before the plan stage runs
+		const planner = tracer.subAgent('agent (planner)') as { event: (e: object) => void }
+		planner.event({ t: 'submit', text: 'plan it' })
+		planner.event({ t: 'model_request', turn: 0, system: '', tools: [], messages: [] })
+		planner.event({ t: 'model_response', turn: 0, text: 'PLAN.md', thinking: '', toolUses: [] })
+		planner.event({ t: 'turn_done', turns: 1 })
+		ev({ t: 'submit', text: 'build a shop' }) // …and the builder ADOPTS the open root
+		ev({ t: 'model_request', turn: 0, system: '', tools: [], messages: [] })
+		ev({ t: 'model_response', turn: 0, text: 'done', thinking: '', toolUses: [] })
+		ev({ t: 'turn_done', turns: 2 })
+
+		const spans = exporter.getFinishedSpans()
+		expect(new Set(spans.map((s) => s.spanContext().traceId)).size).toBe(1) // ONE trace, not six
+
+		const root = spans.find((s) => s.name === 'agent (builder)')!
+		const sub = spans.find((s) => s.name === 'agent (planner)')!
+		expect(root.parentSpanContext?.spanId).toBeUndefined()
+		expect(sub.parentSpanContext?.spanId).toBe(root.spanContext().spanId)
+		expect(sub.attributes['cascade.gen_ai.operation.name'] ?? sub.attributes['gen_ai.operation.name']).toBe('invoke_agent')
+
+		// Each agent's own work hangs off THAT agent. Nesting only the agent span would be cosmetic, and
+		// the builder's spans reverting to roots is exactly the failure this pins.
+		const llms = spans.filter((s) => s.name.startsWith('llm turn'))
+		expect(llms).toHaveLength(2)
+		expect(new Set(llms.map((s) => s.parentSpanContext?.spanId))).toEqual(new Set([root.spanContext().spanId, sub.spanContext().spanId]))
+	})
+
 	// The gap that started the ADR-081 amendment, pinned from the other side: the Observatory had the LLM's
 	// OUTPUT but never its INPUT, so "what was the model looking at" — the question that explains a weak
 	// model's behaviour — had no answer in-app. One fold now feeds both, so asserting it here covers both.
