@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { SpanKindIcon, SpanKindToken, StatusDot } from './SpanKind'
 import { durationOf, formatDuration, formatRate, formatTokens, isRunning } from './constants'
+import { formatJsonish, looksLikeJson } from './format'
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
@@ -44,13 +45,36 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
 /** Long text (a prompt, a tool result) in a scrollable block. Tracer-side truncation at 2000 chars means
  *  this never has to defend against a megabyte, but it still scrolls rather than growing the panel. */
 function TextBlock({ label, value, tone }: { label: string; value: string; tone?: 'reasoning' }) {
+  const isJson = looksLikeJson(value)
+  // Formatted by DEFAULT when the payload is structured: raw is the fallback you reach for to confirm
+  // exactly what was stored, not the view you want to read.
+  const [formatted, setFormatted] = useState(true)
+  const shown = isJson && formatted ? formatJsonish(value) : value
+
   return (
     <div className={cn('rounded-lg border', tone === 'reasoning' && 'border-violet-500/30 bg-violet-500/5')}>
-      <div className={cn('flex items-center justify-between border-b px-3 py-1.5', tone === 'reasoning' && 'border-violet-500/25')}>
-        <span className={cn('text-[11px] font-semibold uppercase tracking-wide', tone === 'reasoning' ? 'text-violet-600 dark:text-violet-400' : 'text-muted-foreground')}>{label}</span>
+      <div className={cn('flex items-center gap-2 border-b px-3 py-1.5', tone === 'reasoning' && 'border-violet-500/25')}>
+        <span className={cn('flex-1 text-[11px] font-semibold uppercase tracking-wide', tone === 'reasoning' ? 'text-violet-600 dark:text-violet-400' : 'text-muted-foreground')}>{label}</span>
+        {isJson && (
+          <div className="flex rounded-md border p-0.5">
+            {([true, false] as const).map((mode) => (
+              <button
+                key={String(mode)}
+                type="button"
+                onClick={() => setFormatted(mode)}
+                className={cn('rounded px-1.5 py-0.5 text-[10px] transition-colors', formatted === mode ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}
+              >
+                {mode ? 'Formatted' : 'Raw'}
+              </button>
+            ))}
+          </div>
+        )}
+        {/* Copy always yields the ORIGINAL. The formatted view expands escapes for reading, which makes it
+            invalid JSON — handing that to the clipboard would be handing over something that no longer
+            parses. You read here; you copy data. */}
         <CopyButton text={value} />
       </div>
-      <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed">{value}</pre>
+      <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed">{shown}</pre>
     </div>
   )
 }
@@ -186,7 +210,10 @@ export function SpanDetail({ span }: { span: SpanInfo | null }) {
           {allAttrs.length ? (
             <div className="divide-y rounded-lg border">
               {allAttrs.map(([k, v]) => {
-                const text = typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v)
+                const raw = typeof v === 'object' ? JSON.stringify(v) : String(v)
+                // Same formatter as the Input/Output blocks: a tool's `input` here is the same escaped
+                // one-liner, and it is just as unreadable in a table cell as it was in a block.
+                const text = looksLikeJson(raw) ? formatJsonish(raw) : raw
                 return (
                   <div key={k} className={cn('grid grid-cols-[minmax(0,11rem)_1fr] gap-3 px-3 py-2', PROMOTED.has(k) && 'opacity-55')}>
                     <span className="truncate font-mono text-xs text-muted-foreground" title={k}>
