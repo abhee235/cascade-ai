@@ -90,7 +90,9 @@ export function SpanDetail({ span }: { span: SpanInfo | null }) {
   const inTok = a.inputTokens as number | undefined
   const outTok = a.outputTokens as number | undefined
   const window = a.contextWindow as number | undefined
-  const rest = Object.entries(a).filter(([k]) => !PROMOTED.has(k))
+  // Sorted so the span's OWN fields lead and the plumbing (cascade.project_id, chat id…) trails —
+  // otherwise the interesting attributes sit below three infrastructure keys on every single span.
+  const allAttrs = Object.entries(a).sort(([x], [y]) => Number(x.startsWith('cascade.')) - Number(y.startsWith('cascade.')) || x.localeCompare(y))
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -159,7 +161,7 @@ export function SpanDetail({ span }: { span: SpanInfo | null }) {
       <Tabs defaultValue="io" className="flex min-h-0 flex-1 flex-col">
         <TabsList className="mx-4 mt-3 w-fit shrink-0">
           <TabsTrigger value="io">Input / Output</TabsTrigger>
-          <TabsTrigger value="attrs">Attributes{rest.length ? ` (${rest.length})` : ''}</TabsTrigger>
+          <TabsTrigger value="attrs">Attributes{allAttrs.length ? ` (${allAttrs.length})` : ''}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="io" className="min-h-0 flex-1 space-y-3 overflow-auto px-4 pb-4">
@@ -176,18 +178,29 @@ export function SpanDetail({ span }: { span: SpanInfo | null }) {
           )}
         </TabsContent>
 
-        <TabsContent value="attrs" className="min-h-0 flex-1 overflow-auto px-4 pb-4">
-          {rest.length ? (
+        <TabsContent value="attrs" className="min-h-0 flex-1 space-y-3 overflow-auto px-4 pb-4">
+          {/* ALL of them, like Phoenix's "All Attributes" — this is the raw view, and a raw view that
+              hides fields is a trap. The named fields above are a READING of the span; this is the span.
+              Promoted keys are dimmed rather than removed, so you can still see the whole record and tell
+              at a glance which parts are already summarised for you. */}
+          {allAttrs.length ? (
             <div className="divide-y rounded-lg border">
-              {rest.map(([k, v]) => (
-                <div key={k} className="grid grid-cols-[minmax(0,10rem)_1fr] gap-3 px-3 py-2">
-                  <span className="truncate font-mono text-xs text-muted-foreground">{k}</span>
-                  <span className="break-words font-mono text-xs">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>
-                </div>
-              ))}
+              {allAttrs.map(([k, v]) => {
+                const text = typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v)
+                return (
+                  <div key={k} className={cn('grid grid-cols-[minmax(0,11rem)_1fr] gap-3 px-3 py-2', PROMOTED.has(k) && 'opacity-55')}>
+                    <span className="truncate font-mono text-xs text-muted-foreground" title={k}>
+                      {k}
+                    </span>
+                    {/* Values can be a whole file (a Write tool's input), so they scroll rather than
+                        pushing the rest of the list off the panel. */}
+                    <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">{text}</pre>
+                  </div>
+                )
+              })}
             </div>
           ) : (
-            <div className="py-8 text-center text-sm text-muted-foreground">No further attributes.</div>
+            <div className="py-8 text-center text-sm text-muted-foreground">This span carries no attributes.</div>
           )}
         </TabsContent>
       </Tabs>

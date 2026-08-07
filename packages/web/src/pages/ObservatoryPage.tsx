@@ -453,7 +453,7 @@ function TraceDetail({ trace, spans, onBack }: { trace: TraceSummaryInfo | undef
         // Fixed left column rather than a resizable split: we have no resizable primitive, and a 2-pane
         // layout with one scrollable side is exactly what this view needs. Both panes scroll internally so
         // the page itself never does.
-        <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(22rem,34%)_1fr]">
+        <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(26rem,40%)_1fr]">
           <div className="hidden min-h-0 border-r lg:block">
             <TraceTree spans={spans} selectedSpanId={selectedSpanId} onSelect={selectSpan} />
           </div>

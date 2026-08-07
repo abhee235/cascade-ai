@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
 import { SpanKindIcon, SpanKindToken, StatusDot } from './SpanKind'
 import { TimelineBar } from './TimelineBar'
 import { buildForest, countDescendants, traceWindow, type TreeNode } from './tree'
-import { CONNECTOR_OFFSET, CONNECTOR_RADIUS, L_CONNECTOR_H, L_CONNECTOR_W, NESTING_INDENT, durationOf, formatDuration, formatTokens, isRunning } from './constants'
+import { CHEVRON_W, CONNECTOR_RADIUS, ICON_GAP, ROW_HALF, ROW_PAD, durationOf, elbowW, formatDuration, formatTokens, iconX, isRunning, railX } from './constants'
 
 interface RowProps {
   node: TreeNode
@@ -38,7 +38,9 @@ function SpanRow({ node, depth, ancestorLines, selectedSpanId, onSelect, traceSt
 
   // Error rows draw their rules in the destructive colour so a failing branch is traceable up the tree at
   // a glance — you follow the red rule to the parent rather than reading every name.
-  const rule = error ? 'var(--destructive)' : 'var(--border)'
+  // `--border` alone was invisible against the panel: the hierarchy existed and could not be seen, which
+  // is what made a nested agent's SIBLINGS read as more of its children.
+  const rule = error ? 'var(--destructive)' : 'color-mix(in srgb, var(--muted-foreground) 42%, transparent)'
   const tokens = (span.attributes?.inputTokens as number | undefined) ?? undefined
   const outTokens = span.attributes?.outputTokens as number | undefined
 
@@ -48,7 +50,7 @@ function SpanRow({ node, depth, ancestorLines, selectedSpanId, onSelect, traceSt
         type="button"
         onClick={() => onSelect(span.spanId)}
         className={cn(
-          'relative flex w-full items-center border-l-4 py-2 pr-3 text-left text-[13px] transition-colors',
+          'relative flex w-full items-center border-l-[3px] py-2 pr-3 text-left text-[13px] transition-colors',
           selected ? 'border-l-primary bg-accent' : 'border-l-transparent hover:bg-accent/40',
         )}
       >
@@ -56,27 +58,29 @@ function SpanRow({ node, depth, ancestorLines, selectedSpanId, onSelect, traceSt
         {ancestorLines.map((show, i) =>
           show ? (
             // biome-ignore lint/suspicious/noArrayIndexKey: the index IS the depth level — it is the identity
-            <span key={i} className="absolute top-0 bottom-0" style={{ borderLeft: `1px solid ${rule}`, left: i * NESTING_INDENT + CONNECTOR_OFFSET }} />
+            <span key={i} className="absolute top-0 bottom-0" style={{ borderLeft: `1px solid ${rule}`, left: railX(i) }} />
           ) : null,
         )}
         {/* The elbow joining this row to its parent's rule. */}
         {depth > 0 && (
+          // Runs from the parent's rail all the way to THIS row's icon. It used to stop 26px short, so a
+          // child never looked attached to anything.
           <span
             className="absolute"
             style={{
               borderLeft: `1px solid ${rule}`,
               borderBottom: `1px solid ${rule}`,
               borderRadius: `0 0 0 ${CONNECTOR_RADIUS}px`,
-              top: -4,
-              left: (depth - 1) * NESTING_INDENT + CONNECTOR_OFFSET,
-              width: L_CONNECTOR_W,
-              height: L_CONNECTOR_H,
+              top: 0,
+              left: railX(depth - 1),
+              width: elbowW(depth),
+              height: ROW_HALF,
             }}
           />
         )}
 
-        <span className="flex min-w-0 flex-1 items-center gap-1.5" style={{ marginLeft: depth * NESTING_INDENT + 14 }}>
-          <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+        <span className="flex min-w-0 flex-1 items-center" style={{ paddingLeft: iconX(depth) - CHEVRON_W - ICON_GAP, gap: ICON_GAP }}>
+          <span className="flex shrink-0 items-center justify-center" style={{ width: CHEVRON_W, height: CHEVRON_W }}>
             {hasChildren ? (
               <span
                 onClick={toggle}
@@ -84,14 +88,14 @@ function SpanRow({ node, depth, ancestorLines, selectedSpanId, onSelect, traceSt
                 role="button"
                 tabIndex={-1}
                 aria-label={expanded ? 'Collapse' : 'Expand'}
-                className="flex h-5 w-5 items-center justify-center rounded bg-foreground/5 transition-transform hover:bg-foreground/10"
-                style={{ transform: expanded ? 'none' : 'rotate(-90deg)' }}
+                className="flex items-center justify-center rounded bg-foreground/10 transition-transform hover:bg-foreground/20"
+                style={{ width: CHEVRON_W, height: CHEVRON_W, transform: expanded ? 'none' : 'rotate(-90deg)' }}
               >
                 <ChevronDown className="h-3.5 w-3.5" />
               </span>
             ) : null}
           </span>
-          <SpanKindIcon kind={span.kind} />
+          <SpanKindIcon kind={span.kind} size={20} />
           <span className="truncate font-medium">{span.name}</span>
           <SpanKindToken kind={span.kind} />
           {(tokens || outTokens) && (
@@ -102,9 +106,11 @@ function SpanRow({ node, depth, ancestorLines, selectedSpanId, onSelect, traceSt
           {hidden > 0 && <span className="shrink-0 rounded bg-muted/50 px-1 py-0.5 text-[10px] text-muted-foreground">+{hidden}</span>}
         </span>
 
-        <span className="flex w-[150px] shrink-0 items-center gap-2">
+        {/* Fixed chrome is charged against the NAME, which is the column you actually read. 150px here
+            plus the badges left "llm turn 12" rendering as "ll…". */}
+        <span className="flex w-[124px] shrink-0 items-center gap-2">
           <StatusDot status={span.status} running={running} />
-          <span className="w-12 shrink-0 text-right font-mono text-[11px] text-muted-foreground">{running ? '…' : formatDuration(durationOf(span))}</span>
+          <span className="w-11 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground">{running ? '…' : formatDuration(durationOf(span))}</span>
           <span className="min-w-0 flex-1">
             <TimelineBar span={span} traceStart={traceStart} traceMs={traceMs} />
           </span>

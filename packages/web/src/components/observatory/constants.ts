@@ -27,12 +27,28 @@ export const spanKindColor = (kind: string): string => SPAN_KIND_COLORS[kind] ??
  *  outside Chromium, and the web app is not Electron-only. Same effect, wider support. */
 export const tint = (color: string, pct: number) => `color-mix(in srgb, ${color} ${pct}%, transparent)`
 
-/* ── Tree geometry (Phoenix values) ── */
-export const NESTING_INDENT = 22 // px per level
-export const CONNECTOR_OFFSET = 26 // px from the row's left edge to the vertical rule
-export const CONNECTOR_RADIUS = 10
-export const L_CONNECTOR_H = 20
-export const L_CONNECTOR_W = 10
+/* ── Tree geometry ──
+ * Derived from ONE row layout rather than hand-tuned constants, because the hand-tuned set drifted out
+ * of agreement with the markup: the elbow ended 26px short of the icon, so a child looked unattached and
+ * a SIBLING of a nested agent read as another of its children. Every x below is computed from the same
+ * three numbers, so the rails and the row content cannot disagree again.
+ *
+ *   [ROW_PAD][indent × depth][CHEVRON_W][GAP][icon]…
+ */
+export const ROW_PAD = 10 // px before the first chevron slot
+export const NESTING_INDENT = 20 // px per level
+export const CHEVRON_W = 18 // the expand/collapse slot — reserved whether or not a row has children
+export const ICON_GAP = 6 // matches gap-1.5 between the chevron slot and the kind icon
+
+/** x of the vertical rule for ancestor level `i` — centred under that level's chevron. */
+export const railX = (level: number) => ROW_PAD + level * NESTING_INDENT + CHEVRON_W / 2
+/** x where a row's kind icon starts. The elbow runs to here, so a child visibly attaches to its parent. */
+export const iconX = (depth: number) => ROW_PAD + depth * NESTING_INDENT + CHEVRON_W + ICON_GAP
+/** Width of the elbow joining a row to its parent's rail. */
+export const elbowW = (depth: number) => iconX(depth) - railX(depth - 1)
+
+export const CONNECTOR_RADIUS = 8
+export const ROW_HALF = 18 // half a row's height — where the elbow turns horizontal
 export const TIMELINE_BAR_HEIGHT = 6
 
 /* ── Formatters ── */

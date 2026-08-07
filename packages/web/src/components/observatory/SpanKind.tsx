@@ -15,18 +15,34 @@ const KIND_ICON: Record<string, LucideIcon> = {
   CHAIN: Zap, // our CHAIN spans are loop-breaker/gate MARKS — a bolt reads as "something fired"
 }
 
-export function SpanKindIcon({ kind, size = 16 }: { kind: string; size?: number }) {
+/**
+ * A SOLID chip, not a bare glyph.
+ *
+ * A tinted outline icon disappears against a busy waterfall — the kind is the first thing you scan for,
+ * and it has to survive being one of forty rows. A filled square with a knocked-out glyph is how Phoenix
+ * does it, and it reads at a glance in both themes: the kind colours are all light enough that a near
+ * black glyph stays legible on them, whatever the page behind is doing.
+ */
+export function SpanKindIcon({ kind, size = 20, plain = false }: { kind: string; size?: number; plain?: boolean }) {
   const Icon = KIND_ICON[kind] ?? CircleDashed
-  return <Icon style={{ width: size, height: size, color: spanKindColor(kind) }} className="shrink-0" />
+  const c = spanKindColor(kind)
+  if (plain) return <Icon style={{ width: size, height: size, color: c }} className="shrink-0" />
+  return (
+    <span className="flex shrink-0 items-center justify-center rounded-[5px]" style={{ width: size, height: size, backgroundColor: c }}>
+      <Icon style={{ width: size * 0.62, height: size * 0.62, color: '#18181b' }} strokeWidth={2.25} />
+    </span>
+  )
 }
 
-/** The pill beside a span's name. Colours derive from ONE accent so adding a kind needs one entry. */
+/** The pill beside a span's name. Colours derive from ONE accent so adding a kind needs one entry.
+ *  Deliberately stronger than a hint: at the previous 14% tint it washed out entirely on light
+ *  backgrounds, leaving the row's kind readable only from the icon. */
 export function SpanKindToken({ kind }: { kind: string }) {
   const c = spanKindColor(kind)
   return (
     <span
-      className="inline-flex h-4 shrink-0 items-center rounded-full border px-1.5 text-[10px] font-medium leading-none"
-      style={{ backgroundColor: tint(c, 14), borderColor: tint(c, 35), color: c }}
+      className="inline-flex h-[18px] shrink-0 items-center rounded-full border px-1.5 text-[10px] font-semibold leading-none"
+      style={{ backgroundColor: tint(c, 22), borderColor: tint(c, 55), color: `color-mix(in srgb, ${c} 78%, var(--foreground))` }}
     >
       {kind.toLowerCase()}
     </span>
