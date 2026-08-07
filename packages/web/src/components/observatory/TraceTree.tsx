@@ -58,7 +58,7 @@ function SpanRow({ node, depth, ancestorLines, selectedSpanId, onSelect, traceSt
         {ancestorLines.map((show, i) =>
           show ? (
             // biome-ignore lint/suspicious/noArrayIndexKey: the index IS the depth level — it is the identity
-            <span key={i} className="absolute top-0 bottom-0" style={{ borderLeft: `1px solid ${rule}`, left: railX(i) }} />
+            <span key={i} className="absolute top-0 bottom-0" style={{ borderLeft: `1px solid ${rule}`, left: railX(i), zIndex: 0 }} />
           ) : null,
         )}
         {/* The elbow joining this row to its parent's rule. */}
@@ -75,11 +75,14 @@ function SpanRow({ node, depth, ancestorLines, selectedSpanId, onSelect, traceSt
               left: railX(depth - 1),
               width: elbowW(depth),
               height: ROW_HALF,
+              zIndex: 0,
             }}
           />
         )}
 
-        <span className="flex min-w-0 flex-1 items-center" style={{ paddingLeft: iconX(depth) - CHEVRON_W - ICON_GAP, gap: ICON_GAP }}>
+        {/* Above the rails. The elbow runs all the way to the icon, so on a row WITH a chevron it passes
+            through the chevron's slot — it has to go behind the control, not across its face. */}
+        <span className="relative z-[1] flex min-w-0 flex-1 items-center" style={{ paddingLeft: iconX(depth) - CHEVRON_W - ICON_GAP, gap: ICON_GAP }}>
           <span className="flex shrink-0 items-center justify-center" style={{ width: CHEVRON_W, height: CHEVRON_W }}>
             {hasChildren ? (
               <span
@@ -88,7 +91,7 @@ function SpanRow({ node, depth, ancestorLines, selectedSpanId, onSelect, traceSt
                 role="button"
                 tabIndex={-1}
                 aria-label={expanded ? 'Collapse' : 'Expand'}
-                className="flex items-center justify-center rounded bg-foreground/10 transition-transform hover:bg-foreground/20"
+                className="flex items-center justify-center rounded border bg-muted text-muted-foreground transition-transform hover:bg-accent hover:text-foreground"
                 style={{ width: CHEVRON_W, height: CHEVRON_W, transform: expanded ? 'none' : 'rotate(-90deg)' }}
               >
                 <ChevronDown className="h-3.5 w-3.5" />
