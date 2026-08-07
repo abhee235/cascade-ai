@@ -176,6 +176,45 @@ describe('spanFold — sub-agents nest, they do not fork the trace', () => {
 })
 
 describe('spanFold — the observables diagnosis depends on', () => {
+  it('stores payloads WHOLE — a truncated forensic record defeats the point', () => {
+    // These were capped at 4000 chars on the theory that viewers truncate anyway. A prompt cut mid-array
+    // cannot answer "what was the model looking at", and a Write cut mid-file cannot answer "what did it
+    // write" — which is what the trace is FOR. Sinks that cannot carry a big payload cap it themselves.
+    const c = collect()
+    const bigFile = 'x'.repeat(50_000)
+    c.emit({ t: 'submit', text: 'y'.repeat(9_000) })
+    c.emit({ t: 'tool_call', id: 'w', name: 'Write', input: { content: bigFile } })
+    c.emit({ t: 'tool_result', id: 'w', name: 'Write', ok: true, ms: 1, content: 'z'.repeat(20_000) })
+    expect(String(c.byKind('AGENT')[0].attributes?.input)).toHaveLength(9_000)
+    const tool = c.byKind('TOOL')[0].attributes!
+    expect(String(tool.input).length).toBeGreaterThan(50_000)
+    expect(String(tool.output)).toHaveLength(20_000)
+  })
+
+  it('records the FULL message list and the system prompt, not the last two messages', () => {
+    // slice(-2) answered "what did it just see"; the question is "what was it looking at".
+    const c = collect()
+    c.emit({ t: 'submit', text: 'x' })
+    c.emit({
+      t: 'model_request',
+      turn: 0,
+      system: 'BUILDER_BEHAVIOR…',
+      messages: [
+        { role: 'user', content: 'first' },
+        { role: 'assistant', content: 'second' },
+        { role: 'user', content: 'third' },
+        { role: 'assistant', content: 'fourth' },
+      ],
+    })
+    const a = c.byKind('LLM')[0].attributes!
+    expect(String(a.input)).toContain('first') // …not just 'third' and 'fourth'
+    expect(String(a.input)).toContain('fourth')
+    // The system prompt lives on the AGENT root, not on each call: it is identical across a turn's calls,
+    // and repeating a 16KB prompt 30 times was ~480KB of duplication per turn for no added fact.
+    expect(a.system).toBeUndefined()
+    expect(c.byKind('AGENT')[0].attributes?.system).toBe('BUILDER_BEHAVIOR…')
+  })
+
   it('records the PROMPT, not just the answer', () => {
     // The Observatory shipped with output only. "What was the model looking at" is the question that
     // explains a weak model's behaviour, and it had no answer in-app.

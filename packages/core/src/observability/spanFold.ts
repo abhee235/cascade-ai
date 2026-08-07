@@ -68,8 +68,18 @@ const MARK_LABELS: Record<string, (e: Record<string, unknown>) => string> = {
   error: () => 'error',
 }
 
-const CAP = 4_000 // attribute payload cap — viewers truncate anyway; keep spans light
-const cut = (s: unknown): string => String(s ?? '').slice(0, CAP)
+// NO CAP. Payloads are stored WHOLE.
+//
+// This was capped at 4000 chars on the theory that viewers truncate anyway. That theory is wrong for the
+// thing these traces are for: a prompt cut mid-array cannot answer "what was the model looking at", and a
+// Write tool's input cut mid-file cannot answer "what did it actually write". A truncated forensic record
+// is a record you have to go elsewhere to finish reading, which defeats it.
+//
+// The cost lands on the STORE, and that is the right place for it — a local DB with retention. Sinks that
+// cannot carry an arbitrary payload cap it THEMSELVES (see otelTracer: OTLP crosses a network to a
+// collector with its own limits, and an oversized span is dropped entirely rather than shortened). That
+// per-sink choice is exactly what the one-fold-two-sinks split is for.
+const cut = (s: unknown): string => String(s ?? '')
 
 // Span/trace ids must be unique ACROSS PROCESSES, not just within one. The first version was
 // `counter + last-4-of-Date.now()`, which restarts the counter on every launch and only carries ~28
@@ -265,6 +275,14 @@ export function createSpanTracer(emit: SpanSink, opts: SpanFoldOptions = {}): Sp
 
         case 'model_request': {
           window = e.contextWindow as number | undefined
+          // The system prompt goes on the AGENT root, ONCE — it is identical on every call of a turn, and
+          // a 16KB prompt repeated across 30 calls was ~480KB of pure duplication per turn. On the root it
+          // is also where you look for it: it belongs to the agent, not to one of its calls. (Per-agent,
+          // so a nested sub-agent records its own — their prompts differ, which is the point of a persona.)
+          if (rootId && e.system && !rootAttrs.system) {
+            rootAttrs = { ...rootAttrs, system: cut(e.system) }
+            write({ spanId: rootId, parentSpanId: rootParent, name: rootName, kind: 'AGENT', startedAt: rootStart, attributes: rootAttrs })
+          }
           llm = {
             spanId: newId('l'),
             start: at,
@@ -276,7 +294,10 @@ export function createSpanTracer(emit: SpanSink, opts: SpanFoldOptions = {}): Sp
               // WHAT WE ACTUALLY SENT. The Observatory had output only, which answers "what did it say"
               // but never "what was it looking at" — and with a weak model the second question is the
               // one that explains the first. Last two messages: the whole transcript would be megabytes.
-              input: cut(JSON.stringify((e.messages as unknown[])?.slice(-2) ?? [])),
+              // The WHOLE conversation as sent, not the last two messages. "What was the model looking
+              // at" is the question a weak-model diagnosis starts from, and the answer is the prompt —
+              // all of it. The system prompt rides alongside rather than inside, so a reader can skip it.
+              input: cut(JSON.stringify(e.messages ?? [])),
               toolsOffered: (e.tools as string[])?.length,
             },
           }

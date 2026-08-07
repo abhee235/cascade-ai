@@ -52,6 +52,9 @@ function memoryStore(traces: TraceSummary[], spans: SpanRecord[] = [], seen: Rec
     async spans(traceId) {
       return spans.filter((s) => s.traceId === traceId)
     },
+    async span(spanId) {
+      return spans.find((s) => s.spanId === spanId)
+    },
     async listSessions(opts) {
       seen.sessions = opts
       return [{ chatId: 'c1', projectId: traces[0]?.projectId, turnCount: 3, startedAt: 1, endedAt: 2, errorTurns: 1, outputTokens: 40, models: ['qwen'] }]
@@ -175,6 +178,27 @@ describe('Observatory protocol (ADR-081)', () => {
     expect(seen.search).toMatchObject({ q: 'Bash', kind: 'TOOL', status: 'error' })
     // The ghost's project is gone; the orphan has none (an eval run) and is still worth reading.
     expect((last(ws, 'spanResults')?.spans as { spanId: string }[]).map((s) => s.spanId)).toEqual(['live', 'orphan'])
+  })
+
+  it('TRIMS payloads for the tree but serves ONE span whole', async () => {
+    // Prompts are stored uncapped now — they are the forensic record. The tree fetch repeats every 3s
+    // while a trace is open, so shipping them there would push megabytes per tick down a socket that is
+    // also carrying a live build. The detail pane asks for the one span it is showing.
+    const ws = new MockWs()
+    const big = 'x'.repeat(5_000)
+    const spans: SpanRecord[] = [{ traceId: 'T1', spanId: 's1', name: 'tool Write', kind: 'TOOL', startedAt: 1, endedAt: 2, attributes: { input: big, toolName: 'Write' } }]
+    handleConnection(ws as never, manager(), undefined, undefined, undefined, undefined, undefined, undefined, memoryStore([summary({ traceId: 'T1' })], spans))
+
+    send(ws, { type: 'trace', action: 'spans', traceId: 'T1' })
+    await waitFor(() => !!last(ws, 'traceSpans'))
+    const fromTree = (last(ws, 'traceSpans')?.spans as { attributes: Record<string, string>; trimmed?: boolean }[])[0]
+    expect(fromTree.attributes.input.length).toBeLessThan(1_000)
+    expect(fromTree.trimmed).toBe(true) // flagged, so the client knows to ask rather than show a cut prompt
+    expect(fromTree.attributes.toolName).toBe('Write') // short values pass through untouched
+
+    send(ws, { type: 'span', action: 'detail', spanId: 's1' })
+    await waitFor(() => !!last(ws, 'spanDetail'))
+    expect(((last(ws, 'spanDetail')?.span as { attributes: Record<string, string> }).attributes.input)).toHaveLength(5_000)
   })
 
   it('with NO store a span search answers empty rather than failing', async () => {

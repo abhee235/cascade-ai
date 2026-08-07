@@ -705,7 +705,17 @@ export function handleConnection(
         }
         case 'trace': {
           if (!traces) break
-          send({ type: 'traceSpans', traceId: msg.traceId, spans: await traces.spans(msg.traceId) })
+          // TRIM payloads for the tree. Prompts are stored whole (they are the forensic record), but the
+          // waterfall renders names and timings — and this fetch repeats every 3s while a trace is open,
+          // so shipping full prompts would push megabytes per tick down a socket that is also carrying a
+          // live build. The detail pane fetches the one span it is showing, untrimmed.
+          send({ type: 'traceSpans', traceId: msg.traceId, spans: (await traces.spans(msg.traceId)).map(trimForTree) })
+          break
+        }
+        case 'span': {
+          if (!traces) break
+          const full = await traces.span(msg.spanId)
+          if (full) send({ type: 'spanDetail', span: full })
           break
         }
         case 'spans': {
@@ -819,6 +829,24 @@ function handleHttp(req: IncomingMessage, res: ServerResponse): void {
   }
   res.writeHead(426, { 'Content-Type': 'text/plain' })
   res.end('Upgrade Required: this is a WebSocket endpoint')
+}
+
+/** How much of a payload the TREE needs: enough to preview, never the whole prompt. */
+const TREE_ATTR_CAP = 400
+/** Shorten the big string attributes for the tree fetch, flagging the span so the client knows to ask for
+ *  the real one before showing it. Numbers and short strings pass through untouched. */
+function trimForTree<T extends { attributes?: Record<string, unknown> }>(span: T): T & { trimmed?: boolean } {
+  const a = span.attributes
+  if (!a) return span
+  let trimmed = false
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(a)) {
+    if (typeof v === 'string' && v.length > TREE_ATTR_CAP) {
+      out[k] = v.slice(0, TREE_ATTR_CAP)
+      trimmed = true
+    } else out[k] = v
+  }
+  return trimmed ? { ...span, attributes: out, trimmed: true } : span
 }
 
 /** Validate the WS upgrade. Browser clients (always send Origin) must be an allowed origin AND present the

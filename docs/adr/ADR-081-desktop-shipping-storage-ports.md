@@ -153,6 +153,26 @@ the socket to render a page nobody may have open. The client polls (3s) *only wh
 flushed. Two commands (`traces`/`trace`) and two events; the server filters out traces whose project was
 deleted, because a row you cannot open is worse than no row.
 
+**Payloads are stored WHOLE (2026-08-07).** Input/output were capped at 4000 chars on the theory that
+viewers truncate anyway. That theory is wrong for what these traces are FOR: a prompt cut mid-array
+cannot answer "what was the model looking at", and a `Write` cut mid-file cannot answer "what did it
+write". The LLM span also carries the **full** message list now, not the last two.
+
+The cost is real and measured — a 30-call turn is **~3.1 MB** of span JSON, so ~60 MB/day at 20 turns
+and ~0.8 GB at the 14-day default retention. That lands on a local DB with a retention knob, which is
+the right place for it. Two consequences handled rather than absorbed:
+
+- **Sinks cap themselves.** OTLP crosses a network to a collector with its own limits, where an oversized
+  span is rejected *entirely* rather than shortened — so `otelTracer` keeps a 32k cap of its own. This is
+  exactly what the one-fold-two-sinks split is for.
+- **The tree fetch trims; the detail fetch does not.** `traceSpans` repeats every 3s while a trace is
+  open, so shipping full prompts there would push megabytes per tick down a socket also carrying a live
+  build. It sends 400-char previews flagged `trimmed`, and the detail pane fetches the single span it is
+  showing via `span(spanId)`.
+
+The system prompt sits on the AGENT root, once — identical across a turn's calls, it was ~480KB of
+duplication per turn (12% of the total) and it belongs to the agent rather than to one of its calls.
+
 **A sub-agent nests; it does not fork the trace (2026-08-07).** The orchestrated plan stage used to be a
 SECOND trace for the same user message — an artifact of the planner having its own session and therefore
 its own tracer, not a decision. The conventions are clear: OTel's GenAI semconv models a same-process

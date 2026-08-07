@@ -193,6 +193,9 @@ export interface TraceStore {
   /** Turns grouped into conversations, newest first. The Observatory's default view. */
   listSessions(opts?: { projectId?: string; limit?: number }): Promise<SessionSummary[]>
   spans(traceId: string): Promise<SpanRecord[]>
+  /** ONE span, with its payloads intact. The tree fetch trims them for transport (a prompt is now stored
+   *  whole and a waterfall does not need it); this is how the detail pane gets the real thing. */
+  span(spanId: string): Promise<SpanRecord | undefined>
   /** Spans across ALL traces, newest first. See SpanQuery for why this exists. */
   searchSpans(opts?: SpanQuery): Promise<SpanRecord[]>
   /** The distinct models seen, newest-used first — so a model filter offers real choices, not a free-text box. */

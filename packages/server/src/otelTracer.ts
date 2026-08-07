@@ -22,7 +22,10 @@ import { resourceFromAttributes } from '@opentelemetry/resources'
 import { SemanticConventions as SC } from '@arizeai/openinference-semantic-conventions'
 import { createSpanTracer, type Tracer, type TraceEvent, type TraceSpan } from '@cascade/core'
 
-const CAP = 4_000
+// The fold stores payloads whole; OTLP cannot carry them whole. This is a NETWORK export to a collector
+// with its own limits, where an oversized span is rejected outright — losing the span entirely is worse
+// than shortening one attribute. Generous, but bounded, and bounded HERE rather than at the source.
+const CAP = 32_000
 const cut = (s: unknown): string => String(s ?? '').slice(0, CAP)
 const snake = (k: string) => k.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
 
@@ -189,6 +192,11 @@ export class OtelTracer implements Tracer {
 		// why only opening the other viewer caught it.
 		if (s.kind === 'AGENT' && !s.parentSpanId) {
 			if (s.endedAt === undefined) {
+				// The fold may re-emit an OPEN record for a span it already opened (it does this to attach the
+				// system prompt to the root once the first model call reveals it). A store that upserts takes
+				// that in its stride; OTLP would export a SECOND root. Ignore the repeat — the attributes ride
+				// along on the close record, which is where this sink acts anyway.
+				if (this.rootSpanId === s.spanId) return
 				this.rootSpanId = s.spanId
 				this.rootStart = s.startedAt
 				this.root = this.otel.startSpan(s.name, { startTime: s.startedAt, attributes: attrs })

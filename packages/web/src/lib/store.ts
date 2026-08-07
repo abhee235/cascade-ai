@@ -64,6 +64,9 @@ interface UiState {
   openTraceId: string | null
   traceSpans: Record<string, SpanInfo[]>
   selectedSpanId: string | null
+  /** Untrimmed spans, keyed by span id. The tree fetch trims payloads for transport, so the detail pane
+   *  asks for the one span it is showing and renders THIS copy once it lands. */
+  spanDetails: Record<string, SpanInfo>
   /** Cross-trace span search: null ⇒ not searching (the trace list is shown instead). */
   spanSearch: { q: string; kind?: string; status?: 'error' } | null
   spanResults: SpanInfo[] | null
@@ -362,6 +365,7 @@ export const useStore = create<UiState>((set, get) => {
     openTraceId: null,
     traceSpans: {},
     selectedSpanId: null,
+    spanDetails: {},
     spanSearch: null,
     spanResults: null,
     observatoryView: 'sessions',
@@ -588,6 +592,9 @@ export const useStore = create<UiState>((set, get) => {
           break
         case 'spanResults':
           set({ spanResults: e.spans })
+          break
+        case 'spanDetail':
+          set((s) => ({ spanDetails: { ...s.spanDetails, [e.span.spanId]: e.span } }))
           break
         case 'sessions':
           set({ sessions: e.sessions, sessionsLoaded: true })
@@ -853,7 +860,12 @@ export const useStore = create<UiState>((set, get) => {
       set({ openTraceId: null, selectedSpanId: null })
       pushUrl('/observatory')
     },
-    selectSpan: (selectedSpanId) => set({ selectedSpanId }),
+    selectSpan: (selectedSpanId) => {
+      set({ selectedSpanId })
+      // Fetch the untrimmed span once. Cached by id, so re-selecting is free and the 3s tree poll never
+      // re-ships payloads it already delivered.
+      if (selectedSpanId && !get().spanDetails[selectedSpanId]) get().send({ type: 'span', action: 'detail', spanId: selectedSpanId })
+    },
     openChat: (projectId, chatId) => {
       // Open the project first, then switch to the chat — same socket, ordered, so the server processes
       // `open` (which attaches the session) before `chat switch`.

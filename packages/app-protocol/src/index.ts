@@ -179,6 +179,7 @@ export type BuilderEvent =
   | { type: 'traces'; traces: TraceSummaryInfo[]; append?: boolean; models?: string[] }
   | { type: 'traceSpans'; traceId: string; spans: SpanInfo[] } // ADR-081: one trace's spans (the waterfall)
   | { type: 'spanResults'; spans: SpanInfo[] } // ADR-081: cross-trace span search hits
+  | { type: 'spanDetail'; span: SpanInfo } // ADR-081: one span with its payloads intact
   | { type: 'sessions'; sessions: SessionInfo[] } // ADR-081: turns grouped into conversations
 
 /** Client → builder. App/workspace-level commands, distinct from a session's InboundMessages.
@@ -222,7 +223,10 @@ export type BuilderCommand =
   // (append), without it a fresh result set.
   | { type: 'traces'; action: 'list'; projectId?: string; model?: string; status?: 'ok' | 'error'; q?: string; chatId?: string; limit?: number; before?: number; beforeId?: string }
   | { type: 'sessions'; action: 'list'; projectId?: string; limit?: number } // ADR-081: the grouped view
-  | { type: 'trace'; action: 'spans'; traceId: string } // one trace's spans (→ traceSpans)
+  | { type: 'trace'; action: 'spans'; traceId: string } // one trace's spans (→ traceSpans), payloads trimmed
+  // ADR-081: ONE span, untrimmed. Prompts are stored whole now, so the tree fetch cannot carry them —
+  // it polls every 3s and would ship megabytes per tick. The detail pane asks for what it is showing.
+  | { type: 'span'; action: 'detail'; spanId: string }
   // Spans across ALL traces — "every failed Bash", "every turn that mentions RecipeGrid". The question a
   // per-trace viewer structurally cannot answer.
   | { type: 'spans'; action: 'search'; projectId?: string; kind?: string; status?: 'ok' | 'error'; q?: string; limit?: number }

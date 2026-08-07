@@ -418,6 +418,7 @@ function summaryFromSpans(traceId: string, spans: SpanInfo[]): TraceSummaryInfo 
 function TraceDetail({ trace, spans, onBack }: { trace: TraceSummaryInfo | undefined; spans: SpanInfo[] | undefined; onBack: () => void }) {
   const selectedSpanId = useStore((s) => s.selectedSpanId)
   const selectSpan = useStore((s) => s.selectSpan)
+  const spanDetails = useStore((s) => s.spanDetails)
   const openChat = useStore((s) => s.openChat)
 
   // Land on the root span rather than an empty panel — for most turns the root IS the summary you want.
@@ -425,7 +426,10 @@ function TraceDetail({ trace, spans, onBack }: { trace: TraceSummaryInfo | undef
     if (!selectedSpanId && spans?.length) selectSpan((spans.find((s) => !s.parentSpanId) ?? spans[0]).spanId)
   }, [spans, selectedSpanId, selectSpan])
 
-  const selected = spans?.find((s) => s.spanId === selectedSpanId) ?? null
+  // Prefer the untrimmed copy. The tree's spans have their payloads shortened for transport, so showing
+  // one directly would silently present a cut prompt as the whole thing.
+  const fromTree = spans?.find((s) => s.spanId === selectedSpanId) ?? null
+  const selected = (selectedSpanId ? spanDetails[selectedSpanId] : null) ?? fromTree
   const tokens = spans?.reduce((n, s) => n + ((s.attributes?.outputTokens as number | undefined) ?? 0), 0)
 
   return (

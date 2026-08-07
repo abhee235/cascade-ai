@@ -269,6 +269,12 @@ export function createTraceStore(db: Db): TraceStore {
       return rows.map(toSpan)
     },
 
+    async span(spanId: string): Promise<SpanRecord | undefined> {
+      writer.flush()
+      const row = db.prepare('SELECT * FROM spans WHERE span_id = ?').get(spanId) as unknown as SpanRow | undefined
+      return row ? toSpan(row) : undefined
+    },
+
     async searchSpans(opts): Promise<SpanRecord[]> {
       writer.flush()
       const where: string[] = []
