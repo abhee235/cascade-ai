@@ -728,6 +728,28 @@ html.cine .panes { flex: 1; min-height: 0; }
 .mcard b { display: block; font-family: var(--mono); font-size: 18px; font-weight: 550; color: var(--text); letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mcard span span { display: block; margin-top: 1px; font-size: 14px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+/* ───────────────── observability showcase ─────────────────
+   Deliberately reuses .mm-layout / .mm-rail / .mm-stage so it reads as a SIBLING of the model manager
+   rather than a different kind of section. The only new part is the frame: this one holds a real
+   screenshot instead of a hand-built mock, because the span tree is the product and a CSS approximation
+   of it would be a drawing of a thing rather than the thing. */
+.obs-stage::before { background: radial-gradient(ellipse 70% 40% at 50% 0%, rgba(167, 139, 250, 0.10), transparent 70%); }
+.obs-frame {
+	position: relative; border: 1px solid var(--line-strong); border-radius: 14px; overflow: hidden;
+	background: #0b0c0e;
+	box-shadow: 0 34px 70px -28px rgba(0,0,0,0.9), 0 0 0 1px rgba(0,0,0,0.4);
+}
+.obs-frame img { display: block; width: 100%; height: auto; }
+/* The shot is dark at the edges; a hairline inner highlight keeps it from dissolving into the page. */
+.obs-frame::after {
+	content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+	box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+}
+#observability .mm-item:nth-child(1) { --ic: var(--h-violet); }
+#observability .mm-item:nth-child(2) { --ic: var(--h-teal); }
+#observability .mm-item:nth-child(3) { --ic: var(--h-sky); }
+#observability .mm-item:nth-child(4) { --ic: var(--h-amber); }
+
 /* ───────────────── model-manager showcase: rail + elevated product mock ───────────────── */
 .mm-layout { margin-top: 54px; display: grid; grid-template-columns: 296px 1fr; gap: 52px; align-items: start; }
 @media (max-width: 1000px) { .mm-layout { grid-template-columns: 1fr; gap: 30px; } }
@@ -1603,6 +1625,45 @@ footer .wrap:last-of-type { padding-bottom: 60px; }
 				</div>
 			</div>
 		</div>
+	</div>
+</section>
+
+<!-- ══════════════════ OBSERVABILITY ══════════════════ -->
+<section id="observability">
+	<div class="wrap">
+		<div class="eyebrow rv">Observability</div>
+		<h2 class="rv">Every turn, on the record.<br />Nothing extra to run.</h2>
+		<p class="section-sub rv">Local models fail in ways you have to <em>see</em> to fix — a loop that never converges, a cache miss that doubles every call, a plan the model quietly ignored. Cascade ships its own trace viewer, writing to a file on your disk. No collector, no Python service, no account.</p>
+
+		<div class="mm-layout">
+			<div class="mm-rail rv">
+				<div class="mm-item active">
+					<div class="mm-h"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>The whole turn, nested</div>
+					<p>One message is one trace — every model call, every tool call and every sub-agent it delegated to, in the order they happened.</p>
+				</div>
+				<div class="mm-item">
+					<div class="mm-h"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v12H7l-3 3Z"/><path d="M8 9h8M8 12.5h5"/></svg>The prompt, in full</div>
+					<p>Not a preview. The entire message list as sent, the reasoning kept as reasoning, every tool's input and output — stored uncapped.</p>
+				</div>
+				<div class="mm-item">
+					<div class="mm-h"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Where the time went</div>
+					<p>Tokens per call and real context occupancy. On local backends prefill and decode split out — a cold cache reads nothing like a slow model.</p>
+				</div>
+				<div class="mm-item">
+					<div class="mm-h"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Search across every run</div>
+					<p>Every failed command, every turn that touched a file, every loop breaker that fired — across your whole history, not one trace at a time.</p>
+				</div>
+			</div>
+
+			<div class="mm-stage obs-stage rv">
+				<div class="obs-frame">
+					<img src="assets/observatory.png" width="1232" height="1020" loading="lazy" decoding="async"
+					     alt="Cascade's Observatory: a span waterfall showing an agent turn with a nested planner sub-agent, beside the selected model call's full prompt, reasoning and token counts." />
+				</div>
+			</div>
+		</div>
+
+		<p class="section-sub rv" style="margin-top:34px">Already have Phoenix, Langfuse or another OTLP collector? Point Cascade at it with one environment variable — the same traces, exported as OpenTelemetry spans, with nothing to change.</p>
 	</div>
 </section>
 
