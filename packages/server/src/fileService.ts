@@ -3,7 +3,7 @@
 // the client are RELATIVE to the project root (host paths never cross the wire). Guards: skip heavy dirs,
 // cap file size, block path traversal, flag binaries.
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, watch, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { parse } from '@babel/parser'
@@ -183,4 +183,43 @@ export function readDiff(root: string, relPath: string): { original: string; mod
     original = '' // new file, untracked, or no git
   }
   return { original, modified }
+}
+
+/**
+ * Watch a project for file changes and call `onChange` when its TREE could have changed.
+ *
+ * The Code pane was push-only: the server sent a tree at project open and when the agent's tools reported
+ * touching files. Anything else — the integrated terminal, an `npm install` finishing in the background,
+ * a generator writing a directory — changed the project with nothing to announce it, so the pane quietly
+ * went stale until the next turn ended.
+ *
+ * `fs.watch`, not a poll: the OS already knows, and walking a project on a timer to ask a question the
+ * kernel can answer is the kind of cost that only shows up on someone else's laptop.
+ *
+ * Filtering is what makes this viable rather than a firehose. The SAME skip list the tree itself uses —
+ * without it, `.cascade/dev.log` alone would fire on every line a dev server prints, and `node_modules`
+ * during an install would fire thousands of times.
+ *
+ * @returns a stop function; safe to call more than once.
+ */
+export function watchProjectTree(root: string, onChange: () => void): () => void {
+	let watcher: import('node:fs').FSWatcher | undefined
+	try {
+		// `recursive` is supported on Windows and macOS, and on Linux since Node 20 — every platform this
+		// runs on. A failure here is not fatal: the pane simply falls back to the push-based refreshes.
+		watcher = watch(root, { recursive: true }, (_event, name) => {
+			if (!name) return onChange()
+			// `name` is relative to root; a change ANYWHERE under a skipped directory is noise.
+			const parts = String(name).split(/[/\\]/)
+			if (parts.some((p) => SKIP.has(p))) return
+			onChange()
+		})
+		watcher.on('error', () => {}) // a watched directory being deleted must not take the connection down
+	} catch {
+		return () => {}
+	}
+	return () => {
+		watcher?.close()
+		watcher = undefined
+	}
 }

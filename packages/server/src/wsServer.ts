@@ -36,7 +36,7 @@ import type { ChatStore, ConfigStore, TraceStore } from '@cascade/storage'
 /** Chat ids: 8 hex chars, the format the file store minted. Generated HERE rather than by the adapter —
  *  an id is not backend knowledge, and importing the adapter for one is exactly what the boundary forbids. */
 const newChatId = () => randomBytes(4).toString('hex')
-import { createFile, deletePath, editJsxTextAtLoc, makeDir, readDiff, readFile, readTree, renamePath, setClassAtLoc, writeFile } from './fileService.js'
+import { createFile, deletePath, editJsxTextAtLoc, makeDir, readDiff, readFile, readTree, renamePath, setClassAtLoc, watchProjectTree, writeFile } from './fileService.js'
 import { PreviewManager } from './previewManager.js'
 import { PreviewProxy } from './previewProxy.js'
 import { runCheck } from './checkProject.js'
@@ -292,8 +292,26 @@ export function handleConnection(
     return name === 'Bash' || name === 'Write' || name === 'Edit' || name === 'MultiEdit'
   }
 
+  /**
+   * Watch the ACTIVE project so the Code pane reflects changes nothing announced.
+   *
+   * The tool-result refresh above only covers the agent's own edits during a turn. The integrated
+   * terminal, a background `npm install`, a generator writing files — all change the project with no
+   * event attached, and the pane would sit stale until the next turn ended.
+   *
+   * One watcher at a time, replaced on every project switch, so a long session does not accumulate them.
+   */
+  let stopWatch: (() => void) | undefined
+  const watchTree = () => {
+    stopWatch?.()
+    stopWatch = undefined
+    const dir = activeId && manager.dirOf(activeId)
+    if (dir) stopWatch = watchProjectTree(dir, scheduleTreeRefresh)
+  }
+
   /** Coalesce a burst of file writes into ONE tree walk. 400ms is below the threshold where the pane feels
-   *  stale, and far above the interval at which a build emits edits. */
+   *  stale, and far above the interval at which a build emits edits — and a watcher fires far harder than
+   *  tool results do, so this is what keeps an `npm install` from walking the tree hundreds of times. */
   let treeTimer: ReturnType<typeof setTimeout> | null = null
   const scheduleTreeRefresh = () => {
     if (treeTimer) return
@@ -391,6 +409,7 @@ export function handleConnection(
           send({ type: 'projects', projects: manager.list(), activeId })
           if (msg.action === 'open') {
             sendTree() // populate the Code pane for the opened project
+            watchTree() // …and keep it current for anything that changes the project from now on
             sendVersions() // populate the Versions panel (M6)
             // M11: load the project's chats and restore the most-recent one's conversation into the session.
             // ADR-068: if a turn is STILL RUNNING for this project, land on ITS chat — a turn started after
@@ -893,6 +912,8 @@ export function handleConnection(
   ws.on('close', () => {
     stopTail?.() // end the Console log stream (the dev server itself stays up in the container)
     stopTail = undefined
+    stopWatch?.() // release the project file watcher — it belongs to this connection, not the project
+    stopWatch = undefined
     killAllTerms() // end the terminal shells (the container stays up)
     unsubscribeTurn() // stop hearing the turn — it keeps running, and the next connection re-attaches
     active = undefined
