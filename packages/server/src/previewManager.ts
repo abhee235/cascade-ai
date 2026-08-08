@@ -6,7 +6,7 @@
 // which states the INTENT (install, start, stop, follow the log) and lets each runtime satisfy it the way
 // it can: the container with the shell it already has, the host with Node APIs and no shell at all.
 
-import { parseDevPort, type ProjectRuntime } from './projectRuntime.js'
+import { parseDevPort, stripAnsi, type ProjectRuntime } from './projectRuntime.js'
 
 export type PreviewStatus = 'installing' | 'starting' | 'running' | 'error' | 'stopped'
 export interface PreviewState {
@@ -85,13 +85,18 @@ export class PreviewManager {
 			// it and say so precisely instead of a bare "error" that once sent a model into a 30-minute
 			// cache-nuking loop. The host runtime passes --port explicitly, so drift there means something
 			// else took the port between reserving it and Vite binding.
-			const drift = parseDevPort(await runtime.devLog(40).catch(() => ''))
+			const log = await runtime.devLog(60).catch(() => '')
+			const drift = parseDevPort(log)
 			set({
 				status: 'error',
 				error:
 					drift && drift !== hostPort
 						? `The dev server started on port ${drift}, but the preview is served from ${hostPort} — so it cannot reach it. Something else is holding ${hostPort} (usually a dev server left over from an earlier run). Stop the preview and start it again to reclaim the port.`
-						: 'The dev server did not start. Check the Output/Console pane for its error.',
+						: // SHOW the reason rather than pointing at a pane. The log already says exactly what went
+							// wrong ("Cannot find package '@tailwindcss/vite'"), and "check the Output pane" turns a
+							// one-line answer into a hunt — measured: it read as "the server won't start" when the
+							// server was fine and a dependency was missing.
+							(devServerError(log) ?? 'The dev server did not start. Check the Output/Console pane for its error.'),
 			})
 		} catch {
 			set({ status: 'error' })
@@ -104,6 +109,28 @@ export class PreviewManager {
 }
 
 export { parseDevPort } // re-exported: the port-drift parser's tests import it from here
+
+/**
+ * The one line of a dev-server log worth putting in front of a user.
+ *
+ * Vite's failures are verbose — a code frame, a resolver trace, a Node stack — but the sentence that
+ * explains them is short and near the end. Searched newest-first so a retry's error wins over the previous
+ * attempt's, and ANSI is stripped because this goes into a UI label, not a terminal.
+ */
+export function devServerError(log: string): string | undefined {
+	const lines = stripAnsi(log)
+		.split('\n')
+		.map((l) => l.trim())
+		.filter(Boolean)
+	for (let i = lines.length - 1; i >= 0; i--) {
+		const l = lines[i]
+		// Skip stack frames and Vite's box-drawing code frames — they are context, not the cause.
+		if (/^at\s|^[╭│╰─┬]/.test(l)) continue
+		const m = l.match(/(Cannot find (?:package|module) .+?)(?:\s+imported|$)/i) ?? l.match(/^(?:Error:\s*)?(.*(?:is not recognized|EADDRINUSE|permission denied|ENOENT.*).*)$/i) ?? l.match(/^error (?:when |while )?(.+)$/i)
+		if (m) return m[1].slice(0, 300)
+	}
+	return undefined
+}
 
 /** Poll a URL until it answers (any HTTP response = the dev server is listening) or we time out. */
 async function waitForHttp(url: string, timeoutMs: number): Promise<boolean> {

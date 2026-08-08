@@ -61,12 +61,35 @@ export class HostSandbox implements ProjectRuntime {
 		return run(command, opts.cwd ?? this.projectDir, opts)
 	}
 
+	/**
+	 * Are the project's DECLARED dependencies actually installed?
+	 *
+	 * "node_modules is non-empty" is not the same question, and the difference is a real failure: the agent
+	 * fixing a missing import with `npm install lucide-react` creates a node_modules containing that package
+	 * and nothing else. A non-empty check then reports "installed", the preview skips its install, and Vite
+	 * dies on the first template dependency it cannot resolve — measured exactly that way, with 34 entries
+	 * present and `@tailwindcss/vite` missing, surfacing only as "Couldn't start the preview".
+	 *
+	 * Checks every declared dependency rather than sampling: a partial install is precisely the case that
+	 * matters, and the check is a handful of stats against a directory the OS has cached.
+	 */
 	async hasDependencies(): Promise<boolean> {
+		let declared: string[]
 		try {
-			return readdirSync(join(this.projectDir, 'node_modules')).length > 0
+			const pkg = JSON.parse(readFileSync(join(this.projectDir, 'package.json'), 'utf8')) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> }
+			declared = [...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.devDependencies ?? {})]
 		} catch {
-			return false // absent is the common case, and is the same answer as empty
+			// No package.json to compare against — fall back to the weaker question rather than claiming
+			// dependencies are missing for a project that may not use npm at all.
+			try {
+				return readdirSync(join(this.projectDir, 'node_modules')).length > 0
+			} catch {
+				return false
+			}
 		}
+		if (!declared.length) return true // nothing to install is the same as installed
+		const modules = join(this.projectDir, 'node_modules')
+		return declared.every((name) => existsSync(join(modules, ...name.split('/'))))
 	}
 
 	async installDependencies(onData?: (chunk: string) => void): Promise<boolean> {

@@ -10,6 +10,7 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { HostSandbox } from '../src/hostSandbox'
+import { devServerError } from '../src/previewManager'
 
 const project = () => mkdtempSync(join(tmpdir(), 'cascade-host-'))
 const isWindows = process.platform === 'win32'
@@ -162,3 +163,51 @@ async function waitFor(pred: () => boolean, timeoutMs = 8000): Promise<void> {
 	}
 	throw new Error('timed out waiting for condition')
 }
+
+// ADR-081 §4 — the partial-install trap, and surfacing the reason a dev server died.
+describe('dependency completeness', () => {
+	it('reports MISSING when node_modules holds only some declared packages', async () => {
+		// Measured: the agent fixed an import with `npm install lucide-react`, which left 34 entries in
+		// node_modules. A non-empty check called that "installed", the preview skipped its install, and Vite
+		// died on `Cannot find package '@tailwindcss/vite'` — surfacing only as "Couldn't start the preview".
+		const dir = project()
+		writeFileSync(join(dir, 'package.json'), JSON.stringify({ dependencies: { react: '^18', 'lucide-react': '^1' }, devDependencies: { '@tailwindcss/vite': '^4' } }))
+		const s = new HostSandbox(dir)
+		expect(await s.hasDependencies()).toBe(false)
+
+		mkdirSync(join(dir, 'node_modules', 'lucide-react'), { recursive: true })
+		expect(await s.hasDependencies()).toBe(false) // non-empty, but still incomplete
+
+		mkdirSync(join(dir, 'node_modules', 'react'), { recursive: true })
+		mkdirSync(join(dir, 'node_modules', '@tailwindcss', 'vite'), { recursive: true }) // scoped names too
+		expect(await s.hasDependencies()).toBe(true)
+	})
+
+	it('treats a project with no declared dependencies as installed', async () => {
+		const dir = project()
+		writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x' }))
+		expect(await new HostSandbox(dir).hasDependencies()).toBe(true)
+	})
+})
+
+describe('devServerError', () => {
+	it('pulls the CAUSE out of a real Vite failure, skipping stacks and code frames', () => {
+		// Verbatim from the failing run, ANSI included.
+		const log = [
+			'> vite --host --port 61146',
+			'\x1b[31mfailed to load config from C:\...\vite.config.ts\x1b[39m',
+			"\x1b[31merror when starting dev server:",
+			"Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@tailwindcss/vite' imported from C:\...\vite.config.ts.timestamp.mjs",
+			'    at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)',
+			'    at packageResolve (node:internal/modules/esm/resolve:768:81)',
+		].join('\n')
+		const msg = devServerError(log)
+		expect(msg).toContain("Cannot find package '@tailwindcss/vite'")
+		expect(msg).not.toContain('at Object.') // a stack frame is context, not the cause
+		expect(msg).not.toContain('\x1b[') // this goes in a UI label, not a terminal
+	})
+
+	it('returns undefined for a healthy log, so the generic message still applies', () => {
+		expect(devServerError('VITE v5.4.21  ready in 529 ms\n  Local: http://localhost:5173/')).toBeUndefined()
+	})
+})
