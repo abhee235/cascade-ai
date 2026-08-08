@@ -16,6 +16,10 @@ import { extractProseToolCalls } from '../proseToolCalls'
 import { parseToolArgs } from '../jsonRepair'
 import { asBlocks, textOf } from './shared'
 
+/** The builtin hosted gateways (mirrors modelSpecs.HOSTED_PROVIDERS): sampler extensions beyond
+ *  temperature/top_p/presence_penalty are rejected there with HTTP 400, so they are never sent. */
+const HOSTED_PROVIDER_IDS = new Set(['openai', 'groq', 'openrouter', 'nvidia'])
+
 /** Output cap sent when the caller pins none. Generous enough never to clip a real answer, but present so a
  *  BACKEND's own (sometimes tiny) default can't silently truncate turns — see body(). Shared with the native
  *  Ollama adapter so the two wire paths can't drift apart. */
@@ -140,6 +144,8 @@ export class OpenAIChatProvider implements ModelProvider {
   }
 
   private body(req: CompletionRequest, stream: boolean): string {
+    // Mirrors modelSpecs.HOSTED_PROVIDERS — the gateways where sampler extensions 400.
+
     const singleToolCall = this.forceSingleTool.has(req.model)
     const body: Record<string, unknown> = {
       model: req.model,
@@ -150,7 +156,18 @@ export class OpenAIChatProvider implements ModelProvider {
     // Backends that don't know the field ignore it — usage just stays undefined.
     if (stream) body.stream_options = { include_usage: true }
     if (req.temperature !== undefined) body.temperature = req.temperature // eval determinism (temperature 0)
-    if (req.topP !== undefined) body.top_p = req.topP // ADR-067 per-model sampling (top_k has no OpenAI-chat equivalent)
+    if (req.topP !== undefined) body.top_p = req.topP // ADR-067 per-model sampling
+    // presence_penalty is STANDARD OpenAI — every compat backend accepts it, so it always flows. It is
+    // also the anti-loop lever Qwen recommends (~1.5) for quantized builds, which is exactly what a
+    // self-hosted vLLM/llama.cpp endpoint tends to be serving.
+    if (req.presencePenalty !== undefined) body.presence_penalty = req.presencePenalty
+    // top_k / repetition_penalty are EXTENSIONS: vLLM, SGLang, llama.cpp server and LM Studio all honor
+    // them on their OpenAI-compat routes, while the builtin hosted gateways reject unknown params with a
+    // 400. Sent only to endpoints we know are self-hosted (custom provider ids — the ADR-076 path).
+    if (!HOSTED_PROVIDER_IDS.has(this.cfg.id)) {
+      if (req.topK !== undefined) body.top_k = req.topK
+      if (req.repeatPenalty !== undefined) body.repetition_penalty = req.repeatPenalty
+    }
     {
       // ADR-038: output cap on the wire. OpenAI RENAMED the field: current models (gpt-5.x, o-series)
       // reject `max_tokens` with HTTP 400 and require `max_completion_tokens` (older gpt-4o accepts both).

@@ -209,7 +209,7 @@ function ModelDetail(props: { em: EnabledModelInfo; info?: { capabilities: strin
 				<div className="grid grid-cols-2 gap-x-8 gap-y-6">
 					<SliderField label="Temperature" value={draft.temperature ?? ''} onChange={(v) => set('temperature', v)} min={0} max={tempMax} step={0.05} fallback={Math.min(0.7, tempMax)} format={(n) => n.toFixed(2)} note="Higher = more random." />
 					<SliderField label="Top P" value={draft.topP ?? ''} onChange={(v) => set('topP', v)} min={0} max={1} step={0.01} fallback={1} format={(n) => n.toFixed(2)} note="Nucleus sampling." />
-					{lim.topK && <SliderField label="Top K" value={draft.topK ?? ''} onChange={(v) => set('topK', v)} min={0} max={100} step={1} fallback={40} format={(n) => String(n)} note="Sampling breadth (local/Ollama)." />}
+					{lim.topK && <SliderField label="Top K" value={draft.topK ?? ''} onChange={(v) => set('topK', v)} min={0} max={100} step={1} fallback={40} format={(n) => String(n)} note="Sampling breadth (local / self-hosted endpoints)." />}
 					{lim.topK && <SliderField label="Repeat penalty" value={draft.repeatPenalty ?? ''} onChange={(v) => set('repeatPenalty', v)} min={1} max={1.5} step={0.01} fallback={1.1} format={(n) => n.toFixed(2)} note="Discourages verbatim repetition — the main anti-loop lever for quantized local models." />}
 					{lim.topK && <SliderField label="Presence penalty" value={draft.presencePenalty ?? ''} onChange={(v) => set('presencePenalty', v)} min={0} max={2} step={0.1} fallback={0} format={(n) => n.toFixed(1)} note="Qwen recommends ~1.5 for quantized builds that loop." />}
 				</div>

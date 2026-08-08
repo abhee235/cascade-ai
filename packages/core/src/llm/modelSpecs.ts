@@ -100,15 +100,23 @@ const specFor = (model: string): SpecRow | undefined => {
 /** The limits for a model. `provider` sets the top_k default when the model isn't in the table (hosted chat
  *  APIs have no top_k). `detected` is the live-probed context window (Ollama num_ctx) — it RAISES the context
  *  ceiling so the slider can reach the real Modelfile allocation even if it exceeds the table/default. */
+/** The builtin hosted gateways — OpenAI-compat endpoints we did not stand up ourselves, where sampler
+ *  extensions beyond temperature/top_p are unavailable (or rejected with a 400). */
+export const HOSTED_PROVIDERS = new Set(['openai', 'groq', 'openrouter', 'nvidia'])
+
 export function limitsFor(provider: string, model: string, detected?: number): ModelLimits {
 	const row = specFor(model)
+	// top_k (and the penalty knobs the UI gates on it) is a property of the SERVING API, not the weights.
+	// Ollama's native endpoint has it — and so does anything SELF-HOSTED behind a custom provider id: vLLM,
+	// SGLang, llama.cpp's server, LM Studio all accept top_k/penalties on their OpenAI-compat route
+	// (ADR-076 is explicitly the rented-vLLM path). What does NOT have it is the builtin hosted gateways,
+	// where the provider id is the final authority — a qwen served by Groq exposes no top_k even though the
+	// family "supports" it.
+	const selfHosted = provider === 'ollama' || !HOSTED_PROVIDERS.has(provider)
 	const base: ModelLimits = row
 		? { contextMax: row.contextMax, outputMax: row.outputMax, tempMax: row.tempMax, topK: row.topK }
-		: { ...DEFAULT_LIMITS, topK: provider === 'ollama' }
-	// top_k is a property of the SERVING API, not the weights: only Ollama's native endpoint exposes it. A
-	// llama/qwen model served by a hosted OpenAI-compat gateway (Groq/NIM/OpenRouter) has no top_k, even
-	// though the open-weight family "supports" it — so the provider is the final authority.
-	base.topK = provider === 'ollama' && base.topK
+		: { ...DEFAULT_LIMITS, topK: selfHosted }
+	base.topK = selfHosted && base.topK
 	if (detected && detected > base.contextMax) base.contextMax = detected
 	return base
 }

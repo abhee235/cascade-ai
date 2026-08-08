@@ -42,6 +42,8 @@ const FULL: CompletionRequest = {
 	temperature: 0.3,
 	topP: 0.9,
 	topK: 40,
+	repeatPenalty: 1.1,
+	presencePenalty: 1.5,
 	contextWindow: 131000,
 	maxOutputTokens: 2048,
 }
@@ -73,6 +75,8 @@ describe('wire parity — ollama native /api/chat', () => {
 		expect(body.options.temperature).toBe(0.3)
 		expect(body.options.top_p).toBe(0.9)
 		expect(body.options.top_k).toBe(40)
+		expect(body.options.repeat_penalty).toBe(1.1)
+		expect(body.options.presence_penalty).toBe(1.5)
 		expect(body.tools?.length).toBe(1)
 		expect(body.messages[0]).toMatchObject({ role: 'system', content: 'be terse' })
 	})
@@ -83,18 +87,29 @@ describe('wire parity — ollama native /api/chat', () => {
 })
 
 describe('wire parity — OpenAI-compatible /v1/chat/completions', () => {
-	it('carries sampling + cap + tools; contextWindow and topK are WIRE-IMPOSSIBLE (documented, not silent)', async () => {
+	it('SELF-HOSTED endpoint (custom id): sampling, penalties AND the extensions flow; contextWindow stays wire-impossible', async () => {
+		// The 'vast' id is not a builtin hosted gateway, so this is the ADR-076 path — vLLM, SGLang,
+		// llama.cpp server, LM Studio — where top_k and repetition_penalty are honored on the compat route.
 		const { url, body } = await sent(new OpenAIChatProvider({ id: 'vast', baseUrl: 'http://x' }), FULL, SSE_EOS)
 		expect(url).toBe('http://x/v1/chat/completions')
 		expect(body.temperature).toBe(0.3)
 		expect(body.top_p).toBe(0.9)
+		expect(body.top_k).toBe(40)
+		expect(body.repetition_penalty).toBe(1.1)
+		expect(body.presence_penalty).toBe(1.5)
 		expect(body.max_tokens).toBe(2048)
 		expect(body.tools?.length).toBe(1)
 		expect(body.messages[0]).toMatchObject({ role: 'system', content: 'be terse' })
-		// The gaps — asserted ABSENT on purpose. If a way to carry these ever exists, these lines should fail
-		// and force the matrix (and the ModelManager warning copy) to be updated:
-		expect(JSON.stringify(body)).not.toMatch(/num_ctx|context_window|contextWindow/) // the 32k-squeeze failure class
+		// Still wire-impossible everywhere on this route — the 32k-squeeze failure class:
+		expect(JSON.stringify(body)).not.toMatch(/num_ctx|context_window|contextWindow/)
+	})
+
+	it('HOSTED gateway (openai id): the extensions are withheld — they 400 there; presence_penalty is standard and flows', async () => {
+		const { body } = await sent(new OpenAIChatProvider({ id: 'openai' }), FULL, SSE_EOS)
 		expect(body.top_k).toBeUndefined()
+		expect(body.repetition_penalty).toBeUndefined()
+		expect(body.presence_penalty).toBe(1.5)
+		expect(body.max_completion_tokens).toBe(2048) // current OpenAI models reject max_tokens
 	})
 	it('unset cap → the 16384 backstop, never omitted (the 38-token-truncation regression)', async () => {
 		const { body } = await sent(new OpenAIChatProvider({ id: 'vast', baseUrl: 'http://x' }), MINIMAL, SSE_EOS)
