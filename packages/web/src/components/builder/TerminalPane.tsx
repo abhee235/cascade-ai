@@ -65,6 +65,37 @@ export function TerminalPane({ id }: { id: string }) {
     })
     term.onData((d) => terminalInput(id, d)) // keystrokes → PTY (never filtered; confinement is the boundary)
 
+    // PASTE. Three routes people actually use, only one of which existed:
+    //  · Ctrl+V — the browser-native path through the helper textarea. Left alone: it already works in a
+    //    browser, and in Electron the default application menu supplies the accelerator.
+    //  · right-click — terminal muscle memory, and in ELECTRON there is no native context menu at all, so
+    //    this route silently did nothing in the desktop app.
+    //  · Ctrl+Shift+V — the terminal convention. Intercepted and fed through term.paste() with the default
+    //    PREVENTED, so the one paste cannot arrive twice (once native, once ours).
+    const pasteFromClipboard = () => {
+      navigator.clipboard
+        ?.readText?.()
+        .then((t) => {
+          if (t) term.paste(t)
+        })
+        .catch(() => {
+          /* clipboard permission denied — the Ctrl+V route still works */
+        })
+    }
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault()
+      pasteFromClipboard()
+    }
+    el.addEventListener('contextmenu', onContextMenu)
+    term.attachCustomKeyEventHandler((ev) => {
+      if (ev.type === 'keydown' && ev.ctrlKey && ev.shiftKey && ev.key.toLowerCase() === 'v') {
+        ev.preventDefault()
+        pasteFromClipboard()
+        return false
+      }
+      return true
+    })
+
     const ro = new ResizeObserver(() => {
       doFit()
       terminalResize(id, term.cols, term.rows)
@@ -72,6 +103,7 @@ export function TerminalPane({ id }: { id: string }) {
     ro.observe(el)
 
     return () => {
+      el.removeEventListener('contextmenu', onContextMenu)
       ro.disconnect()
       setTerminalSink(id, undefined)
       stopTerminal(id)

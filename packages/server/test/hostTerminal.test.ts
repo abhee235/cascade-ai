@@ -104,6 +104,18 @@ describe('host terminal', () => {
 		expect(s.exited()).toBe(false)
 	})
 
+	it('a pasted CRLF submits ONCE, not once per character', async () => {
+		// xterm's paste delivers the clipboard verbatim. Treating the LF of a CRLF pair as its own Enter
+		// ran every pasted line twice — visible as a stray empty prompt, and a re-executed command when
+		// the first finished fast enough.
+		const s = open()
+		s.term.write('echo crlf-once\r\n')
+		await waitFor(() => s.text().includes('crlf-once') && !s.text().endsWith('crlf-once'))
+		await new Promise((r) => setTimeout(r, 400)) // let any spurious second submit land
+		const prompts = (s.text().match(/>\s/g) ?? []).length
+		expect(prompts).toBe(2) // banner prompt + the one after the command — a double submit makes 3
+	})
+
 	it('`exit` ends the session', async () => {
 		const s = open()
 		s.term.write('exit\r')

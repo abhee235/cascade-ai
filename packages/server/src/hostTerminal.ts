@@ -90,10 +90,19 @@ export function createHostTerminal(cwd: string, onData: (chunk: string) => void,
 		run(command)
 	}
 
+	let prevCh = ''
 	return {
 		write(data: string) {
 			if (dead) return
 			for (const ch of data) {
+				// A pasted CRLF must submit ONCE: xterm sends the clipboard verbatim, and treating the LF of a
+				// CRLF pair as its own Enter ran every pasted line twice (the second an empty prompt at best,
+				// a re-executed command at worst).
+				if (ch === '\n' && prevCh === '\r') {
+					prevCh = ch
+					continue
+				}
+				prevCh = ch
 				// Ctrl-C: stop what is running, or just abandon the half-typed line.
 				if (ch === '\x03') {
 					write('^C' + CRLF)
