@@ -23,6 +23,8 @@ interface SpanRow {
   model: string | null
   chat_id: string | null
   attributes: string | null
+  /** Insert order. Explicit rather than SQLite's implicit rowid — see migration 004. */
+  seq: number
 }
 
 const str = (v: unknown): string | null => (typeof v === 'string' ? v : v == null ? null : String(v))
@@ -44,17 +46,22 @@ export function createTraceStore(db: Db): TraceStore {
   // A span is written ONCE, when it ends — but the same span_id can arrive twice if a tracer re-emits
   // after a retry, so upsert rather than insert to keep the write idempotent.
   const insert = db.prepare(`
-    INSERT INTO spans (trace_id, span_id, parent_id, name, kind, started_at, ended_at, status, project_id, model, chat_id, attributes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO spans (trace_id, span_id, parent_id, name, kind, started_at, ended_at, status, project_id, model, chat_id, attributes, seq)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(span_id) DO UPDATE SET
       ended_at = excluded.ended_at, status = excluded.status, attributes = excluded.attributes
   `)
+
+  // Insert order, assigned by the WRITER. A span is emitted twice (open, then close) and the upsert leaves
+  // `seq` alone, so a span keeps the position it first arrived at — which is what "first"/"last in this
+  // conversation" actually mean. Seeded from the table so it survives a restart.
+  let nextSeq = ((db.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM spans').get() as { m: number }).m ?? 0) + 1
 
   const writer = new BufferedWriter<SpanRow>((rows) => {
     db.exec('BEGIN')
     try {
       for (const r of rows) {
-        insert.run(r.trace_id, r.span_id, r.parent_id, r.name, r.kind, r.started_at, r.ended_at, r.status, r.project_id, r.model, r.chat_id, r.attributes)
+        insert.run(r.trace_id, r.span_id, r.parent_id, r.name, r.kind, r.started_at, r.ended_at, r.status, r.project_id, r.model, r.chat_id, r.attributes, r.seq)
       }
       db.exec('COMMIT')
     } catch (e) {
@@ -79,6 +86,7 @@ export function createTraceStore(db: Db): TraceStore {
         model: str(a['llm.model_name'] ?? a['cascade.model'] ?? a.model),
         chat_id: str(a['cascade.chat_id'] ?? a['session.id']),
         attributes: Object.keys(a).length ? JSON.stringify(a) : null,
+        seq: nextSeq++,
       })
     },
 
@@ -206,12 +214,13 @@ export function createTraceStore(db: Db): TraceStore {
         .prepare(`
           SELECT chat_id, kind, attributes, rn_first, rn_last FROM (
             SELECT chat_id, kind, attributes,
-                   -- rowid breaks ties, and ties are the common case: turns inside one conversation can
-                   -- share a millisecond, and started_at alone then lets SQLite pick arbitrarily — which
-                   -- showed turn 5 of 6 as a conversation's "last output". rowid is insertion order,
-                   -- i.e. emission order, which is exactly the sequence we mean by first and last.
-                   ROW_NUMBER() OVER (PARTITION BY chat_id, kind ORDER BY started_at ASC,  rowid ASC)  AS rn_first,
-                   ROW_NUMBER() OVER (PARTITION BY chat_id, kind ORDER BY started_at DESC, rowid DESC) AS rn_last
+                   -- seq breaks ties, and ties are the common case: turns inside one conversation can
+                   -- share a millisecond, and started_at alone then lets the engine pick arbitrarily —
+                   -- which showed turn 5 of 6 as a conversation's "last output". seq is insertion order,
+                   -- i.e. emission order, which is exactly the sequence we mean by first and last. It is
+                   -- an explicit column, not SQLite's rowid, so this query survives a move to Postgres.
+                   ROW_NUMBER() OVER (PARTITION BY chat_id, kind ORDER BY started_at ASC,  seq ASC)  AS rn_first,
+                   ROW_NUMBER() OVER (PARTITION BY chat_id, kind ORDER BY started_at DESC, seq DESC) AS rn_last
             FROM spans
             WHERE chat_id IN (${slots}) AND kind IN ('AGENT', 'LLM') AND attributes IS NOT NULL
           ) WHERE rn_first = 1 OR rn_last = 1

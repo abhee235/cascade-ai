@@ -1,7 +1,7 @@
 {
   "name": "@cascade/storage",
   "version": "0.0.0",
-  "description": "Storage PORTS (interfaces) only — ChatStore/ConfigStore/TraceStore/BlobStore. ADR-081: the server takes these by injection so a desktop (SQLite) and a hosted (Postgres/S3) deployment differ only in the adapter. Depends on nothing; contains no I/O.",
+  "description": "Storage PORTS (interfaces) only \u00e2\u20ac\u201d ChatStore/ConfigStore/TraceStore/BlobStore. ADR-081: the server takes these by injection so a desktop (SQLite) and a hosted (Postgres/S3) deployment differ only in the adapter. Depends on nothing; contains no I/O.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -9,6 +9,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./conformance": {
+      "types": "./src/conformance.ts",
+      "default": "./src/conformance.ts"
     }
   },
   "scripts": {

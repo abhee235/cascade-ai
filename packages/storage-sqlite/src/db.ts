@@ -56,6 +56,21 @@ const MIGRATIONS: { id: string; sql: string }[] = [
     id: '003-config',
     sql: `CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
   },
+  {
+    // An EXPLICIT insert-order column. The first/last-in-a-conversation queries leaned on SQLite's
+    // implicit `rowid`, which Postgres and SQL Server do not have — the one genuinely non-portable thing
+    // in the schema, and exactly the sort of backend assumption a port exists to keep out.
+    //
+    // Backfilled from rowid so existing rows keep the order they were written in; new rows get it from
+    // the autoincrement. `INTEGER PRIMARY KEY AUTOINCREMENT` cannot be added by ALTER, so this is a
+    // plain column fed by a trigger-free default: the writer supplies it (see traceStore).
+    id: '004-span-seq',
+    sql: `
+      ALTER TABLE spans ADD COLUMN seq INTEGER NOT NULL DEFAULT 0;
+      UPDATE spans SET seq = rowid WHERE seq = 0;
+      CREATE INDEX IF NOT EXISTS spans_seq ON spans(seq);
+    `,
+  },
 ]
 
 /**
