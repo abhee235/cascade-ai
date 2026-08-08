@@ -233,6 +233,14 @@ interface UiState {
   setComposerDraft: (text: string) => void // composer reads + clears this (prefill channel)
 }
 
+/** Settle every tool still marked running. Called when a turn ends and after a replay — the two moments
+ *  after which nothing can legitimately still be in flight. */
+function closeOpenTools(items: Item[]): Item[] {
+  return items.some((i) => i.kind === 'tool' && i.status === 'running')
+    ? items.map((i) => (i.kind === 'tool' && i.status === 'running' ? { ...i, status: 'interrupted' as const } : i))
+    : items // unchanged reference when there is nothing to settle, so React skips the re-render
+}
+
 export const useStore = create<UiState>((set, get) => {
   // Batch streaming deltas per animation frame (StreamingOptimizer) so we don't re-render per token.
   const textOpt = new StreamingOptimizer((t) =>
@@ -549,7 +557,10 @@ export const useStore = create<UiState>((set, get) => {
           commitStreaming() // an aborted turn's in-flight thinking/text becomes a transcript item (was: discarded)
           thinkStart = null
           thinkLast = null
-          set({ status: null, recovering: null, busy: false, stepStartedAt: null, sawTokens: false, thinkStartedAt: null })
+          // Nothing can still be running once the turn is over. Without this a tool whose result never
+          // arrived spins forever and the turn looks stuck while it is actually finished — measured with
+          // `start /b cmd /c "npm run dev"`, where the detached child kept the pipe open so no result came.
+          set((s) => ({ status: null, recovering: null, busy: false, stepStartedAt: null, sawTokens: false, thinkStartedAt: null, items: closeOpenTools(s.items) }))
           break
         // ── app/builder events (BuilderEvent) ──
         case 'serverInfo':
@@ -676,7 +687,9 @@ export const useStore = create<UiState>((set, get) => {
                 get().handleEvent((entry as { event: never }).event)
               }
             }
-            set({ streaming: null, status: null, busy: false, recovering: null, stepStartedAt: null, sawTokens: false })
+            // The replay log records toolStart and toolResult but NOT turnDone, so a tool that never
+            // resolved would come back spinning on every reload, forever. Close them the same way.
+            set((s) => ({ streaming: null, status: null, busy: false, recovering: null, stepStartedAt: null, sawTokens: false, items: closeOpenTools(s.items) }))
             break
           }
           // LEGACY fallback (chats recorded before the replay log): the flattened rows.

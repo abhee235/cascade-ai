@@ -4,7 +4,12 @@ import type { Answers, Message, Question, ToolDisplay } from '@cascade/core'
 export type Item =
   | { kind: 'user'; text: string }
   | { kind: 'assistant'; text: string; thinking?: string; thoughtMs?: number }
-  | { kind: 'tool'; id: string; name: string; summary: string; status: 'running' | 'ok' | 'error'; preview?: string; display?: ToolDisplay }
+  // `interrupted` is a TERMINAL state and deliberately not `error`: the tool did not fail, we simply
+  // never learned how it ended — the turn stopped, or a command spawned a detached child that held the
+  // pipe open so no result ever came back. Claiming failure would be a guess; leaving it `running`
+  // spins a spinner forever, which is what it used to do (and survived a reload, since the replay log
+  // holds a toolStart with no matching toolResult).
+  | { kind: 'tool'; id: string; name: string; summary: string; status: 'running' | 'ok' | 'error' | 'interrupted'; preview?: string; display?: ToolDisplay }
   | { kind: 'memory'; text: string }
   | { kind: 'compacted'; text: string }
   | { kind: 'question'; id: string; questions: Question[]; answered?: Answers } // ADR-043: AskUserQuestion card

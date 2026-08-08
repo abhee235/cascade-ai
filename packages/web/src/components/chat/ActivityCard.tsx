@@ -23,6 +23,7 @@ import {
   ListTodo,
   CheckSquare,
   Square,
+  CircleSlash,
   type LucideIcon,
 } from 'lucide-react'
 import type { ToolDisplay, TodoItem } from '@cascade/core'
@@ -133,7 +134,7 @@ function CommandCard({ item }: { item: Extract<Item, { kind: 'tool' }> }) {
   useEffect(() => {
     if (item.status === 'error') setOpen(true)
   }, [item.status])
-  const StatusIcon = running ? Loader2 : item.status === 'ok' ? CheckCircle2 : XCircle
+  const StatusIcon = running ? Loader2 : item.status === 'ok' ? CheckCircle2 : item.status === 'interrupted' ? CircleSlash : XCircle
   return (
     <div className="my-1.5 overflow-hidden rounded-md border border-border bg-card/60">
       <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs">
@@ -144,7 +145,7 @@ function CommandCard({ item }: { item: Extract<Item, { kind: 'tool' }> }) {
           {running && '…'}
         </span>
         <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground/70">{command}</span>
-        <StatusIcon className={cn('h-3.5 w-3.5 shrink-0', running && 'animate-spin text-muted-foreground', item.status === 'ok' && 'text-green-500', item.status === 'error' && 'text-red-500')} />
+        <StatusIcon className={cn('h-3.5 w-3.5 shrink-0', running && 'animate-spin text-muted-foreground', item.status === 'ok' && 'text-green-500', item.status === 'error' && 'text-red-500', item.status === 'interrupted' && 'text-muted-foreground/70')} />
       </button>
       {open && item.preview && (
         <pre className="max-h-56 overflow-auto whitespace-pre-wrap border-t border-border bg-muted/50 px-3 py-1.5 font-mono text-[11px] text-foreground/80">{item.preview}</pre>
@@ -190,7 +191,7 @@ const iconFor = (name: string) => TOOL_ICONS[name.toLowerCase()] ?? Wrench
 function ToolCard({ item }: { item: Extract<Item, { kind: 'tool' }> }) {
   const [open, setOpen] = useState(false)
   const Icon = iconFor(item.name)
-  const StatusIcon = item.status === 'running' ? Loader2 : item.status === 'ok' ? CheckCircle2 : XCircle
+  const StatusIcon = item.status === 'running' ? Loader2 : item.status === 'ok' ? CheckCircle2 : item.status === 'interrupted' ? CircleSlash : XCircle
   const hasOutput = !!item.preview
   // A NAKED log row — no border, no background. Status leads ("Simmer complete ✓");
   // 13px muted; hierarchy from type, not boxes. Click still expands output.
@@ -208,11 +209,13 @@ function ToolCard({ item }: { item: Extract<Item, { kind: 'tool' }> }) {
             item.status === 'running' && 'animate-spin text-primary',
             item.status === 'ok' && 'text-muted-foreground/70',
             item.status === 'error' && 'text-destructive',
+            item.status === 'interrupted' && 'text-muted-foreground/70',
           )}
         />
         <Icon className="h-3.5 w-3.5 shrink-0 opacity-60" />
         
         <span className="truncate">{(item.summary || (item.status === 'running' ? 'working…' : '')).split('/workspace/').join('')}</span>
+        {item.status === 'interrupted' && <span className="shrink-0 text-[11px] text-muted-foreground/70">interrupted</span>}
         {hasOutput && (
           <ChevronRight className={cn('ml-auto h-3 w-3 shrink-0 opacity-0 transition-all group-hover:opacity-60', open && 'rotate-90 opacity-60')} />
         )}
@@ -229,6 +232,10 @@ function ToolCard({ item }: { item: Extract<Item, { kind: 'tool' }> }) {
 /** The agent's task checklist (TodoWrite). Pending = empty box, in_progress = spinner (shows the activeForm),
  *  completed = checked + struck through. */
 function TodoCard({ items }: { items: TodoItem[] }) {
+  // A todo list is a SNAPSHOT taken when the agent last wrote it, so an item left 'in_progress' by a turn
+  // that ended keeps spinning forever — the checklist claims work is happening when nothing is running.
+  // The turn state is the missing piece: same task, but stop animating once the turn is over.
+  const busy = useStore((s) => s.busy)
   const done = items.filter((t) => t.status === 'completed').length
   return (
     <div className="my-4 rounded-md border border-border bg-card/80 p-2.5 text-[13px] text--muted-foreground">
@@ -244,7 +251,7 @@ function TodoCard({ items }: { items: TodoItem[] }) {
             {t.status === 'completed' ? (
               <CheckSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-green-500" />
             ) : t.status === 'in_progress' ? (
-              <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-blue-500" />
+              <Loader2 className={cn('mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-500', busy ? 'animate-spin' : 'opacity-50')} />
             ) : (
               <Square className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             )}
