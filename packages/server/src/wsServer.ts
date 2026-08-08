@@ -24,7 +24,8 @@ import { DEFAULT_RUNTIME_MODE, type RuntimeMode } from './projectRuntime.js'
 import type { RuntimeInfo } from '@cascade/app-protocol'
 import { ensureVisualEditConfig, listTemplates } from './templates.js'
 import { listModels, modelInfo, providerCatalog, setProviderKey } from './modelCaps.js'
-import { activeModel, addEnabledModel, enabledModelsForClient, initModelRegistry, modelContextFor, modelEndpointFor, modelParamsFor, removeEnabledModel, setActiveModel, setModelContext, setModelParams } from './modelRegistry.js'
+import { fetchHfDefaults } from './hfDefaults.js'
+import { activeModel, addEnabledModel, enabledModels, enabledModelsForClient, initModelRegistry, modelContextFor, modelEndpointFor, modelParamsFor, removeEnabledModel, setActiveModel, setModelContext, setModelParams } from './modelRegistry.js'
 import { addMcpServer, enabledMcpServers, initMcpRegistry, mcpServers as mcpServersConfig, removeMcpServer, toggleMcpServer } from './mcpRegistry.js'
 import { sdkConnect } from '@cascade/core'
 import type { McpServerInfo } from '@cascade/app-protocol'
@@ -473,6 +474,25 @@ export function handleConnection(
         case 'addModel': {
           addEnabledModel(msg.provider, msg.model, msg.contextWindow, msg.baseUrl, msg.apiKey, msg.api) // ADR-076/077: baseUrl+key+wire-protocol for a custom endpoint
           sendEnabledModels()
+          // HF-shaped ids carry their own defaults in the repo: config.json has the native context length,
+          // generation_config.json has the AUTHOR's recommended sampling (Qwen3 publishes the exact
+          // temp/top_p/top_k its card recommends). Fetch once, fill ONLY the blanks, persist through the
+          // normal params path — the same rows the sliders edit, so it lands in the database and the UI
+          // updates when it arrives. Background on purpose: adding a model must not wait on huggingface.co.
+          void (async () => {
+            const d = await fetchHfDefaults(msg.model)
+            if (!d) return
+            const current = enabledModels().find((m) => m.provider === msg.provider && m.model === msg.model)
+            const fill = {
+              contextWindow: current?.contextWindow ?? d.contextWindow,
+              temperature: current?.temperature ?? d.temperature,
+              topP: current?.topP ?? d.topP,
+              topK: current?.topK ?? d.topK,
+              repeatPenalty: current?.repeatPenalty ?? d.repeatPenalty,
+            }
+            setModelParams(msg.provider, msg.model, fill)
+            sendEnabledModels()
+          })()
           break
         }
         case 'removeModel': {
