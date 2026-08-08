@@ -20,7 +20,6 @@ import { beginTurn, flushTracers, ProjectManager, setTraceSession, type SessionT
 import { ensurePlanPersisted } from './planStage.js'
 import { DockerSandbox, dockerAvailable, sweepSandboxContainers } from './dockerSandbox.js'
 import { ensureVisualEditConfig, listTemplates } from './templates.js'
-import { ChatStore } from './chatStore.js'
 import { listModels, modelInfo, providerCatalog, setProviderKey } from './modelCaps.js'
 import { activeModel, addEnabledModel, enabledModelsForClient, initModelRegistry, modelContextFor, modelEndpointFor, modelParamsFor, removeEnabledModel, setActiveModel, setModelContext, setModelParams } from './modelRegistry.js'
 import { addMcpServer, enabledMcpServers, initMcpRegistry, mcpServers as mcpServersConfig, removeMcpServer, toggleMcpServer } from './mcpRegistry.js'
@@ -28,7 +27,12 @@ import { sdkConnect } from '@cascade/core'
 import type { McpServerInfo } from '@cascade/app-protocol'
 import type { ChatHistoryItem } from '@cascade/app-protocol'
 import type { Message } from '@cascade/core'
-import type { ConfigStore, TraceStore } from '@cascade/storage'
+import type { ChatMeta } from '@cascade/app-protocol'
+import type { ChatStore, ConfigStore, TraceStore } from '@cascade/storage'
+
+/** Chat ids: 8 hex chars, the format the file store minted. Generated HERE rather than by the adapter —
+ *  an id is not backend knowledge, and importing the adapter for one is exactly what the boundary forbids. */
+const newChatId = () => randomBytes(4).toString('hex')
 import { createFile, deletePath, editJsxTextAtLoc, makeDir, readDiff, readFile, readTree, renamePath, setClassAtLoc, writeFile } from './fileService.js'
 import { PreviewManager } from './previewManager.js'
 import { PreviewProxy } from './previewProxy.js'
@@ -148,6 +152,16 @@ export function handleConnection(
   // responses (answer/permission/abort) must reach IT, not the builder, for the stage's duration.
   let stageAborted = false // abort during the stage cancels the WHOLE submit, not just the planner
   let activeChatId: string | undefined // M11: which chat (conversation) the active session is currently on
+  /** Resolves once the in-flight chat load has bound `activeChatId`.
+   *
+   *  The socket handler is async, so two client messages CAN be in flight at once — and since chats moved
+   *  behind an async port (ADR-081), binding a chat is no longer instantaneous. A submit arriving in that
+   *  window pinned an empty chat id, and its spans landed outside any conversation: the Observatory showed
+   *  the turn but the Sessions view was empty, with nothing else looking wrong.
+   *
+   *  Deliberately NOT a general message queue. Serialising every message would make `abort` queue behind
+   *  the very turn it is meant to cancel. This expresses the one real dependency instead. */
+  let chatReady: Promise<unknown> = Promise.resolve()
   // ADR-068: the SINGLE active turn lives in the server-wide `liveTurn` registry, NOT in this connection —
   // so a hard reload or a second tab still sees the build running and re-attaches to its stream.
   const sendTurnActivity = () => {
@@ -264,30 +278,42 @@ export function handleConnection(
 
   // M11: send the active project's chat list (the active chat highlighted). list() prunes abandoned empty
   // "New chat" entries — the ACTIVE chat is exempt (it may be empty right now, mid-composition).
-  const sendChats = () => {
-    const dir = activeId && manager.dirOf(activeId)
-    if (dir && chatStore && activeChatId) send({ type: 'chats', chats: chatStore.list(dir, activeChatId), activeId: activeChatId })
+  /** The store speaks ChatRecord (it carries projectId); the wire speaks ChatMeta (it does not). */
+  const toChatMetas = (chats: { id: string; title: string; createdAt: string; updatedAt: string }[]): ChatMeta[] =>
+    chats.map((c) => ({ id: c.id, title: c.title, createdAt: c.createdAt, updatedAt: c.updatedAt }))
+  /** The project's chats, guaranteeing at least one. "Open the last chat, or make one" is UI POLICY — which
+   *  is exactly why the store's list() no longer does it on read (ADR-081). */
+  const chatsOrCreate = async (projectId: string): Promise<ChatMeta[]> => {
+    if (!chatStore) return []
+    const existing = await chatStore.list(projectId)
+    if (existing.length) return toChatMetas(existing)
+    return toChatMetas([await chatStore.create({ id: newChatId(), projectId, title: 'New chat' })])
+  }
+  const sendChats = async () => {
+    if (!activeId || !chatStore || !activeChatId) return
+    // Pruning is the caller's policy too. The ACTIVE chat is exempt — it is legitimately empty while
+    // someone is composing in it.
+    await chatStore.prune(activeId, activeChatId)
+    send({ type: 'chats', chats: toChatMetas(await chatStore.list(activeId)), activeId: activeChatId })
   }
   // M11: load a chat's saved conversation into the active session and send its transcript to render.
-  const loadChat = (id: string) => {
-    const dir = activeId && manager.dirOf(activeId)
-    if (!dir || !chatStore || !active) return
+  const loadChat = async (id: string) => {
+    if (!activeId || !chatStore || !active) return
     activeChatId = id
     // ADR-068: a RUNNING turn's history lives in the session — disk is stale until the turn ends (save()
     // only runs after the loop). Re-loading it here would hand the live session an EMPTY history mid-build,
     // silently discarding everything the agent has done so far. In-memory wins while the turn is in flight.
     const live = liveTurn.for(activeId)?.chatId === id
-    if (!live) active.loadHistory(chatStore.messages(dir, id))
-    sendChats()
+    if (!live) active.loadHistory((await chatStore.messages(id)) as Parameters<typeof active.loadHistory>[0])
+    await sendChats()
     // High-fidelity path: replay the ActivityEvents the client rendered live (identical transcript by
     // construction). The flattened items ride along as the fallback for pre-log chats.
-    const events = chatStore.events(dir, id)
+    const events = await chatStore.replay(id)
     send({ type: 'chatHistory', items: historyToItems(active.getHistory()), events: events.length ? events : undefined })
   }
   // M11: persist the current chat's conversation (and derive its title from the first user message).
-  const saveChat = (firstUserText?: string) => {
-    const dir = activeId && manager.dirOf(activeId)
-    if (dir && chatStore && active && activeChatId) chatStore.save(dir, activeChatId, active.getHistory(), firstUserText)
+  const saveChat = async (firstUserText?: string) => {
+    if (chatStore && active && activeChatId) await chatStore.saveMessages(activeChatId, active.getHistory(), firstUserText)
   }
   // The REPLAY LOG (reload = live, measured gap: reloaded chats dropped thinking, diffs, tool status, and
   // leaked <system-reminder> walls). Only COMMITTED render events are logged — streaming deltas and
@@ -295,8 +321,7 @@ export function handleConnection(
   // answerable when the loop is long gone).
   const REPLAY_TYPES = new Set(['toolStart', 'toolResult', 'message', 'memory', 'compacted'])
   const logReplay = (entry: import('@cascade/app-protocol').ChatReplayEntry) => {
-    const dir = activeId && manager.dirOf(activeId)
-    if (dir && chatStore && activeChatId) chatStore.appendEvent(dir, activeChatId, entry)
+    if (chatStore && activeChatId) chatStore.append(activeChatId, entry)
   }
   const logEvent = (ev: { type: string }) => {
     if (REPLAY_TYPES.has(ev.type)) logReplay({ event: ev })
@@ -343,9 +368,13 @@ export function handleConnection(
             // ADR-068: if a turn is STILL RUNNING for this project, land on ITS chat — a turn started after
             // this one (or a freshly created empty chat) would otherwise hide the build in progress. Passing
             // it as `keepId` also protects it from prune while it has no saved messages yet.
-            const dir = activeId && manager.dirOf(activeId)
             const liveChat = liveTurn.for(activeId)?.chatId
-            if (dir && chatStore) loadChat(liveChat || chatStore.list(dir, liveChat)[0].id)
+            if (activeId && chatStore) {
+              // Assigned SYNCHRONOUSLY so a submit starting in the next tick can await it.
+              const openingId = activeId
+              chatReady = (async () => loadChat(liveChat || (await chatsOrCreate(openingId))[0].id))()
+              await chatReady
+            }
             const pv = activeId && preview?.state(activeId) // re-show a preview already running for this project
             if (pv) {
               emitPreview(pv)
@@ -464,13 +493,14 @@ export function handleConnection(
         case 'submit': {
           const s = requireActive()
           if (!s) break
+          await chatReady // a chat load may still be binding activeChatId — see its declaration
           // ADR-068: pin this turn's project/chat so its logging + save can't be misrouted if the user browses
           // to another project mid-build. Also seed the live snapshot for re-attach.
           const turnProjectId = activeId!
           const turnChatId = activeChatId ?? ''
           const turnDir = manager.dirOf(turnProjectId)
           const pinnedLog = (entry: import('@cascade/app-protocol').ChatReplayEntry) => {
-            if (turnDir && chatStore && turnChatId) chatStore.appendEvent(turnDir, turnChatId, entry)
+            if (chatStore && turnChatId) chatStore.append(turnChatId, entry)
           }
           // ADR-053: group this turn's spans under the chat it belongs to, BEFORE anything is traced — the
           // plan stage builds its tracer partway through this handler and must inherit the same session.
@@ -537,8 +567,8 @@ export function handleConnection(
             void maybeAutoStartPreview(turnProjectId)
           }
           sendTree() // the agent may have created/edited files — refresh the tree
-          if (turnDir && chatStore) chatStore.save(turnDir, turnChatId, s.getHistory(), msg.text) // pinned save
-          sendChats() // the title may have changed
+          if (chatStore && turnChatId) await chatStore.saveMessages(turnChatId, s.getHistory(), msg.text) // pinned save
+          await sendChats() // the title may have changed
           // M6: checkpoint the turn's file changes (no-op if nothing changed), then refresh the history.
           const dir = turnDir
           if (dir && versions?.checkpoint(dir, msg.text)) sendVersions()
@@ -639,39 +669,42 @@ export function handleConnection(
           break
         }
         case 'chat': { // M11: multiple chats per project
-          const dir = activeId && manager.dirOf(activeId)
-          if (!dir || !chatStore || !active) break
-          if (msg.action === 'list') sendChats()
+          if (!activeId || !chatStore || !active) break
+          if (msg.action === 'list') await sendChats()
           else if (msg.action === 'new') {
             // Already sitting on an empty chat? Reuse it — don't mint another "New chat" (they'd accumulate).
             if (activeChatId && active.getHistory().length === 0) {
-              sendChats()
+              await sendChats()
               break
             }
-            saveChat() // snapshot the current chat before starting a fresh one
+            await saveChat() // snapshot the current chat before starting a fresh one
             active.reset()
-            loadChat(chatStore.create(dir).id)
+            const created = await chatStore.create({ id: newChatId(), projectId: activeId, title: 'New chat' })
+            await loadChat(created.id)
           } else if (msg.action === 'switch' && msg.id) {
-            saveChat()
-            loadChat(msg.id)
+            await saveChat()
+            await loadChat(msg.id)
           } else if (msg.action === 'rename' && msg.id && msg.title) {
-            chatStore.rename(dir, msg.id, msg.title)
-            sendChats()
+            await chatStore.rename(msg.id, msg.title)
+            await sendChats()
           } else if (msg.action === 'delete' && msg.id) {
-            chatStore.delete(dir, msg.id)
-            if (msg.id === activeChatId) loadChat(chatStore.list(dir)[0].id) // list() recreates one if none remain
-            else sendChats()
+            await chatStore.delete(msg.id)
+            // Deleting the ACTIVE chat must land somewhere. The store no longer conjures a replacement on
+            // read, so ask for one explicitly.
+            if (msg.id === activeChatId) await loadChat((await chatsOrCreate(activeId))[0].id)
+            else await sendChats()
           }
           break
         }
         case 'chats': { // the Chats page: every project's chat list (read-only — never creates/prunes)
           if (!chatStore) break
+          // ONE query for every project (ADR-081). This used to scan each project's .cascade directory,
+          // making the page O(projects) in syscalls on an install with 46 of them.
+          const byProject = new Map<string, ChatMeta[]>()
+          for (const c of await chatStore.listAll()) byProject.set(c.projectId, [...(byProject.get(c.projectId) ?? []), ...toChatMetas([c])])
           const groups = manager
             .list()
-            .map((project) => {
-              const dir = manager.dirOf(project.id)
-              return { project, chats: dir ? chatStore.peek(dir) : [] }
-            })
+            .map((project) => ({ project, chats: byProject.get(project.id) ?? [] }))
             .filter((g) => g.chats.length > 0)
           send({ type: 'allChats', groups })
           break
@@ -875,6 +908,9 @@ export interface ServerDeps {
   /** Models, connectors and settings. Absent ⇒ the registries stay empty (headless/tests), which is the
    *  same thing an absent config file used to mean. */
   config?: ConfigStore
+  /** Chats and their replay logs. Absent ⇒ conversations are in-memory only, which is what a headless
+   *  test run wants — and matches how every other port here degrades. */
+  chats?: ChatStore
   /** Release storage resources on shutdown. Runs BEFORE process.exit — buffered writes are memory-only. */
   dispose?: () => Promise<void>
 }
@@ -927,7 +963,7 @@ export async function start(deps: ServerDeps = {}) {
   previewProxy?.listen()
   const preview = new PreviewManager(previewProxy ? PREVIEW_PORT : undefined)
   const versions = new VersionManager() // M6: git checkpoints/restore (stateless; runs git in each project dir)
-  const chatStore = new ChatStore() // M11: multiple chats per project, persisted under each project's .cascade/
+  const chatStore = deps.chats // ADR-081: injected by the composition root — a PORT, never a backend
   // M7 security: an explicit http.Server so we can bind localhost, serve the token over CORS, and validate the
   // WS upgrade's Origin + token (see handleHttp / verifyWsClient).
   const httpServer = createServer(handleHttp)

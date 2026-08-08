@@ -71,6 +71,41 @@ const MIGRATIONS: { id: string; sql: string }[] = [
       CREATE INDEX IF NOT EXISTS spans_seq ON spans(seq);
     `,
   },
+  {
+    // Chats and their replay logs (ADR-081 §2). Previously `chats.json` + `chat-<id>.json` +
+    // `chat-<id>.events.jsonl` under each PROJECT's directory — which is why the server still knew a host
+    // path, the last thing keeping it tied to one deployment.
+    //
+    // `messages` is a JSON document on the row rather than a table: every read is "the whole conversation"
+    // and every write replaces it, exactly as the file did. A messages TABLE would buy queryability nothing
+    // asks for and turn a Message shape change into a schema change.
+    //
+    // Events ARE rows, because that access pattern is different: append one, read the most recent N. As a
+    // document it would be a read-modify-write of the entire log per event, hundreds of times per turn.
+    //
+    // AUTOINCREMENT is SQLite-specific, and that is fine here in a way it was not for spans.seq: this is
+    // DDL, which is adapter-private by definition (Postgres writes BIGSERIAL). What must stay portable is
+    // the QUERIES, and they only ever say `ORDER BY seq`.
+    id: '005-chats',
+    sql: `
+      CREATE TABLE IF NOT EXISTS chats (
+        id         TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        title      TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        messages   TEXT
+      );
+      CREATE INDEX IF NOT EXISTS chats_project ON chats(project_id, updated_at DESC);
+
+      CREATE TABLE IF NOT EXISTS chat_events (
+        seq     INTEGER PRIMARY KEY AUTOINCREMENT,
+        chat_id TEXT NOT NULL,
+        entry   TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS chat_events_chat ON chat_events(chat_id, seq);
+    `,
+  },
 ]
 
 /**

@@ -4,22 +4,23 @@
 // which backend it got. That is the whole point of the boundary test: swapping in a Postgres bundle
 // later must not touch the server.
 //
-// Scope note, deliberately honest: only `traces` is implemented today. Rather than stub `chats`,
-// `config` and `blobs` with throwing placeholders — which would let a caller wire them and fail at
-// RUNTIME — this exposes a narrower TELEMETRY bundle whose type says exactly what exists. The server
-// can adopt it now, and it widens to the full `Storage` as ChatStore/ConfigStore/BlobStore land
-// (ADR-081 implementation order 4–5). A type error at the wiring site beats a crash in front of a user.
+// Scope note, deliberately honest: `traces`, `config` and `chats` are implemented; `blobs` is not. Rather
+// than stub the missing one with a throwing placeholder — which would let a caller wire it and fail at
+// RUNTIME — this exposes a bundle whose type says exactly what exists, widening to the full `Storage` as
+// BlobStore lands. A type error at the wiring site beats a crash in front of a user.
 
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { ConfigStore, TraceStore } from '@cascade/storage'
+import type { ChatStore, ConfigStore, TraceStore } from '@cascade/storage'
 import { openDb, type Db } from './db.js'
 import { createTraceStore } from './traceStore.js'
 import { createConfigStore } from './configStore.js'
+import { createChatStore } from './chatStore.js'
 
 export interface TelemetryStorage {
   traces: TraceStore
   config: ConfigStore
+  chats: ChatStore
   /** Escape hatch for migrations/inspection while the bundle is still partial. */
   db: Db
   /** Flush buffers and close. Call on app shutdown — buffered spans are lost otherwise. */
@@ -41,6 +42,7 @@ export function createTelemetryStorage(opts: CreateStorageOptions): TelemetrySto
   const db = openDb(opts.file)
   const traces = createTraceStore(db)
   const config = createConfigStore(db)
+  const chats = createChatStore(db)
 
   // Prune at OPEN, not on a timer: a desktop app is closed more often than it is left running, and a
   // background interval would keep waking the process for work that only matters across sessions.
@@ -50,9 +52,13 @@ export function createTelemetryStorage(opts: CreateStorageOptions): TelemetrySto
   return {
     traces,
     config,
+    chats,
     db,
     async dispose() {
-      await traces.flush() // buffered spans are in memory until this runs
+      // BOTH buffers, before the handle closes: spans and replay events are in memory until this runs, and
+      // a lost replay log is a transcript that reloads blank.
+      await traces.flush()
+      await chats.flush()
       db.close()
     },
   }

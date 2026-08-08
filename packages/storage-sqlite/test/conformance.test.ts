@@ -11,6 +11,7 @@ import { runConformance } from '@cascade/storage/conformance'
 import { openDb } from '../src/db.js'
 import { createTraceStore } from '../src/traceStore.js'
 import { createConfigStore } from '../src/configStore.js'
+import { createChatStore } from '../src/chatStore.js'
 
 /** A fresh, migrated database per store — the suite requires stores that cannot see each other's rows. */
 const freshDb = () => openDb(join(mkdtempSync(join(tmpdir(), 'cascade-conformance-')), 'cascade.db'))
@@ -20,6 +21,7 @@ runConformance(
 		name: 'sqlite',
 		makeTraceStore: () => createTraceStore(freshDb()),
 		makeConfigStore: () => createConfigStore(freshDb()),
+		makeChatStore: () => createChatStore(freshDb()),
 	},
 	{ describe, it, expect },
 )

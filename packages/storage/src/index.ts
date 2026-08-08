@@ -29,6 +29,9 @@ export interface ChatRecord {
 export type ReplayEntry = { user: string } | { event: unknown }
 
 export interface ChatStore {
+  /** One project's chats, newest first. A PURE read — it never creates or deletes. "Open the last chat, or
+   *  make one" is UI policy and lives in the server; a store that invents rows on read cannot be reasoned
+   *  about (and made `list` unusable for the read-only Chats page, which is why `peek` had to exist). */
   list(projectId: string): Promise<ChatRecord[]>
   /** Every project's chats in one query — the Chats page. Directory scanning made this O(projects). */
   listAll(): Promise<ChatRecord[]>
@@ -36,11 +39,31 @@ export interface ChatStore {
   create(chat: Omit<ChatRecord, 'createdAt' | 'updatedAt'>): Promise<ChatRecord>
   rename(chatId: string, title: string): Promise<void>
   delete(chatId: string): Promise<void>
+  /**
+   * Drop abandoned empty chats — still titled "New chat", no history, no replay log. `keepId` is spared:
+   * the ACTIVE chat is legitimately empty while someone is composing in it.
+   *
+   * Emptiness must consider the REPLAY LOG, not just messages. A chat whose turn is still running has
+   * events but no saved history and no title yet (history is written when the turn ends), so a
+   * messages-only test classifies a live build as abandoned and deletes it. Measured: opening a project
+   * mid-build pruned the running chat and orphaned its 499-event log.
+   *
+   * Returns the ids it removed, so a caller can tell whether the active chat list actually changed.
+   */
+  prune(projectId: string, keepId?: string): Promise<string[]>
+  /** The agent's conversation for this chat. `unknown[]` deliberately: the shape belongs to core's Message
+   *  type and this package depends on NOTHING — the server casts on the way out. */
+  messages(chatId: string): Promise<unknown[]>
+  /** Replace the conversation, bump `updatedAt`, and — if the chat is still untitled — derive its title from
+   *  `firstUserText`. One call rather than a save plus a touch, because two writes can disagree and a chat
+   *  that saved its history but lost its title reads as a bug. */
+  saveMessages(chatId: string, messages: unknown[], firstUserText?: string): Promise<void>
   /** Append ONE entry. Fire-and-forget at the call site: adapters buffer and flush in a transaction
    *  (ADR-081 §3 — the cost is the commit, not the insert), so this must never be awaited in the loop. */
   append(chatId: string, entry: ReplayEntry): void
-  /** The full replay log, in order — the client re-dispatches these through the live reducer. */
-  replay(chatId: string): Promise<ReplayEntry[]>
+  /** The chat's replay log, oldest first — the client re-dispatches these through the live reducer. Adapters
+   *  return the most recent `limit` entries: a marathon chat replays its tail, not an unbounded log. */
+  replay(chatId: string, limit?: number): Promise<ReplayEntry[]>
   /** Flush any buffered appends. Call before shutdown; adapters with no buffer no-op. */
   flush(): Promise<void>
 }

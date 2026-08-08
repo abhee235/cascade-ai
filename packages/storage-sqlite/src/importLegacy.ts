@@ -13,10 +13,13 @@
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ConfigStore, ConnectorRecord, ModelRecord } from '@cascade/storage'
+import type { ChatStore, ConfigStore, ConnectorRecord, ModelRecord, ReplayEntry } from '@cascade/storage'
 
 /** Set once the import has been considered — see the note above on why emptiness is not the test. */
 const MARKER = 'legacyConfigImported'
+/** The same discipline for chats, tracked separately: the two migrations landed in different releases, so
+ *  an install can legitimately have done one and not the other. */
+const CHATS_MARKER = 'legacyChatsImported'
 
 const readJson = <T>(file: string): T | undefined => {
   try {
@@ -66,3 +69,72 @@ export async function importLegacyConfig(store: ConfigStore, legacyDir: string):
   await store.setSetting(MARKER, true)
   return imported
 }
+
+/** One chat as the file store wrote it into `chats.json`. */
+type LegacyChatMeta = { id: string; title: string; createdAt: string; updatedAt: string }
+
+/**
+ * Bring each project's file-backed chats into the DB, once.
+ *
+ * The files lived under the PROJECT directory (`<dir>/.cascade/chats.json`, `chat-<id>.json`,
+ * `chat-<id>.events.jsonl`), which is why the server had to know a host path to find a conversation. Ids
+ * are PRESERVED rather than re-minted: spans are stamped with `cascade.chat_id`, so a new id would sever
+ * every existing trace from the conversation that produced it — the Observatory's Sessions view would go
+ * blank for all historical work.
+ *
+ * @param projects the id↔dir pairs from the projects index — the mapping the adapter cannot derive itself
+ * @returns counts for the boot log; silence about a migration is how you discover it never ran
+ */
+export async function importLegacyChats(store: ChatStore, projects: { id: string; dir: string }[]): Promise<{ chats: number; events: number }> {
+	// The "run once" marker lives in the CONFIG store (see chatsImported/markChatsImported below) because
+	// ChatStore has no settings surface — the caller checks it, so this stays a pure importer.
+	const imported = { chats: 0, events: 0 }
+	for (const project of projects) {
+		const legacyDir = join(project.dir, '.cascade')
+		for (const meta of readJson<LegacyChatMeta[]>(join(legacyDir, 'chats.json')) ?? []) {
+			if (!meta?.id) continue
+			// Skip anything already present: this runs behind a marker, but a project restored from a backup
+			// after the marker was set would otherwise duplicate its chats.
+			if (await store.get(meta.id)) continue
+			await store.create({ id: meta.id, projectId: project.id, title: meta.title || 'New chat' })
+			const messages = readJson<unknown[]>(join(legacyDir, `chat-${meta.id}.json`)) ?? []
+			// No firstUserText: these chats already have their titles, and passing one would rename any that
+			// a user had deliberately left as "New chat".
+			if (messages.length) await store.saveMessages(meta.id, messages)
+			else if (meta.title && meta.title !== 'New chat') await store.rename(meta.id, meta.title)
+			imported.chats++
+
+			for (const entry of readJsonl(join(legacyDir, `chat-${meta.id}.events.jsonl`))) {
+				store.append(meta.id, entry)
+				imported.events++
+			}
+		}
+	}
+	await store.flush() // append() is fire-and-forget; the import must not return before the rows land
+	return imported
+}
+
+/** Read a JSONL replay log, skipping torn lines. A crash mid-append leaves a partial last line, and losing
+ *  one event is not a reason to lose the transcript. */
+function readJsonl(file: string): ReplayEntry[] {
+	let text: string
+	try {
+		text = readFileSync(file, 'utf8')
+	} catch {
+		return [] // pre-log chat — the caller falls back to the flattened messages
+	}
+	const out: ReplayEntry[] = []
+	for (const line of text.split('\n')) {
+		if (!line.trim()) continue
+		try {
+			out.push(JSON.parse(line) as ReplayEntry)
+		} catch {
+			/* torn tail line */
+		}
+	}
+	return out
+}
+
+/** Has the chat import already run? Kept beside the import so the marker's name has ONE definition. */
+export const chatsImported = (config: ConfigStore) => config.setting<boolean>(CHATS_MARKER)
+export const markChatsImported = (config: ConfigStore) => config.setSetting(CHATS_MARKER, true)

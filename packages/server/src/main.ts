@@ -10,10 +10,11 @@
 //   2. hand the server a per-session tracer that writes spans into it
 //   3. hand the server a dispose() so shutdown flushes the buffer instead of dropping it
 
+import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createSpanTracer } from '@cascade/core'
-import { createTelemetryStorage, importLegacyConfig } from '@cascade/storage-sqlite'
+import { chatsImported, createTelemetryStorage, importLegacyChats, importLegacyConfig, markChatsImported } from '@cascade/storage-sqlite'
 import { PROJECTS_ROOT, start } from './wsServer.js'
 
 /** Where app state lives. On the desktop this becomes Electron's `app.getPath('userData')`, passed in by
@@ -31,6 +32,29 @@ if (moved.models || moved.connectors || moved.active) {
   console.log(`Imported existing config into ${DB_FILE}: ${moved.models} model(s), ${moved.connectors} connector(s)${moved.active ? ', active model' : ''}.`)
 }
 
+// ADR-081 §2, the same treatment for CHATS — which lived under each project directory, and were the last
+// reason the server had to know a host path to find a conversation. Reading `projects.json` here (rather
+// than inside the adapter) is deliberate: the id↔dir mapping is a SERVER fact, and the entry point is the
+// one place allowed to hold both halves.
+if (!(await chatsImported(storage.config))) {
+  const projects = readProjectDirs(join(PROJECTS_ROOT, 'projects.json'))
+  const chats = await importLegacyChats(storage.chats, projects)
+  await markChatsImported(storage.config)
+  if (chats.chats) console.log(`Imported ${chats.chats} chat(s) and ${chats.events} replay event(s) into ${DB_FILE}.`)
+}
+
+/** The projects index, read defensively — a missing or corrupt file means "nothing to import", never a
+ *  failed launch. Chat ids are preserved by the import, so spans stamped with `cascade.chat_id` still
+ *  resolve to their conversation afterwards. */
+function readProjectDirs(file: string): { id: string; dir: string }[] {
+  try {
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as { id?: string; dir?: string }[]
+    return raw.filter((p): p is { id: string; dir: string } => Boolean(p?.id && p?.dir))
+  } catch {
+    return []
+  }
+}
+
 await start({
   // The desktop's telemetry sink: core's ONE event→span fold, writing straight into the store. There is
   // no SQLite-specific tracer any more — `traces.record` is the whole sink, which is what stops this path
@@ -41,5 +65,6 @@ await start({
   sessionTracerFor: ({ projectId, kind, model }) => createSpanTracer((span) => storage.traces.record(span), { projectId, model, rootName: `agent (${kind})` }),
   traces: storage.traces, // the READ side — what the Observatory queries
   config: storage.config, // models, connectors, settings — the registries read through this now
+  chats: storage.chats, // conversations + replay logs, no longer files under each project dir
   dispose: () => storage.dispose(),
 })

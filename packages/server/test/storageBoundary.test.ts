@@ -22,9 +22,10 @@ const COMPOSITION_ROOT = new Set(['main.ts'])
 
 // Files that legitimately touch the filesystem TODAY and are scheduled to move behind a port.
 // Shrinking this list is the migration; it must never grow. (ADR-081 implementation order 4–5.)
-const PENDING_PORTS = new Set([
-  'chatStore.ts', // → ChatStore
-])
+// EMPTY. Every piece of durable app state now sits behind a port; the last entry (chatStore.ts) was
+// retired when chats moved into the DB. Adding one back means a new file writes app state directly —
+// which is allowed only as a scheduled step toward a port, never as a destination.
+const PENDING_PORTS = new Set<string>([])
 
 // Genuinely deployment-agnostic filesystem use: these operate on the PROJECT's files, which stay real
 // files in every deployment (git checkpoints, edits, npm install) and sit behind core's Sandbox port.

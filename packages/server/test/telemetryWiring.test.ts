@@ -15,7 +15,6 @@ import { createTelemetryStorage } from '@cascade/storage-sqlite'
 import { createSpanTracer, type ModelProvider } from '@cascade/core'
 import { ProjectManager } from '../src/projectManager'
 import { handleConnection } from '../src/wsServer'
-import { ChatStore } from '../src/chatStore'
 import { EventEmitter } from 'node:events'
 
 /** Answers every turn with one line and no tool calls, so a submit completes without a backend. */
@@ -112,7 +111,7 @@ describe('ADR-081 telemetry wiring (product path)', () => {
       sessionTracerFor: ({ projectId, kind, model }) => createSpanTracer((span) => storage.traces.record(span), { projectId, model, rootName: `agent (${kind})` }),
     })
     const ws = new MockWs()
-    handleConnection(ws as never, mgr, undefined, undefined, undefined, undefined, new ChatStore(), { sandbox: false, model: 'fake' }, storage.traces)
+    handleConnection(ws as never, mgr, undefined, undefined, undefined, undefined, storage.chats, { sandbox: false, model: 'fake' }, storage.traces)
 
     ws.emit('message', JSON.stringify({ type: 'project', action: 'create', name: 'Solar System' }))
     await waitFor(() => ws.sent.some((e) => e.type === 'projects' && (e.projects as unknown[]).length === 1))

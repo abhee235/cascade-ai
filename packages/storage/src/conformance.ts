@@ -14,7 +14,7 @@
 //   import { runConformance } from '@cascade/storage/conformance'
 //   runConformance({ name: 'sqlite', makeTraceStore, makeConfigStore }, { describe, it, expect })
 
-import type { ConfigStore, TraceStore } from './index.js'
+import type { ChatStore, ConfigStore, TraceStore } from './index.js'
 
 /** The slice of a test runner this uses. Passed in so the ports package needs no dev dependency on a
  *  test framework — it is meant to stay importable from anywhere, including a hosted adapter's repo. */
@@ -34,6 +34,7 @@ export interface Adapter {
 	/** Must return a FRESH, EMPTY store on every call — these tests must not see each other's rows. */
 	makeTraceStore(): Promise<TraceStore> | TraceStore
 	makeConfigStore(): Promise<ConfigStore> | ConfigStore
+	makeChatStore(): Promise<ChatStore> | ChatStore
 }
 
 export function runConformance(adapter: Adapter, t: TestApi): void {
@@ -256,6 +257,144 @@ export function runConformance(adapter: Adapter, t: TestApi): void {
 		it('an unset setting reads as undefined rather than throwing', async () => {
 			const c = await configStore()
 			expect(await c.setting('never-set')).toBeUndefined()
+		})
+	})
+
+	describe(`${adapter.name} — ChatStore conformance`, () => {
+		const chatStore = () => Promise.resolve(adapter.makeChatStore())
+		const seed = async (s: ChatStore, id: string, projectId = 'p1', title = 'New chat') => s.create({ id, projectId, title })
+
+		it('creates a chat and lists it under its project only', async () => {
+			const s = await chatStore()
+			await seed(s, 'a', 'p1')
+			await seed(s, 'b', 'p2')
+			expect((await s.list('p1')).map((c) => c.id)).toEqual(['a'])
+			expect((await s.get('a'))?.projectId).toBe('p1')
+			expect(await s.get('nope')).toBeUndefined()
+		})
+
+		it('list() is a PURE read — it never invents or removes a chat', async () => {
+			// The file implementation created one on read and pruned on read, which made it unusable for the
+			// read-only Chats page and forced a second `peek` method to exist. Policy belongs to the caller.
+			const s = await chatStore()
+			expect(await s.list('empty-project')).toEqual([])
+			expect(await s.list('empty-project')).toEqual([])
+		})
+
+		it('returns every project’s chats in ONE call for the cross-project view', async () => {
+			const s = await chatStore()
+			await seed(s, 'a', 'p1')
+			await seed(s, 'b', 'p2')
+			expect((await s.listAll()).map((c) => c.id).sort()).toEqual(['a', 'b'])
+		})
+
+		it('round-trips the agent conversation', async () => {
+			const s = await chatStore()
+			await seed(s, 'a')
+			expect(await s.messages('a')).toEqual([])
+			await s.saveMessages('a', [{ role: 'user', content: 'hi' }])
+			expect(await s.messages('a')).toEqual([{ role: 'user', content: 'hi' }])
+		})
+
+		it('derives a title from the first user message, and never overwrites a real one', async () => {
+			const s = await chatStore()
+			await seed(s, 'a')
+			await s.saveMessages('a', [{ role: 'user' }], '  build   a   shop  ')
+			expect((await s.get('a'))?.title).toBe('build a shop')
+			// A second turn must not retitle the chat, and neither must an explicit rename be undone.
+			await s.saveMessages('a', [{ role: 'user' }, { role: 'assistant' }], 'now add checkout')
+			expect((await s.get('a'))?.title).toBe('build a shop')
+			await s.rename('a', 'Shop build')
+			await s.saveMessages('a', [], 'something else entirely')
+			expect((await s.get('a'))?.title).toBe('Shop build')
+		})
+
+		it('keeps the old title when a rename is blank', async () => {
+			const s = await chatStore()
+			await seed(s, 'a', 'p1', 'Shop build')
+			await s.rename('a', '   ')
+			expect((await s.get('a'))?.title).toBe('Shop build')
+		})
+
+		it('appends replay entries fire-and-forget and reads them back IN ORDER', async () => {
+			const s = await chatStore()
+			await seed(s, 'a')
+			s.append('a', { user: 'build a shop' })
+			s.append('a', { event: { type: 'toolStart', name: 'Write' } })
+			s.append('a', { event: { type: 'message' } })
+			// No await on append — a read must still see them, or a reload mid-turn loses the transcript.
+			expect(await s.replay('a')).toEqual([{ user: 'build a shop' }, { event: { type: 'toolStart', name: 'Write' } }, { event: { type: 'message' } }])
+		})
+
+		it('replays the most recent slice, oldest-first, when a log is long', async () => {
+			// A marathon chat must not replay an unbounded log — but the slice has to be the TAIL, and it
+			// has to arrive in the order the reducer expects, not reversed.
+			const s = await chatStore()
+			await seed(s, 'a')
+			for (let i = 0; i < 10; i++) s.append('a', { event: { n: i } })
+			const tail = await s.replay('a', 3)
+			expect(tail).toEqual([{ event: { n: 7 } }, { event: { n: 8 } }, { event: { n: 9 } }])
+		})
+
+		it('keeps each chat’s replay log separate', async () => {
+			const s = await chatStore()
+			await seed(s, 'a')
+			await seed(s, 'b')
+			s.append('a', { user: 'for a' })
+			s.append('b', { user: 'for b' })
+			expect(await s.replay('a')).toEqual([{ user: 'for a' }])
+			expect(await s.replay('b')).toEqual([{ user: 'for b' }])
+		})
+
+		it('deletes a chat AND its replay log', async () => {
+			const s = await chatStore()
+			await seed(s, 'a')
+			s.append('a', { user: 'hi' })
+			await s.delete('a')
+			expect(await s.get('a')).toBeUndefined()
+			// An orphaned log would resurrect as another chat's history if an id were ever reused.
+			expect(await s.replay('a')).toEqual([])
+		})
+
+		it('prunes abandoned empty chats but SPARES the active one', async () => {
+			const s = await chatStore()
+			await seed(s, 'abandoned')
+			await seed(s, 'active')
+			expect(await s.prune('p1', 'active')).toEqual(['abandoned'])
+			expect((await s.list('p1')).map((c) => c.id)).toEqual(['active'])
+		})
+
+		it('never prunes a chat that has a title, history, or a REPLAY LOG', async () => {
+			// The replay-log clause is the one that matters and the one a naive implementation misses: a
+			// chat whose turn is still running has events but no saved history and no title yet, so a
+			// messages-only emptiness test deletes the live build. Measured once as a 499-event log
+			// orphaned by opening the project mid-build.
+			const s = await chatStore()
+			await seed(s, 'titled', 'p1', 'Shop build')
+			await seed(s, 'has-history')
+			await s.saveMessages('has-history', [{ role: 'user' }])
+			await seed(s, 'running')
+			s.append('running', { event: { type: 'toolStart' } })
+			expect(await s.prune('p1')).toEqual([])
+			expect((await s.list('p1')).length).toBe(3)
+		})
+
+		it('scopes pruning to one project', async () => {
+			const s = await chatStore()
+			await seed(s, 'a', 'p1')
+			await seed(s, 'b', 'p2')
+			expect(await s.prune('p1')).toEqual(['a'])
+			expect((await s.list('p2')).map((c) => c.id)).toEqual(['b'])
+		})
+
+		it('treats operations on a missing chat as no-ops, not throws', async () => {
+			// These run from a websocket handler where a stale client id is normal; a throw there would
+			// take down the connection rather than the request.
+			const s = await chatStore()
+			await s.rename('ghost', 'x')
+			await s.saveMessages('ghost', [{ role: 'user' }])
+			await s.delete('ghost')
+			expect(await s.messages('ghost')).toEqual([])
 		})
 	})
 }
