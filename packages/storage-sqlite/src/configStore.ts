@@ -15,11 +15,9 @@
 // below is the interesting case: Kysely compiles `onConflict` to the target dialect's own syntax, so the
 // Postgres build of this file is the same source with a different dialect passed to `openDb`.
 
-import { Kysely } from 'kysely'
 import type { ConfigStore, ConnectorRecord, ModelRecord } from '@cascade/storage'
 import type { Db } from './db.js'
-import { NodeSqliteDialect } from './nodeSqliteDialect.js'
-import type { Database } from './schema.js'
+import { kyselyFor } from './kysely.js'
 
 type ActiveModel = { provider: string; model: string; baseUrl?: string }
 
@@ -28,7 +26,7 @@ const ACTIVE = 'activeModel'
 const CONNECTORS = 'connectors'
 
 export function createConfigStore(db: Db): ConfigStore {
-	const k = new Kysely<Database>({ dialect: new NodeSqliteDialect(db) })
+	const k = kyselyFor(db)
 
 	const read = async <T>(key: string): Promise<T | undefined> => {
 		const row = await k.selectFrom('config').select('value').where('key', '=', key).executeTakeFirst()
