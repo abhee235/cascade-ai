@@ -359,6 +359,25 @@ function CommandBlock({ command }: { command: string }) {
  */
 function ServeCommandSection({ command }: { command: string }) {
 	const [open, setOpen] = useState(false)
+	// One OS at a time — the reader is on exactly one, and the other two are noise. Default to theirs.
+	const [os, setOs] = useState<'windows' | 'linux' | 'macos'>(() => {
+		const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
+		return /Windows/i.test(ua) ? 'windows' : /Mac/i.test(ua) ? 'macos' : 'linux'
+	})
+
+	const TABS = [
+		{ id: 'windows' as const, label: 'Windows' },
+		{ id: 'linux' as const, label: 'Linux' },
+		{ id: 'macos' as const, label: 'macOS' },
+	]
+	const CONTENT: Record<typeof os, { note?: string; cmd: string }> = {
+		// vLLM has no native Windows build — it runs in WSL, inside whatever env it was installed to.
+		windows: { note: 'Runs inside WSL. Activate the environment vLLM was installed in (adjust the path), then serve:', cmd: `wsl\nsource ~/vllm-env/bin/activate  # your vLLM env\n${command}` },
+		linux: { cmd: `source ~/vllm-env/bin/activate  # your vLLM env\n${command}` },
+		macos: { note: 'CPU only (experimental) — fine for a smoke test, not for real builds.', cmd: command },
+	}
+	const active = CONTENT[os]
+
 	return (
 		<div className="mt-4 overflow-hidden rounded-lg border border-border">
 			<button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-medium hover:bg-accent/50">
@@ -367,25 +386,17 @@ function ServeCommandSection({ command }: { command: string }) {
 				<span className="ml-auto text-xs font-normal text-muted-foreground">vLLM</span>
 			</button>
 			{open && (
-				<div className="flex flex-col gap-4 border-t border-border px-3 py-3">
-					<div className="flex flex-col gap-1.5">
-						<span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Windows — runs inside WSL</span>
-						<p className="text-xs text-muted-foreground">vLLM has no native Windows build. Activate the environment it was installed in (adjust the path), then serve:</p>
-						<CommandBlock command={`wsl
-source ~/vllm-env/bin/activate  # your vLLM env
-${command}`} />
+				<div className="flex flex-col gap-3 border-t border-border px-3 py-3">
+					<div className="flex w-fit items-center gap-0.5 rounded-md bg-muted p-0.5">
+						{TABS.map((t) => (
+							<button key={t.id} type="button" onClick={() => setOs(t.id)} className={cn('rounded px-2.5 py-1 text-xs font-medium transition-colors', os === t.id ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
+								{t.label}
+							</button>
+						))}
 					</div>
-					<div className="flex flex-col gap-1.5">
-						<span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Linux</span>
-						<CommandBlock command={`source ~/vllm-env/bin/activate  # your vLLM env
-${command}`} />
-					</div>
-					<div className="flex flex-col gap-1.5">
-						<span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">macOS — CPU only (experimental)</span>
-						<p className="text-xs text-muted-foreground">vLLM on Apple Silicon runs on the CPU — fine for a smoke test, not for real builds.</p>
-						<CommandBlock command={command} />
-					</div>
-					<p className="text-xs text-muted-foreground">First run downloads the model from Hugging Face before anything listens. Wait for “Uvicorn running”, then Retry the catalog.</p>
+					{active.note && <p className="text-xs text-muted-foreground">{active.note}</p>}
+					<CommandBlock command={active.cmd} />
+					<p className="text-xs text-muted-foreground">First run downloads the model from Hugging Face before anything listens. Wait for \u201cUvicorn running\u201d, then Retry the catalog.</p>
 				</div>
 			)}
 		</div>
