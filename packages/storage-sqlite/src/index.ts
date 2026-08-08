@@ -9,3 +9,7 @@
 export { openDb, BufferedWriter, type Db } from './db.js'
 export { createTraceStore } from './traceStore.js'
 export { createTelemetryStorage, type TelemetryStorage, type CreateStorageOptions } from './createStorage.js'
+export { createConfigStore } from './configStore.js'
+// Exported so the ENTRY POINT can run it once at startup: it needs the legacy projects root, which the
+// composition root knows and this package does not.
+export { importLegacyConfig } from './importLegacy.js'

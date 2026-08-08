@@ -3,8 +3,7 @@
 // models here. Persisted to a gitignored JSON file so a user's picks survive restarts; per-model context
 // window override rides along and is applied on switch.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import type { ConfigStore } from '@cascade/storage'
 
 export interface EnabledModel {
   provider: string
@@ -51,59 +50,46 @@ export interface ActiveModel {
   baseUrl?: string
 }
 
-let filePath = ''
+// ADR-081: persistence moved behind ConfigStore, but the READ API stays SYNCHRONOUS on purpose.
+//
+// Every getter here is called from a request handler or a session factory — `enabledMcpServers` is even a
+// thunk handed to createSession — and making them async would ripple through ~20 call sites to buy
+// nothing: this was already an in-memory cache over a file. So the cache stays, the load happens ONCE at
+// startup, and writes are fire-and-forget through the port (the same call it made to writeFileSync,
+// which was equally unawaited). Config is a user action, never a hot path.
+let store: ConfigStore | undefined
 let cache: EnabledModel[] | null = null
-let activePath = ''
 let activeCache: ActiveModel | null | undefined // undefined = not read yet, null = nothing persisted
 
-/** Point the registry at a project-root-adjacent file (called once at server startup). */
-export function initModelRegistry(rootDir: string): void {
-  filePath = join(rootDir, '.cascade', 'models.json')
-  activePath = join(rootDir, '.cascade', 'active-model.json')
-  cache = null
-  activeCache = undefined
+/** Load the registry from the injected store (called once at server startup). */
+export async function initModelRegistry(s: ConfigStore): Promise<void> {
+  store = s
+  const persisted = await s.models()
+  // No persisted models ⇒ the curated DEFAULTS, exactly as an absent models.json used to mean. They are
+  // not written back: a default the user never chose should not become a row they have to delete.
+  cache = persisted.length ? (persisted as EnabledModel[]) : [...DEFAULTS]
+  activeCache = (await s.activeModel()) ?? null
 }
+
+/** Persist one model, best-effort. Mirrors the old save(): a write that fails costs persistence, never
+ *  the running session. */
+const persist = (m: EnabledModel) => void Promise.resolve(store?.upsertModel(m)).catch(() => {})
 
 /** The model the user last switched to, or undefined ⇒ fall back to the env default (first run). Without
  *  this, every server restart silently reverted to CASCADE_PROVIDER/CASCADE_MODEL — measured: a restart
  *  moved a session from the selected local Ollama model back to a paid hosted one, visible only in a label. */
 export function activeModel(): ActiveModel | undefined {
-  if (activeCache === undefined) {
-    try {
-      activeCache = JSON.parse(readFileSync(activePath, 'utf8')) as ActiveModel
-    } catch {
-      activeCache = null
-    }
-  }
   return activeCache ?? undefined
 }
 
 export function setActiveModel(a: ActiveModel): void {
   activeCache = a
-  try {
-    mkdirSync(dirname(activePath), { recursive: true })
-    writeFileSync(activePath, JSON.stringify(a, null, 2))
-  } catch {
-    /* best-effort — a read-only fs just loses persistence, not the switch */
-  }
+  void Promise.resolve(store?.setActiveModel(a)).catch(() => {})
 }
 
 function load(): EnabledModel[] {
-  if (cache) return cache
-  try {
-    cache = JSON.parse(readFileSync(filePath, 'utf8')) as EnabledModel[]
-  } catch {
-    cache = [...DEFAULTS]
-  }
+  if (!cache) cache = [...DEFAULTS] // init not run (a test, or a headless embed) — behave as a fresh install
   return cache
-}
-function save(): void {
-  try {
-    mkdirSync(dirname(filePath), { recursive: true })
-    writeFileSync(filePath, JSON.stringify(cache ?? DEFAULTS, null, 2))
-  } catch {
-    /* best-effort — a read-only fs just loses persistence, not the session */
-  }
 }
 
 const same = (a: EnabledModel, provider: string, model: string) => a.provider === provider && a.model === model
@@ -125,7 +111,7 @@ export function addEnabledModel(provider: string, model: string, contextWindow?:
     if (apiKey) existing.apiKey = apiKey.trim() || undefined // OMITTED key ⇒ keep the stored one (edit-friendly)
     if (api !== undefined) existing.api = api
   } else list.push({ provider, model, contextWindow, baseUrl: baseUrl?.trim() || undefined, apiKey: apiKey?.trim() || undefined, api })
-  save()
+  persist(list.find((m) => same(m, provider, model))!)
 }
 
 /** ADR-076/077: the custom endpoint (baseUrl + apiKey + wire protocol) saved for a model, applied on
@@ -143,14 +129,14 @@ export function enabledModelsForClient(ensure?: { provider: string; model: strin
 
 export function removeEnabledModel(provider: string, model: string): void {
   cache = load().filter((m) => !same(m, provider, model))
-  save()
+  void Promise.resolve(store?.removeModel(provider, model)).catch(() => {})
 }
 
 export function setModelContext(provider: string, model: string, contextWindow?: number): void {
   const m = load().find((x) => same(x, provider, model))
   if (m) {
     m.contextWindow = contextWindow
-    save()
+    persist(m)
   } else {
     addEnabledModel(provider, model, contextWindow)
   }
@@ -173,7 +159,7 @@ export function setModelParams(provider: string, model: string, params: ModelPar
   for (const k of ['contextWindow', 'maxOutputTokens', 'temperature', 'topP', 'topK'] as const) {
     if (k in params) m[k] = params[k]
   }
-  save()
+  persist(m)
 }
 
 /** The full param set for a model (applied on activation). Empty object when the model isn't curated. */
@@ -184,4 +170,3 @@ export function modelParamsFor(provider: string, model: string): ModelParams {
   return params
 }
 
-export const _existsForTest = (p: string) => existsSync(p)

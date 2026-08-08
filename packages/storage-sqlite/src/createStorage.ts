@@ -12,12 +12,14 @@
 
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { TraceStore } from '@cascade/storage'
+import type { ConfigStore, TraceStore } from '@cascade/storage'
 import { openDb, type Db } from './db.js'
 import { createTraceStore } from './traceStore.js'
+import { createConfigStore } from './configStore.js'
 
 export interface TelemetryStorage {
   traces: TraceStore
+  config: ConfigStore
   /** Escape hatch for migrations/inspection while the bundle is still partial. */
   db: Db
   /** Flush buffers and close. Call on app shutdown — buffered spans are lost otherwise. */
@@ -38,6 +40,7 @@ export function createTelemetryStorage(opts: CreateStorageOptions): TelemetrySto
   mkdirSync(dirname(opts.file), { recursive: true }) // first launch has no app-data dir yet
   const db = openDb(opts.file)
   const traces = createTraceStore(db)
+  const config = createConfigStore(db)
 
   // Prune at OPEN, not on a timer: a desktop app is closed more often than it is left running, and a
   // background interval would keep waking the process for work that only matters across sessions.
@@ -46,6 +49,7 @@ export function createTelemetryStorage(opts: CreateStorageOptions): TelemetrySto
 
   return {
     traces,
+    config,
     db,
     async dispose() {
       await traces.flush() // buffered spans are in memory until this runs

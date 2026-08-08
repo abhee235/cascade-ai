@@ -50,6 +50,12 @@ const MIGRATIONS: { id: string; sql: string }[] = [
       CREATE INDEX IF NOT EXISTS spans_chat ON spans(chat_id, started_at DESC);
     `,
   },
+  {
+    // Models, connectors and settings (ADR-081 §2). One JSON document per key — see configStore.ts for
+    // why documents rather than a table per concept.
+    id: '003-config',
+    sql: `CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
+  },
 ]
 
 /**

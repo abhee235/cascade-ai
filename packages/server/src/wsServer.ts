@@ -28,7 +28,7 @@ import { sdkConnect } from '@cascade/core'
 import type { McpServerInfo } from '@cascade/app-protocol'
 import type { ChatHistoryItem } from '@cascade/app-protocol'
 import type { Message } from '@cascade/core'
-import type { TraceStore } from '@cascade/storage'
+import type { ConfigStore, TraceStore } from '@cascade/storage'
 import { createFile, deletePath, editJsxTextAtLoc, makeDir, readDiff, readFile, readTree, renamePath, setClassAtLoc, writeFile } from './fileService.js'
 import { PreviewManager } from './previewManager.js'
 import { PreviewProxy } from './previewProxy.js'
@@ -68,7 +68,8 @@ if (KEY_VARS[PROVIDER] && !process.env[KEY_VARS[PROVIDER]] && !process.env.CASCA
   console.error(`Provider "${PROVIDER}" needs an API key: set ${KEY_VARS[PROVIDER]} (or CASCADE_API_KEY) in .env at the repo root.`)
   process.exit(1)
 }
-const PROJECTS_ROOT = process.env.CASCADE_PROJECTS_ROOT || join(process.cwd(), 'cascade-projects')
+// Exported so the composition root can find the LEGACY config dir to import from (ADR-081 §2).
+export const PROJECTS_ROOT = process.env.CASCADE_PROJECTS_ROOT || join(process.cwd(), 'cascade-projects')
 
 // ── Security (M7) ──────────────────────────────────────────────────────────────────────────────────────
 // Bind to localhost only by default (the `ws` `{ port }` form binds ALL interfaces — LAN-exposed). Override
@@ -871,6 +872,9 @@ export interface ServerDeps {
   sessionTracerFor?: SessionTracerFactory
   /** The READ side of the same store — what the Observatory queries. A port, never an adapter. */
   traces?: TraceStore
+  /** Models, connectors and settings. Absent ⇒ the registries stay empty (headless/tests), which is the
+   *  same thing an absent config file used to mean. */
+  config?: ConfigStore
   /** Release storage resources on shutdown. Runs BEFORE process.exit — buffered writes are memory-only. */
   dispose?: () => Promise<void>
 }
@@ -888,8 +892,13 @@ export async function start(deps: ServerDeps = {}) {
   }
   const sandboxFor = hasDocker ? (dir: string) => new DockerSandbox(dir) : undefined
 
-  initModelRegistry(PROJECTS_ROOT) // ADR-067: curated model list persisted under PROJECTS_ROOT/.cascade/
-  initMcpRegistry(PROJECTS_ROOT) // ADR-071: configured MCP servers persisted under PROJECTS_ROOT/.cascade/mcp.json
+  // ADR-081: both registries now read through the injected ConfigStore. AWAITED here — every getter they
+  // expose is synchronous (they are called from request handlers and session factories), so the one load
+  // has to complete before the first connection can ask.
+  if (deps.config) {
+    await initModelRegistry(deps.config)
+    await initMcpRegistry(deps.config)
+  }
   const manager = new ProjectManager({
     root: PROJECTS_ROOT,
     provider: PROVIDER,

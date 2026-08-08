@@ -153,6 +153,24 @@ the socket to render a page nobody may have open. The client polls (3s) *only wh
 flushed. Two commands (`traces`/`trace`) and two events; the server filters out traces whose project was
 deleted, because a row you cannot open is worse than no row.
 
+**ConfigStore landed (2026-08-08).** `modelRegistry` and `mcpRegistry` were three JSON files written with
+`writeFileSync`; they now read and write through the port, and the boundary test's exemption list is down
+from three files to one (`chatStore.ts`). Two decisions worth recording:
+
+- **The read API stayed SYNCHRONOUS.** Every getter is called from a request handler or a session factory
+  — `enabledMcpServers` is a thunk handed to `createSession` — so making them async would ripple through
+  ~20 call sites to buy nothing. These were already in-memory caches over a file; only the backing store
+  changed. The load happens once at startup (awaited), and writes are fire-and-forget, exactly as the
+  unawaited `writeFileSync` was.
+- **Documents, not a table per concept.** Nothing queries this config: every read is "all the models" or
+  "all the connectors", the sets are tens of rows, and the shapes are still moving (ADR-067/076/077). A
+  JSON document per key keeps a shape change from being a schema change, and keeps the import from the
+  old files to a copy.
+
+An existing install's config is imported ONCE at startup, guarded by a marker setting. The first version
+guarded on "is the store empty?" — a different question: delete every model and the store is empty again,
+so the next launch would import them back. A test caught it.
+
 **Payloads are stored WHOLE (2026-08-07).** Input/output were capped at 4000 chars on the theory that
 viewers truncate anyway. That theory is wrong for what these traces are FOR: a prompt cut mid-array
 cannot answer "what was the model looking at", and a `Write` cut mid-file cannot answer "what did it

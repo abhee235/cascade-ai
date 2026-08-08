@@ -24,8 +24,6 @@ const COMPOSITION_ROOT = new Set(['main.ts'])
 // Shrinking this list is the migration; it must never grow. (ADR-081 implementation order 4–5.)
 const PENDING_PORTS = new Set([
   'chatStore.ts', // → ChatStore
-  'modelRegistry.ts', // → ConfigStore
-  'mcpRegistry.ts', // → ConfigStore
 ])
 
 // Genuinely deployment-agnostic filesystem use: these operate on the PROJECT's files, which stay real

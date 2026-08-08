@@ -56,6 +56,12 @@ export interface ModelRecord {
   temperature?: number
   topP?: number
   topK?: number
+  /** ADR-076: the key for a custom endpoint. Stored server-side and NEVER returned to a client — the
+   *  registry exposes `hasKey` upward instead. It lives on the record because the endpoint is useless
+   *  without it, and splitting them would mean two writes that can disagree. */
+  apiKey?: string
+  /** ADR-077: wire protocol for a custom endpoint — 'ollama' uses the native /api/chat. */
+  api?: 'openai' | 'ollama'
 }
 
 /** An MCP connector. The key is stored SEPARATELY from the endpoint so either can be edited alone,

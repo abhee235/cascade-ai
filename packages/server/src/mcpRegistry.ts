@@ -7,44 +7,31 @@
 // it. The core `.mcp.json` per-project mechanism still works underneath; this is the server's own registry
 // that the web UI edits.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import type { ConfigStore } from '@cascade/storage'
 import type { McpServerConfig } from '@cascade/core'
 
 /** name → server config (stdio: command/args/env; env carries API keys, kept server-side). */
 type McpServers = Record<string, McpServerConfig>
 
-let filePath = ''
+// ADR-081: persistence moved behind ConfigStore. The read API stays SYNCHRONOUS — `enabledMcpServers` is
+// handed to createSession as a thunk and is called whenever a session is built, so it cannot await. This
+// was already an in-memory cache over a file; only the backing store changed.
+let store: ConfigStore | undefined
 let cache: McpServers | null = null
 
-/** Point the registry at a project-root-adjacent file (called once at server startup). */
-export function initMcpRegistry(rootDir: string): void {
-  filePath = join(rootDir, '.cascade', 'mcp.json')
-  cache = null
+/** Load the registry from the injected store (called once at server startup). */
+export async function initMcpRegistry(s: ConfigStore): Promise<void> {
+  store = s
+  cache = Object.fromEntries((await s.connectors()).map(({ name, ...config }) => [name, config as McpServerConfig]))
 }
 
 function load(): McpServers {
-  if (cache) return cache
-  try {
-    const parsed = JSON.parse(readFileSync(filePath, 'utf8'))
-    // Accept either { mcpServers: {…} } (the portable .mcp.json shape) or a bare map, for forward-compat.
-    cache = (parsed?.mcpServers ?? parsed) as McpServers
-    if (!cache || typeof cache !== 'object') cache = {}
-  } catch {
-    cache = {}
-  }
+  if (!cache) cache = {} // init not run (a test, or a headless embed) — no configured servers
   return cache
 }
 
-function save(): void {
-  try {
-    mkdirSync(dirname(filePath), { recursive: true })
-    // Write the portable { mcpServers } shape so the file doubles as a hand-editable .mcp.json.
-    writeFileSync(filePath, JSON.stringify({ mcpServers: cache ?? {} }, null, 2))
-  } catch {
-    /* read-only fs just loses persistence, not the running config */
-  }
-}
+/** Persist one server, best-effort — a failed write costs persistence, never the running config. */
+const persist = (name: string) => void Promise.resolve(store?.upsertConnector({ name, ...(load()[name] as object) })).catch(() => {})
 
 /** Every configured server (enabled or not) — for the management panel. */
 export function mcpServers(): McpServers {
@@ -64,14 +51,14 @@ export function addMcpServer(name: string, config: McpServerConfig): void {
   const existing = servers[name]
   const apiKey = config.apiKey === undefined ? existing?.apiKey : config.apiKey || undefined
   servers[name] = { ...config, apiKey }
-  save()
+  persist(name)
 }
 
 export function removeMcpServer(name: string): void {
   const servers = load()
   if (name in servers) {
     delete servers[name]
-    save()
+    void Promise.resolve(store?.removeConnector(name)).catch(() => {})
   }
 }
 
@@ -79,11 +66,13 @@ export function toggleMcpServer(name: string, disabled: boolean): void {
   const servers = load()
   if (servers[name]) {
     servers[name] = { ...servers[name], disabled }
-    save()
+    persist(name)
   }
 }
 
 /** Whether ANY server is configured — lets the server skip building an McpHub when there's nothing to connect. */
 export function hasMcpServers(): boolean {
-  return existsSync(filePath) && Object.keys(load()).length > 0
+  // Was `existsSync(file) && …`; the file check was only ever a proxy for "anything configured?", and the
+  // loaded map answers that directly now.
+  return Object.keys(load()).length > 0
 }
