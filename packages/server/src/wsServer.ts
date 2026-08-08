@@ -9,8 +9,8 @@
 // Shape: a web server + a session relay decoupled from the transport.
 
 import './loadDotEnv.js' // FIRST import: .env → process.env before the CASCADE_* consts below read it
-import { dirname, join } from 'node:path'
-import { appendFileSync, mkdirSync } from 'node:fs'
+import { dirname, extname, join, resolve, sep } from 'node:path'
+import { appendFileSync, createReadStream, existsSync, mkdirSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomBytes } from 'node:crypto'
 import { WebSocketServer, type WebSocket } from 'ws'
@@ -89,6 +89,9 @@ const ALLOWED_ORIGINS = new Set([
   ...(process.env.CASCADE_ALLOWED_ORIGINS?.split(',').map((s) => s.trim()).filter(Boolean) ?? []),
   'http://localhost:5319',
   'http://127.0.0.1:5319',
+  // ADR-081 §7: the desktop window loads the app FROM this server, so its own origin must be allowed.
+  `http://127.0.0.1:${PORT}`,
+  `http://localhost:${PORT}`,
 ])
 // A per-run secret the legit web app fetches from GET /token (CORS-guarded to ALLOWED_ORIGINS, so a cross-site
 // page can't read it) and presents as ?token= on the WS URL — defense-in-depth alongside the Origin check.
@@ -881,8 +884,58 @@ function handleHttp(req: IncomingMessage, res: ServerResponse): void {
     res.end(JSON.stringify({ token: WS_TOKEN }))
     return
   }
+  // ADR-081 §7: the desktop shell serves the web bundle from HERE rather than loading it off disk.
+  //
+  // `file://` would be the obvious choice and is a trap: its origin is the string "null", so the WS
+  // handshake's Origin check rejects it and `/token` cannot be fetched cross-origin either — the window
+  // would open and sit on a connecting spinner forever. Serving over the SAME origin as the socket makes
+  // the desktop and browser cases identical, which is also why nothing here is desktop-specific.
+  if (WEB_ROOT && req.method === 'GET') return serveStatic(req, res)
   res.writeHead(426, { 'Content-Type': 'text/plain' })
   res.end('Upgrade Required: this is a WebSocket endpoint')
+}
+
+/** Where the built web bundle lives. Unset ⇒ this server serves no UI (the dev setup, where Vite does). */
+const WEB_ROOT = process.env.CASCADE_WEB_ROOT || ''
+
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+  '.woff': 'font/woff',
+  '.map': 'application/json; charset=utf-8',
+}
+
+function serveStatic(req: IncomingMessage, res: ServerResponse): void {
+  const url = new URL(req.url ?? '/', 'http://localhost')
+  // Resolve inside WEB_ROOT and verify it stayed there. A request for `/../../.env` is not hypothetical:
+  // this listens on a real port, and path traversal is the first thing anything scanning it will try.
+  const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '')
+  const target = resolve(WEB_ROOT, rel)
+  const root = resolve(WEB_ROOT)
+  let file = target === root || target.startsWith(root + sep) ? target : root
+
+  // SPA fallback: the app owns its routes (/settings, /project/:id), so any path that is not a real file
+  // must return index.html or a reload on a deep link 404s.
+  if (!existsSync(file) || statSync(file).isDirectory()) file = join(root, 'index.html')
+  if (!existsSync(file)) {
+    res.writeHead(404, { 'Content-Type': 'text/plain' })
+    res.end('Not found')
+    return
+  }
+  const type = MIME[extname(file).toLowerCase()] ?? 'application/octet-stream'
+  // The HTML must never be cached: it names the hashed asset files, so a stale copy after an update points
+  // at bundles that no longer exist. Hashed assets themselves are immutable.
+  const cache = file.endsWith('index.html') ? 'no-store' : 'public, max-age=31536000, immutable'
+  res.writeHead(200, { 'Content-Type': type, 'Cache-Control': cache })
+  createReadStream(file).pipe(res)
 }
 
 /** How much of a payload the TREE needs: enough to preview, never the whole prompt. */

@@ -20,6 +20,7 @@ import { createPackTool } from './packTool.js'
 import { createImageSearchTool } from './imageSearchTool.js'
 import { hasVision } from './modelCaps.js'
 import type { ProjectRuntime } from './projectRuntime.js'
+import { resourceDir } from './resources.js'
 
 /** Initialize a git repo in `dir` with one commit — the baseline for checkpoints (Phase 18). Best-effort. */
 function gitInit(dir: string): void {
@@ -141,8 +142,8 @@ const slug = (name: string) =>
 /** The capability dirs every builder-facing session shares: server-owned base first (immutable), then the
  *  project's own `.cascade/` (user-owned; shadows base by name). One definition — builder, plan stage,
  *  and the eval bench must all see the SAME capabilities. */
-export const skillDirsFor = (dir: string) => [join(import.meta.dirname, '..', 'skills', 'builder'), join(dir, '.cascade', 'skills')]
-export const agentDirsFor = (dir: string) => [join(import.meta.dirname, '..', 'agents', 'builder'), join(dir, '.cascade', 'agents')]
+export const skillDirsFor = (dir: string) => [resourceDir('skills', 'builder'), join(dir, '.cascade', 'skills')]
+export const agentDirsFor = (dir: string) => [resourceDir('agents', 'builder'), join(dir, '.cascade', 'agents')]
 
 /** Per-project forensic traces (ADR-023, product path — the first live walkthrough was UNDIAGNOSABLE
  *  without them). One JSONL per session under the project's own .cascade/traces/.

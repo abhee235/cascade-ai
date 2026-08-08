@@ -33,3 +33,7 @@ logs/
 # untracked also stops a future agent run from dirtying the harness repo it is running in.
 /focusflow/
 /packages/orbit/
+
+# Desktop build + packaging output (ADR-081 §7)
+packages/desktop/dist/
+packages/desktop/out/

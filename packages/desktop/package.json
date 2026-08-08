@@ -1,0 +1,31 @@
+{
+  "name": "@cascade/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cascade desktop (ADR-081 \u00a77): boots the server in-process and opens a window on the built web bundle.",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build": "tsx build.mts",
+    "start": "electron .",
+    "package": "electron-forge package",
+    "make": "electron-forge make",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^7.11.2",
+    "@electron-forge/maker-squirrel": "^7.11.2",
+    "@electron-forge/maker-zip": "^7.11.2",
+    "@electron-forge/plugin-auto-unpack-natives": "^7.11.2",
+    "electron": "^43.3.0",
+    "esbuild": "^0.23.1"
+  },
+  "dependencies": {
+    "playwright-core": "^1.62.1",
+    "typescript": "^5.9.3",
+    "update-electron-app": "^3.3.0"
+  },
+  "config": {
+    "forge": "./forge.config.cjs"
+  },
+  "productName": "Cascade"
+}

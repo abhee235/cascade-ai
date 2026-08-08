@@ -68,3 +68,8 @@ await start({
   chats: storage.chats, // conversations + replay logs, no longer files under each project dir
   dispose: () => storage.dispose(),
 })
+
+// ADR-081 §7: the Electron shell imports this module (it self-starts) and needs a way to shut it down.
+// Buffered spans and chat replay events live in memory until this runs, so quitting without it drops
+// whatever the last turn produced.
+export const dispose = () => storage.dispose()

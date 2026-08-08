@@ -8,15 +8,27 @@
 //
 // Search order: cwd (repo root when run from there), then the repo root relative to this file (covers
 // `npm run dev -w @cascade/server`, whose cwd is packages/server), then packages/server itself.
+//
+// A PACKAGED build (ADR-081 §7) searches exactly one place instead: its app-data directory. Every path
+// above is relative to the source tree or to the process's cwd, and once installed both are wrong —
+// the cwd of a double-clicked app is arbitrary (on Windows often the desktop or System32), and the
+// bundle sits inside Program Files. Measured while smoke-testing the packaged .exe from this repo: it
+// walked up and loaded the DEVELOPER's .env, silently inheriting real API keys. Harmless on a user's
+// machine only because that file does not exist there — which makes it luck, not design.
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const candidates = [
-  join(process.cwd(), '.env'),
-  join(import.meta.dirname, '..', '..', '..', '.env'), // monorepo root (src → server → packages → root)
-  join(import.meta.dirname, '..', '.env'), // packages/server
-]
+/** Set by the desktop shell. Its presence is what tells us we are packaged. */
+const APP_DATA = process.env.CASCADE_RESOURCES ? process.env.CASCADE_APP_DATA : undefined
+
+const candidates = APP_DATA
+  ? [join(APP_DATA, '.env')] // packaged: one location the user can actually find and edit
+  : [
+      join(process.cwd(), '.env'),
+      join(import.meta.dirname, '..', '..', '..', '.env'), // monorepo root (src → server → packages → root)
+      join(import.meta.dirname, '..', '.env'), // packages/server
+    ]
 
 for (const file of candidates) {
   if (!existsSync(file)) continue

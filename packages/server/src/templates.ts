@@ -6,8 +6,9 @@
 import { cpSync, existsSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { resourceDir } from './resources.js'
 
-const TEMPLATES_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'templates')
+const TEMPLATES_DIR = resourceDir('templates')
 const AI_RULES_FILE = 'AI_RULES.md'
 
 export interface TemplateInfo {
