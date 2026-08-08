@@ -288,6 +288,32 @@ export function runConformance(adapter: Adapter, t: TestApi): void {
 			expect((await s.listAll()).map((c) => c.id).sort()).toEqual(['a', 'b'])
 		})
 
+		it('accepts the ORIGINAL timestamps and history, for a migration', async () => {
+			// Without this, an import stamps every chat with "now": the list is ordered by updatedAt and
+			// renders it as relative time, so a user's whole history collapses into one block dated at the
+			// upgrade. Caught by driving the real UI after a migration — 46 chats all reading "8m ago".
+			const s = await chatStore()
+			await s.create({
+				id: 'a',
+				projectId: 'p1',
+				title: 'Build "Simmer"',
+				createdAt: '2026-07-02T11:14:26.287Z',
+				updatedAt: '2026-07-04T09:00:00.000Z',
+				messages: [{ role: 'user', content: 'build a recipe app' }],
+			})
+			const got = await s.get('a')
+			expect(got?.createdAt).toBe('2026-07-02T11:14:26.287Z')
+			expect(got?.updatedAt).toBe('2026-07-04T09:00:00.000Z')
+			expect(await s.messages('a')).toEqual([{ role: 'user', content: 'build a recipe app' }])
+		})
+
+		it('orders a project’s chats most-recently-updated first', async () => {
+			const s = await chatStore()
+			await s.create({ id: 'older', projectId: 'p1', title: 'x', updatedAt: '2026-07-02T00:00:00.000Z' })
+			await s.create({ id: 'newer', projectId: 'p1', title: 'y', updatedAt: '2026-08-01T00:00:00.000Z' })
+			expect((await s.list('p1')).map((c) => c.id)).toEqual(['newer', 'older'])
+		})
+
 		it('round-trips the agent conversation', async () => {
 			const s = await chatStore()
 			await seed(s, 'a')

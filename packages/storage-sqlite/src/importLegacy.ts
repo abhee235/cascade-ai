@@ -96,12 +96,17 @@ export async function importLegacyChats(store: ChatStore, projects: { id: string
 			// Skip anything already present: this runs behind a marker, but a project restored from a backup
 			// after the marker was set would otherwise duplicate its chats.
 			if (await store.get(meta.id)) continue
-			await store.create({ id: meta.id, projectId: project.id, title: meta.title || 'New chat' })
-			const messages = readJson<unknown[]>(join(legacyDir, `chat-${meta.id}.json`)) ?? []
-			// No firstUserText: these chats already have their titles, and passing one would rename any that
-			// a user had deliberately left as "New chat".
-			if (messages.length) await store.saveMessages(meta.id, messages)
-			else if (meta.title && meta.title !== 'New chat') await store.rename(meta.id, meta.title)
+			// ONE call, carrying the original timestamps and history. Creating and then saving would stamp
+			// `updatedAt` twice with "now", collapsing a user's whole chat history into a single block dated
+			// at the moment they upgraded — and that field is what the list is sorted by and displays.
+			await store.create({
+				id: meta.id,
+				projectId: project.id,
+				title: meta.title || 'New chat',
+				createdAt: meta.createdAt,
+				updatedAt: meta.updatedAt ?? meta.createdAt,
+				messages: readJson<unknown[]>(join(legacyDir, `chat-${meta.id}.json`)) ?? [],
+			})
 			imported.chats++
 
 			for (const entry of readJsonl(join(legacyDir, `chat-${meta.id}.events.jsonl`))) {

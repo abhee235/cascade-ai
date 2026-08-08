@@ -99,10 +99,12 @@ export function createChatStore(db: Db): ChatStore {
 			return row ? toChat(row) : undefined
 		},
 
-		async create(chat) {
+		async create({ messages, ...chat }) {
 			const stamp = now()
-			const record: ChatRecord = { ...chat, createdAt: stamp, updatedAt: stamp }
-			insertChat.run(record.id, record.projectId, record.title, stamp, stamp, '[]')
+			// An import supplies the originals; everything else gets "now". See the port's note on why this
+			// matters — the chat list is sorted by updatedAt and renders it as relative time.
+			const record: ChatRecord = { ...chat, createdAt: chat.createdAt ?? stamp, updatedAt: chat.updatedAt ?? stamp }
+			insertChat.run(record.id, record.projectId, record.title, record.createdAt, record.updatedAt, JSON.stringify(messages ?? []))
 			return record
 		},
 

@@ -56,6 +56,18 @@ describe('importLegacyChats', () => {
 		expect(await store.messages('c8f60c38')).toEqual([{ role: 'user', content: 'build a recipe app' }])
 	})
 
+	it('preserves each chat’s original dates', async () => {
+		// The chat list is sorted by updatedAt and shows it as "8m ago". Importing with fresh stamps makes
+		// every chat look like it was touched at upgrade time and destroys the ordering — which is exactly
+		// what the first version of this migration did, invisibly to a passing test suite.
+		const store = freshStore()
+		const dir = legacyProject([{ id: 'c1', title: 'Build "Simmer"' }])
+		await importLegacyChats(store, [{ id: 'p1', dir }])
+		const chat = await store.get('c1')
+		expect(chat?.createdAt).toBe('2026-07-02T11:14:26.287Z')
+		expect(chat?.updatedAt).toBe('2026-07-02T11:14:26.287Z')
+	})
+
 	it('carries the replay log across in order, with its display hints intact', async () => {
 		// The reason the log exists at all: a chat rebuilt from flattened rows lost thinking, diffs and tool
 		// status. If the migration flattens or reorders it, that regression comes back for every old chat.

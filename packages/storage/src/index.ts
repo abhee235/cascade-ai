@@ -36,7 +36,15 @@ export interface ChatStore {
   /** Every project's chats in one query — the Chats page. Directory scanning made this O(projects). */
   listAll(): Promise<ChatRecord[]>
   get(chatId: string): Promise<ChatRecord | undefined>
-  create(chat: Omit<ChatRecord, 'createdAt' | 'updatedAt'>): Promise<ChatRecord>
+  /**
+   * Timestamps and history default to now/empty — the normal path creates a blank chat.
+   *
+   * A MIGRATION supplies the originals instead, and must be able to: this list is SORTED by `updatedAt`
+   * and shows it as "8m ago". Importing with fresh stamps silently reorders a user's entire history into
+   * one indistinguishable block dated at whenever they happened to upgrade. Passing `messages` here rather
+   * than following with saveMessages is the same concern — that call bumps `updatedAt` by design.
+   */
+  create(chat: Omit<ChatRecord, 'createdAt' | 'updatedAt'> & Partial<Pick<ChatRecord, 'createdAt' | 'updatedAt'>> & { messages?: unknown[] }): Promise<ChatRecord>
   rename(chatId: string, title: string): Promise<void>
   delete(chatId: string): Promise<void>
   /**
