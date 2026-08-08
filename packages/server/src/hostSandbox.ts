@@ -19,6 +19,7 @@ import { readFile } from 'node:fs/promises'
 import { connect, createServer } from 'node:net'
 import { join } from 'node:path'
 import type { ExecOptions, ExecResult } from '@cascade/core'
+import { devServerRefusal } from './dockerSandbox.js'
 import { type ProjectRuntime, stripAnsi } from './projectRuntime.js'
 
 /** Where a detached dev server's output goes. Inside the project so it travels with it, and so a user can
@@ -58,6 +59,11 @@ export class HostSandbox implements ProjectRuntime {
 	}
 
 	async exec(command: string, opts: ExecOptions = {}): Promise<ExecResult> {
+		// The SAME refusal Docker mode has had all along, and host mode was missing — which is exactly how a
+		// desktop trace ended with the model starting its own dev server via `start /b` and hanging the turn:
+		// the Preview owns the dev server in BOTH runtimes, and a second one binds a port nothing is watching.
+		const refusal = devServerRefusal(command)
+		if (refusal) return { output: refusal, exitCode: 1 }
 		return run(command, opts.cwd ?? this.projectDir, opts)
 	}
 
@@ -285,12 +291,29 @@ function freePort(): Promise<number> {
 	})
 }
 
-/** Run one command through the host shell, streaming combined output. */
+/**
+ * Run one command through the host shell, streaming combined output.
+ *
+ * Settles on 'exit', NOT 'close' — the distinction core's Bash already learned the hard way (measured
+ * 2026-07-30: a dev server started with `start /b` left a grandchild holding the inherited stdout pipe, so
+ * 'close' never fired and the call hung 37+ minutes on a 120s deadline). This function reintroduced that
+ * hang for host mode, where Bash routes through the sandbox and core's own fix is bypassed — confirmed in
+ * a desktop trace as an AGENT turn stuck on an open `tool Bash` span running `start /b cmd /c …`.
+ *
+ * On abort, the tree is killed on Windows: the `signal` option kills only the direct cmd.exe wrapper, and
+ * the grandchild it spawned survives holding its port — the same reason stopDev kills with /T.
+ */
 function run(command: string, cwd: string, opts: { signal?: AbortSignal; onData?: (s: string) => void }): Promise<ExecResult> {
 	return new Promise((resolve) => {
 		if (!existsSync(cwd)) return resolve({ output: `cwd does not exist: ${cwd}`, exitCode: 1 })
 		const child = spawn(command, { cwd, shell: true, windowsHide: true, signal: opts.signal })
 		let output = ''
+		let settled = false
+		const finish = (r: ExecResult) => {
+			if (settled) return
+			settled = true
+			resolve(r)
+		}
 		const take = (c: Buffer) => {
 			const s = String(c)
 			output += s
@@ -298,8 +321,17 @@ function run(command: string, cwd: string, opts: { signal?: AbortSignal; onData?
 		}
 		child.stdout?.on('data', take)
 		child.stderr?.on('data', take)
-		// An abort or a missing shell rejects the process rather than exiting — both are results, not crashes.
-		child.on('error', (e) => resolve({ output: output || String(e), exitCode: null }))
-		child.on('close', (code) => resolve({ output, exitCode: code }))
+		if (isWindows && opts.signal) {
+			opts.signal.addEventListener('abort', () => {
+				if (child.pid) spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true })
+			}, { once: true })
+		}
+		// An abort or a missing shell errors rather than exiting — both are results, not crashes.
+		child.on('error', (e) => finish({ output: output || String(e), exitCode: null }))
+		child.on('exit', (code) => {
+			// The PROCESS ended; stdio may still be held open by a detached grandchild that is meant to
+			// outlive us. Give buffered output one tick to drain, then settle regardless of pipe state.
+			setTimeout(() => finish({ output, exitCode: code }), 50)
+		})
 	})
 }

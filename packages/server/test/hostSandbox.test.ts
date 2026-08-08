@@ -211,3 +211,27 @@ describe('devServerError', () => {
 		expect(devServerError('VITE v5.4.21  ready in 529 ms\n  Local: http://localhost:5173/')).toBeUndefined()
 	})
 })
+
+// The stuck-turn fixes (measured in a desktop trace: an AGENT turn hung on an open Bash span).
+describe('detached children and dev servers', () => {
+	it('settles when the direct child exits, even if a detached grandchild still holds the pipes', async () => {
+		// THE hang: `start /b` leaves a grandchild that inherits stdout, so waiting for 'close' waits for
+		// the grandchild. Settling on 'exit' returns as soon as the shell itself is done. The grandchild
+		// here outlives the call by design — exactly like a detached dev server.
+		if (!isWindows) return // start /b is the Windows-specific reproduction
+		const s = new HostSandbox(project())
+		const t0 = Date.now()
+		const res = await s.exec('start /b cmd /c "ping -n 6 127.0.0.1 > nul"')
+		expect(Date.now() - t0).toBeLessThan(3000) // grandchild pings for ~5s; we must not wait for it
+		expect(res.exitCode).toBe(0)
+	})
+
+	it('refuses to start a dev server — the Preview owns it, in host mode too', async () => {
+		// Docker mode has had this guard all along; host mode missing it is how the model started its own
+		// vite via `start /b` and collided with the preview's reserved port.
+		const s = new HostSandbox(project())
+		const res = await s.exec('npm run dev')
+		expect(res.exitCode).toBe(1)
+		expect(res.output).toMatch(/Preview/)
+	})
+})

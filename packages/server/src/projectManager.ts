@@ -253,7 +253,7 @@ export class ProjectManager {
   /** ADR-067: the RUNTIME provider/model config. Starts from opts (env), mutated by setModelConfig so the
    *  UI can switch provider+model WITHOUT restarting the server. New sessions read this; switching
    *  invalidates cached sessions (history lives in chatStore and reloads on re-open). */
-  private active!: { provider: string; model: string; baseUrl?: string; apiKey?: string; api?: 'openai' | 'ollama'; contextWindow?: number; maxOutputTokens?: number; temperature?: number; topP?: number; topK?: number }
+  private active!: { provider: string; model: string; baseUrl?: string; apiKey?: string; api?: 'openai' | 'ollama'; contextWindow?: number; maxOutputTokens?: number; temperature?: number; topP?: number; topK?: number; repeatPenalty?: number; presencePenalty?: number }
   /** Provider construction, injectable so tests can assert which model a session was actually built from. */
   private readonly makeProvider: typeof createProvider
 
@@ -280,6 +280,8 @@ export class ProjectManager {
           temperature: this.active.temperature,
           topP: this.active.topP,
           topK: this.active.topK,
+          repeatPenalty: this.active.repeatPenalty,
+          presencePenalty: this.active.presencePenalty,
           // The autonomous builder has no synchronous user to answer mid-build — drop AskUserQuestion so a
           // weak model can't stall the turn asking permission / for the next step (it must ACT — see
           // BUILDER_BEHAVIOR). Clarifying questions belong to the planner stage, which keeps the tool.
@@ -499,7 +501,7 @@ export class ProjectManager {
    *  reloads on re-open. The API key is resolved from the ENVIRONMENT for the built-in providers, OR passed
    *  explicitly (ADR-076: a custom endpoint's key, held server-side in the registry, never by the client).
    *  On a provider change, the old baseUrl/contextWindow/apiKey are dropped (provider-specific) unless supplied. */
-  async setModelConfig(cfg: { provider?: string; model?: string; baseUrl?: string; apiKey?: string; api?: 'openai' | 'ollama'; contextWindow?: number; maxOutputTokens?: number; temperature?: number; topP?: number; topK?: number }): Promise<void> {
+  async setModelConfig(cfg: { provider?: string; model?: string; baseUrl?: string; apiKey?: string; api?: 'openai' | 'ollama'; contextWindow?: number; maxOutputTokens?: number; temperature?: number; topP?: number; topK?: number; repeatPenalty?: number; presencePenalty?: number }): Promise<void> {
     const providerChanged = !!cfg.provider && cfg.provider !== this.active.provider
     const modelChanged = !!cfg.model && cfg.model !== this.active.model
     // Per-model params (window/output/sampling) are dropped when the TARGET model changes — the caller
@@ -517,6 +519,8 @@ export class ProjectManager {
       temperature: cfg.temperature ?? (dropModelParams ? undefined : this.active.temperature),
       topP: cfg.topP ?? (dropModelParams ? undefined : this.active.topP),
       topK: cfg.topK ?? (dropModelParams ? undefined : this.active.topK),
+      repeatPenalty: cfg.repeatPenalty ?? (dropModelParams ? undefined : this.active.repeatPenalty),
+      presencePenalty: cfg.presencePenalty ?? (dropModelParams ? undefined : this.active.presencePenalty),
     }
     this.visionOk = await hasVision(this.active.model, this.active.baseUrl, this.active.provider).catch(() => false)
     // Drop cached sessions so the next open() recreates them against the new provider (history reloads).

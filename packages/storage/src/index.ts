@@ -105,6 +105,13 @@ export interface ModelRecord {
   temperature?: number
   topP?: number
   topK?: number
+  /** Repetition penalty (llama.cpp `repeat_penalty`, ~1.0–1.3). THE anti-loop lever for quantized local
+   *  models: a 4-bit Qwen3 MoE measured 10× the loop rate of a hosted model with no penalty set. Local
+   *  (Ollama) only — hosted chat APIs do not expose it. */
+  repeatPenalty?: number
+  /** Presence penalty (0–2 on Ollama/llama.cpp). Qwen's own guidance for quantized builds is ~1.5 to
+   *  suppress endless repetition. Mapped to OpenAI-compat `presence_penalty` (−2..2) where supported. */
+  presencePenalty?: number
   /** ADR-076: the key for a custom endpoint. Stored server-side and NEVER returned to a client — the
    *  registry exposes `hasKey` upward instead. It lives on the record because the endpoint is useless
    *  without it, and splitting them would mean two writes that can disagree. */

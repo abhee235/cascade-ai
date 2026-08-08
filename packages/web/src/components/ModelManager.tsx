@@ -145,13 +145,15 @@ function ModelDetail(props: { em: EnabledModelInfo; info?: { capabilities: strin
 	const tempMax = Math.max(lim.tempMax, em.temperature ?? 0)
 
 	// Local draft ('' = Auto/backend default) so dragging feels immediate; commit on Save.
-	const keys = ['contextWindow', 'maxOutputTokens', 'temperature', 'topP', 'topK'] as const
+	const keys = ['contextWindow', 'maxOutputTokens', 'temperature', 'topP', 'topK', 'repeatPenalty', 'presencePenalty'] as const
 	const snapshot = () => ({
 		contextWindow: em.contextWindow?.toString() ?? '',
 		maxOutputTokens: em.maxOutputTokens?.toString() ?? '',
 		temperature: em.temperature?.toString() ?? '',
 		topP: em.topP?.toString() ?? '',
 		topK: em.topK?.toString() ?? '',
+		repeatPenalty: em.repeatPenalty?.toString() ?? '',
+		presencePenalty: em.presencePenalty?.toString() ?? '',
 	})
 	const [draft, setDraft] = useState<Record<string, string>>(snapshot)
 	useEffect(() => setDraft(snapshot()), [em]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -162,7 +164,7 @@ function ModelDetail(props: { em: EnabledModelInfo; info?: { capabilities: strin
 		const t = s.trim()
 		return t === '' || !Number.isFinite(Number(t)) ? undefined : Number(t)
 	}
-	const save = () => setModelParams(em.provider, em.model, { contextWindow: num(draft.contextWindow), maxOutputTokens: num(draft.maxOutputTokens), temperature: num(draft.temperature), topP: num(draft.topP), topK: num(draft.topK) })
+	const save = () => setModelParams(em.provider, em.model, { contextWindow: num(draft.contextWindow), maxOutputTokens: num(draft.maxOutputTokens), temperature: num(draft.temperature), topP: num(draft.topP), topK: num(draft.topK), repeatPenalty: num(draft.repeatPenalty), presencePenalty: num(draft.presencePenalty) })
 
 	return (
 		<div className="flex flex-col gap-6">
@@ -200,6 +202,8 @@ function ModelDetail(props: { em: EnabledModelInfo; info?: { capabilities: strin
 					<SliderField label="Temperature" value={draft.temperature ?? ''} onChange={(v) => set('temperature', v)} min={0} max={tempMax} step={0.05} fallback={Math.min(0.7, tempMax)} format={(n) => n.toFixed(2)} note="Higher = more random." />
 					<SliderField label="Top P" value={draft.topP ?? ''} onChange={(v) => set('topP', v)} min={0} max={1} step={0.01} fallback={1} format={(n) => n.toFixed(2)} note="Nucleus sampling." />
 					{lim.topK && <SliderField label="Top K" value={draft.topK ?? ''} onChange={(v) => set('topK', v)} min={0} max={100} step={1} fallback={40} format={(n) => String(n)} note="Sampling breadth (local/Ollama)." />}
+					{lim.topK && <SliderField label="Repeat penalty" value={draft.repeatPenalty ?? ''} onChange={(v) => set('repeatPenalty', v)} min={1} max={1.5} step={0.01} fallback={1.1} format={(n) => n.toFixed(2)} note="Discourages verbatim repetition — the main anti-loop lever for quantized local models." />}
+					{lim.topK && <SliderField label="Presence penalty" value={draft.presencePenalty ?? ''} onChange={(v) => set('presencePenalty', v)} min={0} max={2} step={0.1} fallback={0} format={(n) => n.toFixed(1)} note="Qwen recommends ~1.5 for quantized builds that loop." />}
 				</div>
 
 				<div className="flex items-center gap-3">

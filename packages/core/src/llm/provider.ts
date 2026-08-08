@@ -31,6 +31,8 @@ export interface CompletionRequest {
   topP?: number
   /** Top-K sampling. Omit ⇒ backend default. Ollama-native (OpenAI chat ignores it). */
   topK?: number
+  repeatPenalty?: number
+  presencePenalty?: number
   /** ADR-038 ENFORCEMENT: the ALLOCATED context window the caller is planning against. The provider must
    *  put it on the wire (Ollama: options.num_ctx via the native path) — otherwise the compactor protects a
    *  window the model may not actually have, and Ollama silently front-truncates the prompt (system prompt

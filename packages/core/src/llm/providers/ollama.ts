@@ -170,6 +170,9 @@ export class OllamaProvider extends OpenAIChatProvider {
     if (req.temperature !== undefined) options.temperature = req.temperature
     if (req.topP !== undefined) options.top_p = req.topP
     if (req.topK !== undefined) options.top_k = req.topK
+    // The anti-loop levers (measured: a 4-bit Qwen3 quant at 10× the loop rate of a hosted model).
+    if (req.repeatPenalty !== undefined) options.repeat_penalty = req.repeatPenalty
+    if (req.presencePenalty !== undefined) options.presence_penalty = req.presencePenalty
     const body = JSON.stringify({ model: req.model, messages: toNativeMessages(req.messages, req.system), tools: toOpenAITools(req.tools), stream: true, ...(Object.keys(options).length ? { options } : {}) })
     const res = await fetch(`${this.cfg.baseUrl}/api/chat`, { method: 'POST', headers: this.headers(), body, signal })
     if (!res.ok || !res.body) {

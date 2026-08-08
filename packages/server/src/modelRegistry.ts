@@ -18,6 +18,8 @@ export interface EnabledModel {
   topP?: number
   /** Top-K sampling (Ollama-native). Omit ⇒ backend default. */
   topK?: number
+  repeatPenalty?: number
+  presencePenalty?: number
   /** ADR-076: custom OpenAI-compatible endpoint (rented vLLM/SGLang/remote Ollama). When set, the switch sends
    *  this baseUrl to createProvider instead of the provider-id default — so a remote GPU is configured entirely
    *  from the Model Manager, no .env edit or restart. */
@@ -156,7 +158,7 @@ export function setModelParams(provider: string, model: string, params: ModelPar
     m = { provider, model }
     list.push(m)
   }
-  for (const k of ['contextWindow', 'maxOutputTokens', 'temperature', 'topP', 'topK'] as const) {
+  for (const k of ['contextWindow', 'maxOutputTokens', 'temperature', 'topP', 'topK', 'repeatPenalty', 'presencePenalty'] as const) {
     if (k in params) m[k] = params[k]
   }
   persist(m)
