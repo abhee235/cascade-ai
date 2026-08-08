@@ -27,5 +27,6 @@
   "config": {
     "forge": "./forge.config.cjs"
   },
-  "productName": "Cascade"
+  "productName": "Cascade",
+  "author": "Cascade"
 }
