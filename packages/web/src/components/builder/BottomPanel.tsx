@@ -136,8 +136,17 @@ export function BottomPanel() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1">
-        {bottomTab === 'terminal' ? <TerminalSessions /> : bottomTab === 'problems' ? <ProblemsPane /> : bottomTab === 'output' ? <ConsolePane /> : <PortsPane />}
+      {/* All panes stay MOUNTED; the inactive ones are merely invisible — the same rule the terminal
+          session strip already follows, now applied one level up. The ternary this replaces unmounted the
+          terminal pane on every tab switch, destroying the xterm instance (and the scrollback) while the
+          shell lived on server-side — and output arriving while another tab was open was dropped entirely,
+          because the data sink unregisters on unmount. visibility, not display:none, so xterm keeps real
+          dimensions and mounts correctly even while another tab is active. */}
+      <div className="relative min-h-0 flex-1">
+        <div className={cn('absolute inset-0', bottomTab !== 'terminal' && 'invisible')}><TerminalSessions /></div>
+        <div className={cn('absolute inset-0', bottomTab !== 'problems' && 'invisible')}><ProblemsPane /></div>
+        <div className={cn('absolute inset-0', bottomTab !== 'output' && 'invisible')}><ConsolePane /></div>
+        <div className={cn('absolute inset-0', bottomTab !== 'ports' && 'invisible')}><PortsPane /></div>
       </div>
     </div>
   )

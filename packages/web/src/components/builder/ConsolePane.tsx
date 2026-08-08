@@ -12,7 +12,12 @@ const isError = (l: string) => /\b(error|err!|failed|cannot|exception|ENOENT|EAD
 export function ConsolePane() {
   const { logs, preview, clearLogs, startPreview } = useStore()
   const endRef = useRef<HTMLDivElement>(null)
-  useEffect(() => endRef.current?.scrollIntoView(), [logs])
+  // Braces matter: the concise arrow RETURNED scrollIntoView()'s result, and React treats any truthy
+  // return from an effect as a cleanup fn — "destroy is not a function", unmounting the whole tree. It was
+  // latent while this pane only mounted on tab-select; keeping every pane mounted surfaced it at page load.
+  useEffect(() => {
+    endRef.current?.scrollIntoView()
+  }, [logs])
 
   const active = preview?.status === 'running' || preview?.status === 'starting' || preview?.status === 'installing'
 
