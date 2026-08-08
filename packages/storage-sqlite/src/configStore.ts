@@ -51,11 +51,24 @@ export function createConfigStore(db: Db): ConfigStore {
 	const connectors = async () => (await read<ConnectorRecord[]>(CONNECTORS)) ?? []
 	const sameModel = (a: ModelRecord, provider: string, model: string) => a.provider === provider && a.model === model
 
+	// Serialize every DOCUMENT mutation. upsert/remove are read-modify-write of one JSON value, so two
+	// concurrent calls both read the same snapshot and the second write silently erases the first's change.
+	// Not hypothetical: seeding three defaults at boot persisted two of them (caught by test), and a bulk
+	// delete raced the same way. Callers are fire-and-forget by design, so the fix cannot be "make callers
+	// await" — the store itself must queue. Reads stay unserialized; they cannot lose anything.
+	let chain: Promise<unknown> = Promise.resolve()
+	const serialize = <T>(fn: () => Promise<T>): Promise<T> => {
+		const next = chain.then(fn, fn)
+		chain = next.catch(() => {}) // one failed write must not wedge the queue forever
+		return next
+	}
+
 	return {
 		async models() {
 			return models()
 		},
-		async upsertModel(m) {
+		upsertModel(m) {
+			return serialize(async () => {
 			const list = await models()
 			const i = list.findIndex((x) => sameModel(x, m.provider, m.model))
 			// MERGE, never replace: the editor sends only the fields it changed, and a naive overwrite would
@@ -63,11 +76,14 @@ export function createConfigStore(db: Db): ConfigStore {
 			if (i >= 0) list[i] = { ...list[i], ...m, apiKey: m.apiKey ?? list[i].apiKey }
 			else list.push(m)
 			await write(MODELS, list)
+			})
 		},
-		async removeModel(provider, model) {
-			await write(
-				MODELS,
-				(await models()).filter((m) => !sameModel(m, provider, model)),
+		removeModel(provider, model) {
+			return serialize(async () =>
+				write(
+					MODELS,
+					(await models()).filter((m) => !sameModel(m, provider, model)),
+				),
 			)
 		},
 		async activeModel() {
@@ -80,7 +96,8 @@ export function createConfigStore(db: Db): ConfigStore {
 		async connectors() {
 			return connectors()
 		},
-		async upsertConnector(c) {
+		upsertConnector(c) {
+			return serialize(async () => {
 			const list = await connectors()
 			const i = list.findIndex((x) => x.name === c.name)
 			// The documented merge rule (ADR-071): `apiKey` UNDEFINED keeps the stored key — that is what makes
@@ -88,11 +105,14 @@ export function createConfigStore(db: Db): ConfigStore {
 			if (i >= 0) list[i] = { ...list[i], ...c, apiKey: c.apiKey === undefined ? list[i].apiKey : c.apiKey || undefined }
 			else list.push(c)
 			await write(CONNECTORS, list)
+			})
 		},
-		async removeConnector(name) {
-			await write(
-				CONNECTORS,
-				(await connectors()).filter((c) => c.name !== name),
+		removeConnector(name) {
+			return serialize(async () =>
+				write(
+					CONNECTORS,
+					(await connectors()).filter((c) => c.name !== name),
+				),
 			)
 		},
 

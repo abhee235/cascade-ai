@@ -254,6 +254,21 @@ export function runConformance(adapter: Adapter, t: TestApi): void {
 			expect(await c.connectors()).toEqual([])
 		})
 
+		it('does not LOSE concurrent updates — upserts and removes are read-modify-write', async () => {
+			// Callers are fire-and-forget by design (the registry persists in the background), so the STORE
+			// must serialize its document mutations. Measured without this: seeding three defaults at boot
+			// persisted two, and a bulk delete left survivors.
+			const c = await configStore()
+			await Promise.all([
+				c.upsertModel({ provider: 'p', model: 'a' }),
+				c.upsertModel({ provider: 'p', model: 'b' }),
+				c.upsertModel({ provider: 'p', model: 'c' }),
+			])
+			expect((await c.models()).length).toBe(3)
+			await Promise.all([c.removeModel('p', 'a'), c.removeModel('p', 'b'), c.removeModel('p', 'c')])
+			expect((await c.models()).length).toBe(0)
+		})
+
 		it('an unset setting reads as undefined rather than throwing', async () => {
 			const c = await configStore()
 			expect(await c.setting('never-set')).toBeUndefined()

@@ -16,10 +16,18 @@ import { cn } from '@/lib/utils'
 const fmtCtx = (n?: number) => (n === undefined ? '' : n >= 1_048_576 ? `${+(n / 1_048_576).toFixed(n % 1_048_576 ? 1 : 0)}M` : n >= 1024 ? `${Math.round(n / 1024)}K` : String(n))
 // Client-side fallback when the server hasn't sent limits yet (matches modelSpecs.DEFAULT_LIMITS).
 const FALLBACK_LIMITS: ModelLimits = { contextMax: 262_144, outputMax: 8_192, tempMax: 2, topK: true }
-// Context-window slider stops: powers of two from 4K up to the model's max (inclusive), à la LM Studio.
+// Context-window slider stops: powers of two from 4K up to the model's max, PLUS the midpoint between
+// each pair (48K, 96K, 192K…), à la LM Studio but at twice the resolution. Pure doubling left holes a
+// user actually wants — between 64K and 128K there was nothing, and "some context, not half" is exactly
+// the knob for a partial-offload box where the KV cache competes with the weights for VRAM. num_ctx has
+// no power-of-two requirement; the discrete stops are UX, not a backend constraint.
 const ctxStops = (max: number) => {
 	const stops: number[] = []
-	for (let v = 4096; v < max; v *= 2) stops.push(v)
+	for (let v = 4096; v < max; v *= 2) {
+		stops.push(v)
+		const mid = v * 1.5
+		if (mid < max) stops.push(mid)
+	}
 	stops.push(max)
 	return stops
 }

@@ -67,9 +67,26 @@ let activeCache: ActiveModel | null | undefined // undefined = not read yet, nul
 export async function initModelRegistry(s: ConfigStore): Promise<void> {
   store = s
   const persisted = await s.models()
-  // No persisted models ⇒ the curated DEFAULTS, exactly as an absent models.json used to mean. They are
-  // not written back: a default the user never chose should not become a row they have to delete.
-  cache = persisted.length ? (persisted as EnabledModel[]) : [...DEFAULTS]
+  if (persisted.length) {
+    cache = persisted as EnabledModel[]
+  } else if (await s.setting<boolean>('modelsSeeded')) {
+    // The user deleted every model on purpose. An empty picker is their choice; respect it.
+    cache = []
+  } else {
+    // First boot: seed the defaults AND persist them, marker-guarded so a later delete sticks.
+    //
+    // The earlier version kept the seeds in-memory only ("a default the user never chose should not
+    // become a row they have to delete") — and that caused measured data loss on the desktop: the seeds
+    // exist only while the store is EMPTY, so the first time any single model was selected (persisting
+    // that one row), every other model in the picker vanished on the next launch. Rows the user saw and
+    // relied on disappearing is strictly worse than rows they can delete once.
+    cache = [...DEFAULTS]
+    // AWAITED, sequentially — unlike every other registry write. upsertModel is a read-modify-write of one
+    // JSON document, so three concurrent seeds race and one loses its update (caught by test: the picker
+    // seeded 2 of 3). Init runs once at boot; the hot-path rule does not apply here.
+    for (const d of DEFAULTS) await Promise.resolve(s.upsertModel(d)).catch(() => {})
+  }
+  void Promise.resolve(s.setSetting('modelsSeeded', true)).catch(() => {})
   activeCache = (await s.activeModel()) ?? null
 }
 
