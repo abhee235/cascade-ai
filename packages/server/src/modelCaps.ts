@@ -18,12 +18,13 @@ const cache = new Map<string, string[]>()
 // server can list models + report which providers are configured without importing core internals).
 const BASE_URLS: Record<string, string> = {
   ollama: 'http://127.0.0.1:11434',
+  vllm: 'http://127.0.0.1:8000',
   openai: 'https://api.openai.com',
   nvidia: 'https://integrate.api.nvidia.com',
   groq: 'https://api.groq.com/openai',
   openrouter: 'https://openrouter.ai/api',
 }
-const KEY_ENV: Record<string, string> = { openai: 'OPENAI_API_KEY', nvidia: 'NVIDIA_API_KEY', groq: 'GROQ_API_KEY', openrouter: 'OPENROUTER_API_KEY' }
+const KEY_ENV: Record<string, string> = { vllm: 'VLLM_API_KEY', openai: 'OPENAI_API_KEY', nvidia: 'NVIDIA_API_KEY', groq: 'GROQ_API_KEY', openrouter: 'OPENROUTER_API_KEY' }
 
 export interface ProviderCatalogEntry {
   id: string
@@ -36,7 +37,8 @@ export interface ProviderCatalogEntry {
 export function providerCatalog(): ProviderCatalogEntry[] {
   return Object.keys(BASE_URLS).map((id) => ({
     id,
-    configured: id === 'ollama' || !!(process.env[KEY_ENV[id]] || process.env.CASCADE_API_KEY),
+    // Local backends need no key to be usable; hosted ones need one in the environment.
+    configured: id === 'ollama' || id === 'vllm' || !!(process.env[KEY_ENV[id]] || process.env.CASCADE_API_KEY),
   }))
 }
 
@@ -61,6 +63,25 @@ export async function modelInfo(provider: string, model: string, baseUrl?: strin
       else if (archMax) contextWindow = Math.min(archMax, ARCH_FALLBACK_CAP)
     } catch {
       /* unreachable — leave undefined */
+    }
+  }
+  if (provider === 'vllm') {
+    // vLLM's /v1/models is richer than OpenAI's: each entry carries `max_model_len` — the SERVED context
+    // length after --max-model-len and KV-cache sizing. That is the number the harness must plan against,
+    // and probing it kills the one manual step the custom-endpoint path required (typing the window by
+    // hand, where a wrong value is the 32k-squeeze failure class: silent truncation mid-build).
+    try {
+      const base = (baseUrl ?? BASE_URLS.vllm).replace(/\/+$/, '').replace(/\/v1\/?$/, '')
+      const key = process.env[KEY_ENV.vllm] || process.env.CASCADE_API_KEY
+      const res = await fetch(`${base}/v1/models`, { headers: key ? { Authorization: `Bearer ${key}` } : {}, signal: AbortSignal.timeout(5000) })
+      const j = (await res.json()) as { data?: { id: string; max_model_len?: number }[] }
+      const row = (j.data ?? []).find((m) => m.id === model) ?? (j.data ?? [])[0]
+      if (row?.max_model_len) {
+        contextWindow = row.max_model_len
+        archMax = row.max_model_len
+      }
+    } catch {
+      /* unreachable — the sliders fall back to the spec table, same as any custom endpoint */
     }
   }
   // The slider max reaches the TRUE ceiling (archMax) so the user can raise the window to what the model

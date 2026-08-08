@@ -37,6 +37,7 @@ export interface ProviderConfig {
 const OPENAI_COMPAT_BASE_URLS: Record<string, string> = {
   ollama: 'http://127.0.0.1:11434',
   llamacpp: 'http://127.0.0.1:8080',
+  vllm: 'http://127.0.0.1:8000', // vLLM's OpenAI server default (`vllm serve` with no --port)
   openai: 'https://api.openai.com',
   groq: 'https://api.groq.com/openai',
   openrouter: 'https://openrouter.ai/api',
@@ -46,6 +47,7 @@ const OPENAI_COMPAT_BASE_URLS: Record<string, string> = {
 // Conventional env var per provider — the names every vendor's own docs tell users to export. Resolution
 // order: explicit config > provider-specific var > CASCADE_API_KEY (the generic/custom-endpoint fallback).
 const API_KEY_ENV: Record<string, string> = {
+  vllm: 'VLLM_API_KEY', // only set when the server was launched with --api-key
   openai: 'OPENAI_API_KEY',
   groq: 'GROQ_API_KEY',
   openrouter: 'OPENROUTER_API_KEY',
