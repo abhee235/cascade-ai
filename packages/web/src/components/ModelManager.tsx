@@ -8,7 +8,7 @@
 // Nothing smaller. Numeric params are sliders, never bare number inputs.
 
 import { type CSSProperties, useEffect, useState } from 'react'
-import { Check, Cpu, Eye, EyeOff, KeyRound, Plus, Search, Trash2, X } from 'lucide-react'
+import { Check, ChevronRight, Cpu, Eye, EyeOff, KeyRound, Plus, Search, Trash2, X } from 'lucide-react'
 import type { EnabledModelInfo, ModelLimits } from '@cascade/app-protocol'
 import { useStore } from '@/lib/store'
 import { launchCommandFor, LOCAL_PROVIDER_ORIGINS } from '@/lib/launchCommand'
@@ -213,15 +213,7 @@ function ModelDetail(props: { em: EnabledModelInfo; info?: { capabilities: strin
 					{lim.topK && <SliderField label="Top K" value={draft.topK ?? ''} onChange={(v) => set('topK', v)} min={0} max={100} step={1} fallback={40} format={(n) => String(n)} note="Sampling breadth (local / self-hosted endpoints)." />}
 					{lim.topK && <SliderField label="Repeat penalty" value={draft.repeatPenalty ?? ''} onChange={(v) => set('repeatPenalty', v)} min={1} max={1.5} step={0.01} fallback={1.1} format={(n) => n.toFixed(2)} note="Discourages verbatim repetition — the main anti-loop lever for quantized local models." />}
 					{lim.topK && <SliderField label="Presence penalty" value={draft.presencePenalty ?? ''} onChange={(v) => set('presencePenalty', v)} min={0} max={2} step={0.1} fallback={0} format={(n) => n.toFixed(1)} note="Qwen recommends ~1.5 for quantized builds that loop." />}
-					{em.provider === 'vllm' && (
-						<div className="mt-3 flex flex-col gap-1.5">
-							<span className="text-sm font-medium">Serve command</span>
-							{/* Built from the CURRENT draft, so dragging the context slider updates --max-model-len live.
-							    The parser flags are derived from the model family — without them vLLM emits no tool_calls
-							    and the agent can only talk about editing files. */}
-							<CommandBlock command={launchCommandFor('vllm', em.model, { contextWindow: num(draft.contextWindow) ?? em.contextWindow, requiresKey: em.hasKey }) ?? ''} />
-						</div>
-					)}
+
 				</div>
 
 				<div className="flex items-center gap-3">
@@ -235,6 +227,8 @@ function ModelDetail(props: { em: EnabledModelInfo; info?: { capabilities: strin
 					)}
 					<span className="ml-auto text-xs text-muted-foreground">Auto = backend default. Applies live to the next turn.</span>
 				</div>
+
+				{em.provider === 'vllm' && <ServeCommandSection command={launchCommandFor('vllm', em.model, { contextWindow: num(draft.contextWindow) ?? em.contextWindow, requiresKey: em.hasKey }) ?? ''} />}
 			</section>
 
 			{/* provider key */}
@@ -353,6 +347,47 @@ function CommandBlock({ command }: { command: string }) {
 			>
 				{copied ? 'Copied' : 'Copy'}
 			</button>
+		</div>
+	)
+}
+
+/**
+ * "How do I run this?" — collapsed by default so the params pane stays uncluttered, per-OS because the
+ * honest answer differs: vLLM does not run on native Windows (it runs in WSL, inside whatever env it was
+ * installed to), macOS is CPU-only/experimental, and Linux is the primary target. The command itself is
+ * built live from the CURRENT draft — dragging the context slider updates --max-model-len before you copy.
+ */
+function ServeCommandSection({ command }: { command: string }) {
+	const [open, setOpen] = useState(false)
+	return (
+		<div className="mt-4 overflow-hidden rounded-lg border border-border">
+			<button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-medium hover:bg-accent/50">
+				<ChevronRight className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
+				How to serve this model
+				<span className="ml-auto text-xs font-normal text-muted-foreground">vLLM</span>
+			</button>
+			{open && (
+				<div className="flex flex-col gap-4 border-t border-border px-3 py-3">
+					<div className="flex flex-col gap-1.5">
+						<span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Windows — runs inside WSL</span>
+						<p className="text-xs text-muted-foreground">vLLM has no native Windows build. Activate the environment it was installed in (adjust the path), then serve:</p>
+						<CommandBlock command={`wsl
+source ~/vllm-env/bin/activate  # your vLLM env
+${command}`} />
+					</div>
+					<div className="flex flex-col gap-1.5">
+						<span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Linux</span>
+						<CommandBlock command={`source ~/vllm-env/bin/activate  # your vLLM env
+${command}`} />
+					</div>
+					<div className="flex flex-col gap-1.5">
+						<span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">macOS — CPU only (experimental)</span>
+						<p className="text-xs text-muted-foreground">vLLM on Apple Silicon runs on the CPU — fine for a smoke test, not for real builds.</p>
+						<CommandBlock command={command} />
+					</div>
+					<p className="text-xs text-muted-foreground">First run downloads the model from Hugging Face before anything listens. Wait for “Uvicorn running”, then Retry the catalog.</p>
+				</div>
+			)}
 		</div>
 	)
 }
