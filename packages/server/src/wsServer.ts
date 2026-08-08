@@ -282,6 +282,28 @@ export function handleConnection(
     if (dir && versions) send({ type: 'versions', versions: versions.list(dir) })
   }
 
+  /** Did this tool result change the set of files on disk? A `fileEdit` display covers Write/Edit/MultiEdit;
+   *  a shell command is included because `npm install`, `mkdir` and generated scaffolding all create files
+   *  the pane should show. Reads and searches are excluded — they are the common case and change nothing. */
+  const touchesFiles = (ev: { [k: string]: unknown }): boolean => {
+    const display = ev.display as { kind?: string } | undefined
+    if (display?.kind === 'fileEdit') return true
+    const name = String(ev.name ?? '')
+    return name === 'Bash' || name === 'Write' || name === 'Edit' || name === 'MultiEdit'
+  }
+
+  /** Coalesce a burst of file writes into ONE tree walk. 400ms is below the threshold where the pane feels
+   *  stale, and far above the interval at which a build emits edits. */
+  let treeTimer: ReturnType<typeof setTimeout> | null = null
+  const scheduleTreeRefresh = () => {
+    if (treeTimer) return
+    treeTimer = setTimeout(() => {
+      treeTimer = null
+      sendTree()
+    }, 400)
+    treeTimer.unref?.()
+  }
+
   // M11: send the active project's chat list (the active chat highlighted). list() prunes abandoned empty
   // "New chat" entries — the ACTIVE chat is exempt (it may be empty right now, mid-composition).
   /** The store speaks ChatRecord (it carries projectId); the wire speaks ChatMeta (it does not). */
@@ -541,6 +563,11 @@ export function handleConnection(
           const relay = (ev: { type: string; [k: string]: unknown }) => {
             liveTurn.publish(turn, ev)
             if (REPLAY_TYPES.has(ev.type)) pinnedLog({ event: ev })
+            // Refresh the Code pane AS files appear. The tree was only sent after the plan stage and again
+            // when the whole turn ended, so for the entire build — minutes — the pane showed PLAN.md and
+            // nothing else, which reads as "the agent has not written anything" while it is writing
+            // constantly. Debounced because a build emits these in bursts and readTree walks the project.
+            if (ev.type === 'toolResult' && touchesFiles(ev)) scheduleTreeRefresh()
           }
 
           // ADR-056 rung 3: first message of a fresh, unplanned project → run the planner as its own
