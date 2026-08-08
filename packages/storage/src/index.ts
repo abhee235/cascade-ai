@@ -72,6 +72,24 @@ export interface ChatStore {
   /** The chat's replay log, oldest first — the client re-dispatches these through the live reducer. Adapters
    *  return the most recent `limit` entries: a marathon chat replays its tail, not an unbounded log. */
   replay(chatId: string, limit?: number): Promise<ReplayEntry[]>
+  /**
+   * Retention for REPLAY LOGS — never for chats or their history, which are the user's work.
+   *
+   * Two independent limits, because they carry different risk:
+   *
+   * `maxPerChat` is free. `replay()` only ever returns the most recent slice, so rows beyond that limit
+   * cannot be displayed by any code path — keeping them is pure waste. Bounds the pathological case: one
+   * marathon conversation.
+   *
+   * `olderThanMs` is NOT free and is keyed on the chat's `updatedAt`, not the event's: it drops the
+   * high-fidelity log of conversations nobody has touched in that long. Those chats still open — the
+   * client falls back to the flattened messages, the same path every pre-log chat already uses — but the
+   * transcript loses thinking blocks, tool cards and diffs. That is a real downgrade, so the default is
+   * generous and it is the caller's decision, not the store's.
+   *
+   * @returns rows deleted
+   */
+  pruneEvents(opts?: { maxPerChat?: number; olderThanMs?: number }): Promise<number>
   /** Flush any buffered appends. Call before shutdown; adapters with no buffer no-op. */
   flush(): Promise<void>
 }

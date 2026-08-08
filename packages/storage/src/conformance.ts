@@ -413,6 +413,69 @@ export function runConformance(adapter: Adapter, t: TestApi): void {
 			expect((await s.list('p2')).map((c) => c.id)).toEqual(['b'])
 		})
 
+		it('caps a replay log at EXACTLY maxPerChat, keeping the newest', async () => {
+			// Off-by-one matters here: the cap is the same number replay() reads, so keeping one extra row
+			// forever is a slow leak, and keeping one too few silently drops the oldest visible entry.
+			const s = await chatStore()
+			await seed(s, 'a')
+			for (let i = 0; i < 10; i++) s.append('a', { event: { n: i } })
+			expect(await s.pruneEvents({ maxPerChat: 4 })).toBe(6)
+			expect(await s.replay('a')).toEqual([{ event: { n: 6 } }, { event: { n: 7 } }, { event: { n: 8 } }, { event: { n: 9 } }])
+		})
+
+		it('leaves a log alone when it is already under the cap', async () => {
+			const s = await chatStore()
+			await seed(s, 'a')
+			for (let i = 0; i < 3; i++) s.append('a', { event: { n: i } })
+			expect(await s.pruneEvents({ maxPerChat: 10 })).toBe(0)
+			expect(await s.replay('a')).toHaveLength(3)
+		})
+
+		it('caps each chat independently', async () => {
+			const s = await chatStore()
+			await seed(s, 'a')
+			await seed(s, 'b')
+			for (let i = 0; i < 6; i++) s.append('a', { event: { n: i } })
+			s.append('b', { user: 'only one' })
+			await s.pruneEvents({ maxPerChat: 2 })
+			expect(await s.replay('a')).toHaveLength(2)
+			expect(await s.replay('b')).toEqual([{ user: 'only one' }])
+		})
+
+		it('drops the logs of chats untouched for longer than the age limit', async () => {
+			const s = await chatStore()
+			await s.create({ id: 'old', projectId: 'p1', title: 'Old build', updatedAt: '2020-01-01T00:00:00.000Z' })
+			await seed(s, 'recent')
+			s.append('old', { user: 'ancient' })
+			s.append('recent', { user: 'today' })
+			expect(await s.pruneEvents({ olderThanMs: 24 * 60 * 60 * 1000 })).toBe(1)
+			expect(await s.replay('old')).toEqual([])
+			expect(await s.replay('recent')).toEqual([{ user: 'today' }])
+		})
+
+		it('NEVER deletes the chat or its history — only the replay log', async () => {
+			// The line this feature must not cross. A trace is diagnostics; a conversation is the user's work.
+			// A chat whose log has aged out still opens: the client falls back to the flattened messages, the
+			// same path every pre-log chat already uses.
+			const s = await chatStore()
+			await s.create({ id: 'old', projectId: 'p1', title: 'Old build', updatedAt: '2020-01-01T00:00:00.000Z' })
+			await s.saveMessages('old', [{ role: 'user', content: 'build a shop' }])
+			s.append('old', { user: 'build a shop' })
+			await s.pruneEvents({ olderThanMs: 1000 })
+			expect((await s.get('old'))?.title).toBe('Old build')
+			expect(await s.messages('old')).toEqual([{ role: 'user', content: 'build a shop' }])
+			expect((await s.list('p1')).map((c) => c.id)).toEqual(['old'])
+		})
+
+		it('does nothing when given no limits', async () => {
+			// The default call must not be destructive by accident.
+			const s = await chatStore()
+			await seed(s, 'a')
+			s.append('a', { user: 'keep me' })
+			expect(await s.pruneEvents()).toBe(0)
+			expect(await s.replay('a')).toEqual([{ user: 'keep me' }])
+		})
+
 		it('treats operations on a missing chat as no-ops, not throws', async () => {
 			// These run from a websocket handler where a stale client id is normal; a throw there would
 			// take down the connection rather than the request.

@@ -67,6 +67,14 @@ export function createChatStore(db: Db): ChatStore {
 	const selectEvents = db.prepare('SELECT entry FROM chat_events WHERE chat_id = ? ORDER BY seq DESC LIMIT ?')
 	const countEvents = db.prepare('SELECT COUNT(*) AS c FROM chat_events WHERE chat_id = ?')
 
+	// ── Retention (see the port's note on why these two limits differ) ──────────────────────────────────
+	/** Chats whose log exceeds the cap — the only ones worth touching. */
+	const countPerChat = db.prepare('SELECT chat_id FROM chat_events GROUP BY chat_id HAVING COUNT(*) > ?')
+	/** The seq of the Nth-newest row: everything strictly below it is unreachable by replay(). */
+	const nthNewestSeq = db.prepare('SELECT seq FROM chat_events WHERE chat_id = ? ORDER BY seq DESC LIMIT 1 OFFSET ?')
+	const deleteBelowSeq = db.prepare('DELETE FROM chat_events WHERE chat_id = ? AND seq < ?')
+	const deleteAgedEvents = db.prepare('DELETE FROM chat_events WHERE chat_id IN (SELECT id FROM chats WHERE updated_at < ?)')
+
 	// Same reasoning as spans: the cost is the commit, not the insert, and `append` sits on the turn's hot
 	// path where it must never block. One transaction per batch.
 	const writer = new BufferedWriter<{ chat_id: string; entry: string }>((rows) => {
@@ -165,6 +173,35 @@ export function createChatStore(db: Db): ChatStore {
 				.reverse()
 				.map((r) => parseJson<ReplayEntry | null>(r.entry, null))
 				.filter((e): e is ReplayEntry => e !== null)
+		},
+
+		async pruneEvents({ maxPerChat, olderThanMs } = {}) {
+			writer.flush() // never measure a log while part of it is still in memory
+			let deleted = 0
+			db.exec('BEGIN')
+			try {
+				if (olderThanMs && olderThanMs > 0) {
+					// Keyed on the CHAT's updatedAt rather than an event timestamp — chat_events has none, and
+					// "this conversation has been idle for months" is the question actually being asked. The
+					// chat and its messages survive; only the high-fidelity log goes.
+					const cutoff = new Date(Date.now() - olderThanMs).toISOString()
+					deleted += deleteAgedEvents.run(cutoff).changes as number
+				}
+				if (maxPerChat && maxPerChat > 0) {
+					// Per chat, find the seq of the newest row to KEEP, then delete everything below it. One
+					// indexed range delete each, rather than a correlated subquery over the whole table.
+					for (const row of countPerChat.all(maxPerChat) as unknown as { chat_id: string }[]) {
+						// OFFSET is maxPerChat-1, so this is the OLDEST row we keep; anything below it goes.
+						const floor = nthNewestSeq.get(row.chat_id, maxPerChat - 1) as unknown as { seq: number } | undefined
+						if (floor) deleted += deleteBelowSeq.run(row.chat_id, floor.seq).changes as number
+					}
+				}
+				db.exec('COMMIT')
+			} catch (e) {
+				db.exec('ROLLBACK') // retention must never be able to half-delete a transcript
+				throw e
+			}
+			return deleted
 		},
 
 		async flush() {
