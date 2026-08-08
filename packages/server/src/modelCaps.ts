@@ -100,23 +100,28 @@ export function setProviderKey(provider: string, key: string): boolean {
 }
 
 /** List the models a provider offers, live: Ollama → /api/tags; OpenAI-compatible → /v1/models (with the
- *  env key). Empty on any failure (no key, unreachable, unknown provider) — never throws. */
-export async function listModels(provider: string, baseUrl?: string): Promise<string[]> {
+ *  env key). Never throws.
+ *
+ *  `reachable` is a SEPARATE fact from an empty list, because the UI must say different things: an empty
+ *  catalog on a reachable server means "no models here" (or a bad key — the server answered), while an
+ *  unreachable one means "nothing is listening" and the fix is a LAUNCH COMMAND, not a different query.
+ *  Collapsing the two showed a blank catalog for a vllm that simply was not started. */
+export async function listModels(provider: string, baseUrl?: string): Promise<{ models: string[]; reachable: boolean }> {
   const base = (baseUrl ?? BASE_URLS[provider] ?? '').replace(/\/$/, '')
-  if (!base) return []
+  if (!base) return { models: [], reachable: false }
   try {
     if (provider === 'ollama') {
       const res = await fetch(`${base.replace(/\/v1$/, '')}/api/tags`, { signal: AbortSignal.timeout(5000) })
       const j = (await res.json()) as { models?: { name: string }[] }
-      return (j.models ?? []).map((m) => m.name).sort()
+      return { models: (j.models ?? []).map((m) => m.name).sort(), reachable: true }
     }
     const key = process.env[KEY_ENV[provider]] || process.env.CASCADE_API_KEY
     const res = await fetch(`${base}/v1/models`, { headers: key ? { Authorization: `Bearer ${key}` } : {}, signal: AbortSignal.timeout(8000) })
-    if (!res.ok) return []
+    if (!res.ok) return { models: [], reachable: true } // it ANSWERED — a 401/404 is not "not running"
     const j = (await res.json()) as { data?: { id: string }[] }
-    return (j.data ?? []).map((m) => m.id).sort()
+    return { models: (j.data ?? []).map((m) => m.id).sort(), reachable: true }
   } catch {
-    return []
+    return { models: [], reachable: false }
   }
 }
 

@@ -43,7 +43,9 @@ interface UiState {
   // connection + projects
   connected: boolean
   serverInfo: { sandbox: boolean; model: string; provider?: string; providers?: { id: string; configured: boolean }[]; runtime?: import('@cascade/app-protocol').RuntimeInfo } | null // server greeting: runtime, active provider/model, provider menu (ADR-067)
-  models: Record<string, string[]> // ADR-067: cached model lists per provider (filled by `models` events, for the picker)
+  models: Record<string, string[]>
+  /** Per provider: did the last listing actually reach a server? false ⇒ show the launch command. */
+  modelsReachable: Record<string, boolean> // ADR-067: cached model lists per provider (filled by `models` events, for the picker)
   modelInfo: Record<string, { capabilities: string[]; contextWindow?: number; limits?: ModelLimits }> // ADR-067: per "provider/model" capabilities+context+slider limits (manager)
   modelManagerOpen: boolean // ADR-067: the model-management dialog is open
   enabledModels: EnabledModelInfo[] // ADR-067: the CURATED models shown in the picker (with per-model params)
@@ -357,6 +359,7 @@ export const useStore = create<UiState>((set, get) => {
     connected: false,
     serverInfo: null,
     models: {},
+    modelsReachable: {},
     modelInfo: {},
     modelManagerOpen: false,
     enabledModels: [],
@@ -567,7 +570,7 @@ export const useStore = create<UiState>((set, get) => {
           set({ serverInfo: { sandbox: e.sandbox, model: e.model, provider: e.provider, providers: e.providers, runtime: e.runtime } })
           break
         case 'models': // ADR-067: a provider's model list arrived → cache it for the picker
-          set((s) => ({ models: { ...s.models, [e.provider]: e.models } }))
+          set((s) => ({ models: { ...s.models, [e.provider]: e.models }, modelsReachable: { ...s.modelsReachable, [e.provider]: e.reachable !== false } }))
           break
         case 'modelInfo': // ADR-067: one model's capabilities+context → cache for the manager
           set((s) => ({ modelInfo: { ...s.modelInfo, [`${e.provider}/${e.model}`]: { capabilities: e.capabilities, contextWindow: e.contextWindow, limits: e.limits } } }))

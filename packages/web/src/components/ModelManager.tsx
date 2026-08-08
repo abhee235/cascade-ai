@@ -11,6 +11,7 @@ import { type CSSProperties, useEffect, useState } from 'react'
 import { Check, Cpu, Eye, EyeOff, KeyRound, Plus, Search, Trash2, X } from 'lucide-react'
 import type { EnabledModelInfo, ModelLimits } from '@cascade/app-protocol'
 import { useStore } from '@/lib/store'
+import { launchCommandFor, LOCAL_PROVIDER_ORIGINS } from '@/lib/launchCommand'
 import { cn } from '@/lib/utils'
 
 const fmtCtx = (n?: number) => (n === undefined ? '' : n >= 1_048_576 ? `${+(n / 1_048_576).toFixed(n % 1_048_576 ? 1 : 0)}M` : n >= 1024 ? `${Math.round(n / 1024)}K` : String(n))
@@ -212,6 +213,15 @@ function ModelDetail(props: { em: EnabledModelInfo; info?: { capabilities: strin
 					{lim.topK && <SliderField label="Top K" value={draft.topK ?? ''} onChange={(v) => set('topK', v)} min={0} max={100} step={1} fallback={40} format={(n) => String(n)} note="Sampling breadth (local / self-hosted endpoints)." />}
 					{lim.topK && <SliderField label="Repeat penalty" value={draft.repeatPenalty ?? ''} onChange={(v) => set('repeatPenalty', v)} min={1} max={1.5} step={0.01} fallback={1.1} format={(n) => n.toFixed(2)} note="Discourages verbatim repetition — the main anti-loop lever for quantized local models." />}
 					{lim.topK && <SliderField label="Presence penalty" value={draft.presencePenalty ?? ''} onChange={(v) => set('presencePenalty', v)} min={0} max={2} step={0.1} fallback={0} format={(n) => n.toFixed(1)} note="Qwen recommends ~1.5 for quantized builds that loop." />}
+					{em.provider === 'vllm' && (
+						<div className="mt-3 flex flex-col gap-1.5">
+							<span className="text-sm font-medium">Serve command</span>
+							{/* Built from the CURRENT draft, so dragging the context slider updates --max-model-len live.
+							    The parser flags are derived from the model family — without them vLLM emits no tool_calls
+							    and the agent can only talk about editing files. */}
+							<CommandBlock command={launchCommandFor('vllm', em.model, { contextWindow: num(draft.contextWindow) ?? em.contextWindow, requiresKey: em.hasKey }) ?? ''} />
+						</div>
+					)}
 				</div>
 
 				<div className="flex items-center gap-3">
@@ -326,6 +336,27 @@ function ProviderKey(props: { provider: string; configured: boolean }) {
 	)
 }
 
+/** A copyable shell command. Used wherever the fix for a state is "run this", not "click something". */
+function CommandBlock({ command }: { command: string }) {
+	const [copied, setCopied] = useState(false)
+	return (
+		<div className="relative">
+			<pre className="overflow-x-auto whitespace-pre-wrap rounded-md border border-border bg-muted/50 px-3 py-2 pr-16 font-mono text-xs leading-relaxed">{command}</pre>
+			<button
+				type="button"
+				className="absolute right-1.5 top-1.5 rounded border border-border bg-background px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+				onClick={() => {
+					void navigator.clipboard?.writeText(command)
+					setCopied(true)
+					setTimeout(() => setCopied(false), 1500)
+				}}
+			>
+				{copied ? 'Copied' : 'Copy'}
+			</button>
+		</div>
+	)
+}
+
 // ── Add-model flow: pick a provider, then type a model id OR browse its catalog ──
 const CUSTOM_PROVIDER = '__custom__' // ADR-076: dropdown sentinel for "Custom endpoint…" (a remote OpenAI-compatible GPU)
 
@@ -357,6 +388,10 @@ function AddModelPane(props: { onAdded: (provider: string, model: string) => voi
 		if (!isCustom && provider && !models[provider]) listModels(provider)
 	}, [provider, models, listModels, isCustom])
 	const loading = !models[provider]
+	const reachable = useStore((st) => st.modelsReachable)[provider]
+	// A LOCAL backend that answered nothing is not "an empty catalog" — nothing is listening. The fix is a
+	// command, so show the command (built for this provider) instead of skeletons that resolve to nothing.
+	const showLaunchHelp = !isCustom && reachable === false && provider in LOCAL_PROVIDER_ORIGINS
 	const catalog = (models[provider] ?? []).filter((m) => m.toLowerCase().includes(query.toLowerCase()))
 	useEffect(() => {
 		for (const m of catalog.slice(0, 40)) if (!modelInfo[`${provider}/${m}`]) fetchModelInfo(provider, m)
@@ -450,7 +485,20 @@ function AddModelPane(props: { onAdded: (provider: string, model: string) => voi
 					</div>
 				</div>
 				<div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border p-1">
-					{loading ? (
+					{showLaunchHelp ? (
+						<div className="flex flex-col gap-2 px-3 py-5 text-sm">
+							<p className="font-medium">{provider} isn't running.</p>
+							<p className="text-muted-foreground">
+								Nothing answered at <code className="rounded bg-muted px-1">{LOCAL_PROVIDER_ORIGINS[provider]}</code>. Start it, then retry:
+							</p>
+							<CommandBlock command={launchCommandFor(provider, modelId.trim() || undefined) ?? ''} />
+							<div>
+								<button type="button" onClick={() => listModels(provider)} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent">
+									Retry
+								</button>
+							</div>
+						</div>
+					) : loading ? (
 						// skeleton rows reserve height while the catalog loads (no layout shift)
 						<div className="flex flex-col gap-0.5">
 							{Array.from({ length: 8 }).map((_, i) => (

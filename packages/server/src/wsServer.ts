@@ -437,7 +437,8 @@ export function handleConnection(
         }
         // ADR-067: runtime provider/model switching — no server restart.
         case 'listModels': {
-          send({ type: 'models', provider: msg.provider, models: await listModels(msg.provider, msg.baseUrl) })
+          const listed = await listModels(msg.provider, msg.baseUrl)
+          send({ type: 'models', provider: msg.provider, models: listed.models, reachable: listed.reachable })
           break
         }
         case 'modelInfo': {

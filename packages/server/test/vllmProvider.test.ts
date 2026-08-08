@@ -29,7 +29,7 @@ describe('native vLLM provider', () => {
 	it('lists the served models from /v1/models on the default origin', async () => {
 		const fetchMock = vi.fn(async () => new Response(MODELS_RESPONSE, { status: 200 }))
 		vi.stubGlobal('fetch', fetchMock)
-		expect(await listModels('vllm')).toEqual(['Qwen/Qwen3-8B-FP8'])
+		expect(await listModels('vllm')).toEqual({ models: ['Qwen/Qwen3-8B-FP8'], reachable: true })
 		expect(String(fetchMock.mock.calls[0][0])).toBe('http://127.0.0.1:8000/v1/models')
 	})
 
@@ -48,8 +48,9 @@ describe('native vLLM provider', () => {
 		expect(info.limits.topK).toBe(true)
 	})
 
-	it('an unreachable server degrades to the spec-table limits instead of throwing', async () => {
+	it('an unreachable server is REPORTED as unreachable — the UI shows a launch command, not an empty catalog', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new Error('ECONNREFUSED'))))
+		expect(await listModels('vllm')).toEqual({ models: [], reachable: false })
 		const info = await modelInfo('vllm', 'Qwen/Qwen3-8B-FP8')
 		expect(info.contextWindow).toBeUndefined() // honest: nothing was detected
 		expect(info.limits.contextMax).toBeGreaterThan(0) // sliders still bounded sanely
