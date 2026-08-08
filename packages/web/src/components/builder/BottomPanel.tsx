@@ -34,35 +34,27 @@ function IconBtn({ title, onClick, icon: Icon }: { title: string; onClick: () =>
 
 // The Terminal tab: a session sub-strip + all sessions mounted (only the active one visible).
 function TerminalSessions() {
-  const { terminals, activeTerminalId, activeId, bottomTab, bottomOpen, newTerminal, closeTerminal, setActiveTerminal, serverInfo } = useStore()
-  const noSandbox = serverInfo !== null && !serverInfo.sandbox
+  const { terminals, activeTerminalId, activeId, bottomTab, bottomOpen, newTerminal, closeTerminal, setActiveTerminal } = useStore()
 
   // Ensure there's always a session while the Terminal tab is open (a fresh one per project). The ref guard
-  // stops React StrictMode's double-invoked effect from spawning two before state settles. Skipped entirely
-  // without a sandbox — there is no shell to attach (the terminal execs into the Docker container).
+  // stops React StrictMode's double-invoked effect from spawning two before state settles.
+  //
+  // No longer gated on Docker (ADR-081 §4): host mode has a terminal too. It is a different thing — a
+  // line-oriented shell on this machine rather than a pty inside a container — and it says so itself when
+  // it opens, which is better than the dead end this used to render.
   const creating = useRef(false)
   useEffect(() => {
     // Only spawn a session once the panel is actually OPEN — the panel stays mounted (just hidden) when
     // closed, so gating on `bottomOpen` keeps the terminal (and thus the panel) HIDDEN by default instead of
     // auto-opening on project load. Opening the Terminal tab flips bottomOpen → this creates the session.
-    if (bottomOpen && bottomTab === 'terminal' && activeId && terminals.length === 0 && !creating.current && !noSandbox) {
+    if (bottomOpen && bottomTab === 'terminal' && activeId && terminals.length === 0 && !creating.current) {
       creating.current = true
       newTerminal()
     } else if (terminals.length > 0) {
       creating.current = false
     }
-  }, [bottomOpen, bottomTab, activeId, terminals.length, newTerminal, noSandbox])
+  }, [bottomOpen, bottomTab, activeId, terminals.length, newTerminal])
 
-  // No Docker ⇒ no terminal. Say it plainly instead of showing a dead, blank xterm.
-  if (noSandbox) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-1.5 bg-background text-center text-muted-foreground">
-        <SquareTerminal className="h-6 w-6 opacity-50" />
-        <p className="text-sm">The terminal needs Docker.</p>
-        <p className="text-xs opacity-70">Start Docker Desktop and restart the Cascade server to get an isolated shell per project.</p>
-      </div>
-    )
-  }
 
   return (
     <div className="flex h-full min-h-0 bg-background">
@@ -108,9 +100,8 @@ function TerminalSessions() {
 }
 
 export function BottomPanel() {
-  const { bottomTab, setBottomTab, toggleBottom, toggleBottomMax, bottomMaximized, problems, runtimeErrors, activeTerminalId, newTerminal, closeTerminal, serverInfo } = useStore()
+  const { bottomTab, setBottomTab, toggleBottom, toggleBottomMax, bottomMaximized, problems, runtimeErrors, activeTerminalId, newTerminal, closeTerminal } = useStore()
   const problemCount = problems.length + runtimeErrors.length
-  const noSandbox = serverInfo !== null && !serverInfo.sandbox
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-card">
@@ -134,7 +125,7 @@ export function BottomPanel() {
         ))}
 
         <div className="ml-auto flex items-center gap-0.5">
-          {bottomTab === 'terminal' && !noSandbox && (
+          {bottomTab === 'terminal' && (
             <>
               <IconBtn title="New terminal" icon={Plus} onClick={newTerminal} />
               <IconBtn title="Kill terminal" icon={Trash2} onClick={() => activeTerminalId && closeTerminal(activeTerminalId)} />

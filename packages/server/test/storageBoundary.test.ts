@@ -39,6 +39,10 @@ const PROJECT_FILES_OK = new Set([
   // runs the user's project — and the project's own files stay real files in every deployment. A hosted
   // deployment does not use this class at all; it injects a remote-container Sandbox instead.
   'hostSandbox.ts',
+  // The host TERMINAL (ADR-081 §4). It touches the filesystem only to validate a `cd` target — the user's
+  // own directories, in a shell they opened. Nothing here is app state, and a hosted deployment attaches a
+  // remote shell instead.
+  'hostTerminal.ts',
   'versionManager.ts',
   'checkProject.ts',
   'loadDotEnv.ts',

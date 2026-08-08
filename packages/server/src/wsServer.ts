@@ -42,6 +42,7 @@ import { PreviewProxy } from './previewProxy.js'
 import { runCheck } from './checkProject.js'
 import { VersionManager } from './versionManager.js'
 import { createTerminal, type TerminalHandle } from './terminalSession.js'
+import { createHostTerminal } from './hostTerminal.js'
 import { liveTurn } from './liveTurn.js'
 
 /** What a connection can receive: a core session message OR an app/builder command. */
@@ -793,27 +794,25 @@ export function handleConnection(
             break
           }
           const sandbox = manager.sandboxOf(activeId)
-          if (!(sandbox instanceof DockerSandbox)) {
-            // No Docker ⇒ no shell to attach. Tell the client so the tab shows "exited" instead of a blank
-            // xterm forever (the UI also disables New terminal when serverInfo.sandbox is false).
+          const projectDir = manager.dirOf(activeId)
+          if (!sandbox || !projectDir) {
+            // Nowhere to attach a shell. Tell the client so the tab shows "exited" instead of a blank xterm
+            // forever.
             send({ type: 'terminalExit', id: msg.id })
             break
           }
           terms.get(msg.id)?.kill() // replace if this id already had a shell
-          const containerId = await sandbox.getContainerId()
           const sid = msg.id
-          terms.set(
-            sid,
-            await createTerminal(
-              containerId,
-              { cols: msg.cols ?? 80, rows: msg.rows ?? 24 },
-              (data) => send({ type: 'terminalData', id: sid, data }),
-              () => {
-                send({ type: 'terminalExit', id: sid })
-                terms.delete(sid)
-              },
-            ),
-          )
+          const onData = (data: string) => send({ type: 'terminalData', id: sid, data })
+          const onExit = () => {
+            send({ type: 'terminalExit', id: sid })
+            terms.delete(sid)
+          }
+          // ADR-081 §4: both runtimes have a terminal now, and they are genuinely different things. Docker
+          // gets a real pty inside the container — the shell is confined exactly like the agent's Bash.
+          // Host mode has no pty to give (node-pty is native, and this project ships none), so it gets a
+          // line-oriented shell that runs on THIS machine, with the limits stated in its own banner.
+          terms.set(sid, sandbox instanceof DockerSandbox ? await createTerminal(await sandbox.getContainerId(), { cols: msg.cols ?? 80, rows: msg.rows ?? 24 }, onData, onExit) : createHostTerminal(projectDir, onData, onExit))
           break
         }
         case 'terminalInput':
@@ -1082,6 +1081,8 @@ export async function start(deps: ServerDeps = {}) {
   const wss = new WebSocketServer({ server: httpServer, verifyClient: verifyWsClient })
   wss.on('connection', (ws) =>
     handleConnection(ws, manager, preview, previewProxy, PREVIEW_PORT, versions, chatStore, {
+      // A terminal exists in BOTH runtimes now, so this no longer gates it — see `runtime` below for
+      // what actually differs. Kept as the isolation flag it always was.
       sandbox: runtimeMode === 'docker',
       model: MODEL,
       // Fresh per connection: the mode can have changed since boot, and a stale badge is a lie about
