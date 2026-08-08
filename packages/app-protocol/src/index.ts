@@ -14,6 +14,22 @@
  *  This is the public, host-path-free view (the `dir` never crosses the wire). */
 export type ProjectInfo = { id: string; name: string; createdAt: string }
 
+/** ADR-081 §4: where a project's commands execute. */
+export type RuntimeMode = 'host' | 'docker'
+
+/** What the UI needs to render the runtime setting HONESTLY — which is more than the chosen value.
+ *
+ *  `mode` is what is actually running; `requested` is what the user asked for. They differ when Docker was
+ *  selected but is not answering, and the app fell back rather than refusing to start. Showing only the
+ *  setting in that case would tell the user they have isolation when they do not. */
+export interface RuntimeInfo {
+  mode: RuntimeMode
+  requested: RuntimeMode
+  dockerAvailable: boolean
+  /** CASCADE_SANDBOX=off pins host mode; the UI disables the control rather than letting it lie. */
+  forcedHost?: boolean
+}
+
 /** A project scaffold the agent can start from (Phase 15). */
 export type TemplateInfo = { id: string; name: string; description: string }
 
@@ -151,7 +167,7 @@ export interface SessionInfo {
 }
 
 export type BuilderEvent =
-  | { type: 'serverInfo'; sandbox: boolean; model: string; provider?: string; providers?: { id: string; configured: boolean }[] } // greeting: Docker up, active provider/model, and the provider menu (ADR-067)
+  | { type: 'serverInfo'; sandbox: boolean; model: string; provider?: string; providers?: { id: string; configured: boolean }[]; runtime?: RuntimeInfo } // greeting: runtime, active provider/model, and the provider menu (ADR-067)
   | { type: 'mcpServers'; servers: McpServerInfo[] } // ADR-071: configured MCP servers + live connection status (the MCP panel)
   | { type: 'models'; provider: string; models: string[] } // ADR-067: models a provider offers (for the picker)
   | { type: 'modelInfo'; provider: string; model: string; capabilities: string[]; contextWindow?: number; limits?: ModelLimits } // ADR-067: one model's capabilities + context + slider limits (manager)
@@ -191,6 +207,7 @@ export type BuilderCommand =
   | { type: 'listModels'; provider: string; baseUrl?: string } // ADR-067: ask for a provider's model list (→ `models`)
   | { type: 'modelInfo'; provider: string; model: string; baseUrl?: string } // ADR-067: ask for one model's capabilities+context (→ `modelInfo`)
   | { type: 'setApiKey'; provider: string; key: string } // ADR-067: set a provider's API key for the running server (→ fresh serverInfo)
+  | { type: 'setRuntimeMode'; mode: RuntimeMode } // ADR-081 §4: switch where the agent's commands run (→ fresh serverInfo)
   | { type: 'addModel'; provider: string; model: string; contextWindow?: number; baseUrl?: string; apiKey?: string; api?: 'openai' | 'ollama' } // ADR-067/076/077: add a model; baseUrl+apiKey+api configure a custom endpoint (key stored server-side, never echoed; api picks the wire protocol)
   | { type: 'removeModel'; provider: string; model: string } // ADR-067: remove a model from the curated list
   | { type: 'setModelContext'; provider: string; model: string; contextWindow?: number } // ADR-067: set a model's context-window override

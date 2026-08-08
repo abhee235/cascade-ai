@@ -19,6 +19,9 @@ import type { BuilderCommand } from '@cascade/app-protocol'
 import { beginTurn, flushTracers, ProjectManager, setTraceSession, type SessionTracerFactory } from './projectManager.js'
 import { ensurePlanPersisted } from './planStage.js'
 import { DockerSandbox, dockerAvailable, sweepSandboxContainers } from './dockerSandbox.js'
+import { HostSandbox } from './hostSandbox.js'
+import { DEFAULT_RUNTIME_MODE, type RuntimeMode } from './projectRuntime.js'
+import type { RuntimeInfo } from '@cascade/app-protocol'
 import { ensureVisualEditConfig, listTemplates } from './templates.js'
 import { listModels, modelInfo, providerCatalog, setProviderKey } from './modelCaps.js'
 import { activeModel, addEnabledModel, enabledModelsForClient, initModelRegistry, modelContextFor, modelEndpointFor, modelParamsFor, removeEnabledModel, setActiveModel, setModelContext, setModelParams } from './modelRegistry.js'
@@ -137,7 +140,7 @@ export function handleConnection(
   previewPort?: number,
   versions?: VersionManager,
   chatStore?: ChatStore,
-  serverInfo?: { sandbox: boolean; model: string },
+  serverInfo?: { sandbox: boolean; model: string; runtime?: RuntimeInfo; setRuntimeMode?: (mode: RuntimeMode) => Promise<RuntimeInfo> },
   /** ADR-081: the deployment's span store, for the Observatory. A PORT (`@cascade/storage`), never the
    *  adapter — this file must not know whether it is reading SQLite or Postgres. Absent ⇒ the Observatory
    *  simply reports no traces, which is the correct answer for a deployment that stores none. */
@@ -206,10 +209,10 @@ export function handleConnection(
   // Start streaming the active project's dev-server log into the Console pane (`log` events). Replaces any
   // existing tail (e.g. when switching projects). No-op without Docker / a PreviewManager.
   const startTail = (id: string) => {
-    const sandbox = manager.sandboxOf(id)
-    if (!preview || !(sandbox instanceof DockerSandbox)) return
+    const runtime = manager.runtimeOf(id)
+    if (!preview || !runtime) return
     stopTail?.()
-    stopTail = preview.tail(id, sandbox, (line) => send({ type: 'log', line }))
+    stopTail = preview.tail(id, runtime, (line) => send({ type: 'log', line }))
   }
 
   // Auto-start the live preview for a project IF it's buildable (node_modules populated) and nothing is
@@ -220,13 +223,12 @@ export function handleConnection(
   // preview is already running/stopped (respects a manual Stop; HMR handles a rebuild that's already live).
   const maybeAutoStartPreview = async (projectId: string): Promise<void> => {
     if (!preview || preview.state(projectId)) return // nothing tracked yet ⇒ safe to auto-start
-    const sandbox = manager.sandboxOf(projectId)
-    if (!(sandbox instanceof DockerSandbox)) return
-    const has = await sandbox.exec('[ -n "$(ls -A node_modules 2>/dev/null)" ] && echo yes || echo no').catch(() => ({ output: '', exitCode: 1 }))
-    if (!has.output.includes('yes')) return
+    const runtime = manager.runtimeOf(projectId)
+    if (!runtime) return
+    if (!(await runtime.hasDependencies().catch(() => false))) return
     const dir = manager.dirOf(projectId)
     if (dir) ensureVisualEditConfig(dir) // M9: backfill the loc-stamp on older scaffolds
-    void preview.start(projectId, sandbox, (s) => {
+    void preview.start(projectId, runtime, (s) => {
       emitPreview(s)
       if (s.status === 'running') startTail(projectId)
     })
@@ -235,7 +237,7 @@ export function handleConnection(
   // Greet the new connection with capabilities + the project list + available templates so the UI can render
   // immediately (serverInfo drives the Terminal's Docker gate and the Settings page). ADR-067: model +
   // provider come from the manager (runtime-mutable), and the provider menu rides along for the picker.
-  if (serverInfo) send({ type: 'serverInfo', sandbox: serverInfo.sandbox, model: manager.currentModel, provider: manager.currentProvider, providers: providerCatalog() })
+  if (serverInfo) send({ type: 'serverInfo', sandbox: serverInfo.sandbox, model: manager.currentModel, provider: manager.currentProvider, providers: providerCatalog(), runtime: serverInfo.runtime })
   send({ type: 'projects', projects: manager.list(), activeId })
   sendTurnActivity() // a build may already be running from an earlier connection — say so up front, not on the next change
   send({ type: 'templates', templates: listTemplates() })
@@ -398,10 +400,28 @@ export function handleConnection(
           send({ type: 'modelInfo', provider: msg.provider, model: msg.model, capabilities: info.capabilities, contextWindow: info.contextWindow, limits: info.limits })
           break
         }
+        case 'setRuntimeMode': {
+          // ADR-081 §4. The switch is LIVE, not a restart prompt: applying it means dropping every cached
+          // sandbox, and those own real resources — a container kept alive by `tail -f`, or a detached dev
+          // server still holding the port the new runtime is about to reserve. invalidateSandboxes disposes
+          // both. Previews are stopped first so the UI does not keep showing a dead iframe as "running".
+          if (!serverInfo?.setRuntimeMode) break
+          for (const id of manager.list().map((p) => p.id)) preview?.stop(id)
+          stopTail?.()
+          stopTail = undefined
+          previewProxy?.setTarget(null)
+          await manager.invalidateSandboxes()
+          const runtime = await serverInfo.setRuntimeMode(msg.mode)
+          serverInfo.runtime = runtime
+          serverInfo.sandbox = runtime.mode === 'docker'
+          send({ type: 'preview', status: 'stopped' })
+          send({ type: 'serverInfo', sandbox: serverInfo.sandbox, model: manager.currentModel, provider: manager.currentProvider, providers: providerCatalog(), runtime })
+          break
+        }
         case 'setApiKey': {
           setProviderKey(msg.provider, msg.key)
           // re-announce providers (configured status may have flipped)
-          send({ type: 'serverInfo', sandbox: serverInfo?.sandbox ?? false, model: manager.currentModel, provider: manager.currentProvider, providers: providerCatalog() })
+          send({ type: 'serverInfo', sandbox: serverInfo?.sandbox ?? false, model: manager.currentModel, provider: manager.currentProvider, providers: providerCatalog(), runtime: serverInfo?.runtime })
           break
         }
         case 'addModel': {
@@ -487,7 +507,7 @@ export function handleConnection(
             active = manager.open(activeId)
             if (activeChatId) loadChat(activeChatId)
           }
-          send({ type: 'serverInfo', sandbox: serverInfo?.sandbox ?? false, model: manager.currentModel, provider: manager.currentProvider, providers: providerCatalog() })
+          send({ type: 'serverInfo', sandbox: serverInfo?.sandbox ?? false, model: manager.currentModel, provider: manager.currentProvider, providers: providerCatalog(), runtime: serverInfo?.runtime })
           break
         }
         case 'submit': {
@@ -549,13 +569,10 @@ export function handleConnection(
             // first `npm run build` would hit `tsc: not found`, and a weak model stalls asking to install
             // (measured: gpt-oss:20b). Install ONCE here, before the build, so the agent always inherits a
             // build-ready project. No-op after the first install (node_modules populated).
-            const buildSandbox = manager.sandboxOf(turnProjectId)
-            if (buildSandbox instanceof DockerSandbox) {
-              const dep = await buildSandbox.exec('[ -n "$(ls -A node_modules 2>/dev/null)" ] && echo yes || echo no').catch(() => ({ output: 'yes', exitCode: 0 }))
-              if (!dep.output.includes('yes')) {
-                relay({ type: 'status', text: 'Installing dependencies…' })
-                await buildSandbox.exec('npm install --no-audit --no-fund').catch(() => {})
-              }
+            const buildRuntime = manager.runtimeOf(turnProjectId)
+            if (buildRuntime && !(await buildRuntime.hasDependencies().catch(() => true))) {
+              relay({ type: 'status', text: 'Installing dependencies…' })
+              await buildRuntime.installDependencies().catch(() => false)
             }
             for await (const ev of s.submit(msg.text, msg.images)) relay(ev) // M11: images = attached data-URIs
           } finally {
@@ -629,25 +646,28 @@ export function handleConnection(
             send({ type: 'preview', status: 'stopped' })
             break
           }
-          const sandbox = manager.sandboxOf(activeId)
-          if (sandbox instanceof DockerSandbox) {
+          const runtime = manager.runtimeOf(activeId)
+          if (runtime) {
             const id = activeId
             const dir = manager.dirOf(id)
             if (dir) ensureVisualEditConfig(dir) // M9: backfill the loc-stamp on projects scaffolded before it
-            void preview.start(id, sandbox, (s) => {
+            void preview.start(id, runtime, (s) => {
               emitPreview(s)
               if (s.status === 'running') startTail(id) // begin streaming dev-server logs to the Console pane
             })
           } else {
-            // No Docker ⇒ no isolated dev server. (Running on the host is out of scope for v1.)
-            send({ type: 'preview', status: 'error' })
+            // A deployment that injected a bare Sandbox (no preview contract). ADR-081 §4: both the host
+            // and Docker runtimes satisfy it, so this is not the no-Docker case any more.
+            send({ type: 'preview', status: 'error', error: 'This deployment has no runtime that can host a dev server.' })
           }
           break
         }
         case 'check': { // M5.3: run a type-check in the sandbox and return structured problems
           if (!activeId) break
+          // Any runtime can type-check — runCheck only needs core's Sandbox, so this is no longer
+          // Docker-only. Host mode gets its problems panel.
           const sandbox = manager.sandboxOf(activeId)
-          if (!(sandbox instanceof DockerSandbox)) {
+          if (!sandbox) {
             send({ type: 'problems', problems: [], checking: false })
             break
           }
@@ -916,17 +936,56 @@ export interface ServerDeps {
 }
 
 export async function start(deps: ServerDeps = {}) {
-  // 13.3: isolate each project's command execution in its own Docker container when Docker is available.
-  // Opt out with CASCADE_SANDBOX=off. Without Docker we fall back to HOST exec (usable, but not isolated).
-  const sandboxEnabled = process.env.CASCADE_SANDBOX !== 'off'
-  const hasDocker = sandboxEnabled && (await dockerAvailable())
+  // ADR-081 §4: the runtime is a persisted CHOICE, not an inference from what happens to be installed.
+  //
+  // It used to be "Docker if Docker answers", which silently changed the isolation model when someone quit
+  // Docker Desktop, and made "why is this different today" unanswerable from the UI. `host` is the default
+  // because requiring Docker is install friction that kills desktop adoption; `docker` stays one setting
+  // away for anyone who wants real isolation.
+  //
+  // CASCADE_SANDBOX=off still forces host, so existing scripts and CI keep working.
+  const forcedHost = process.env.CASCADE_SANDBOX === 'off'
+  const preferred = forcedHost ? 'host' : ((await deps.config?.setting<RuntimeMode>('runtimeMode')) ?? DEFAULT_RUNTIME_MODE)
+  // Only ASK Docker when Docker was chosen — probing it in host mode costs a subprocess on every launch and
+  // tells us nothing we would act on.
+  const dockerReady = preferred === 'docker' && (await dockerAvailable())
+  let runtimeMode: RuntimeMode = dockerReady ? 'docker' : 'host'
+  let requestedMode: RuntimeMode = preferred
+  if (preferred === 'docker' && !dockerReady) {
+    // Fall back rather than fail: the user asked for isolation and Docker is not answering, but refusing to
+    // start would leave them with no app at all. Say so; the UI surfaces it beside the setting.
+    console.warn('Runtime is set to "docker" but Docker is not available — falling back to host mode.')
+  }
   // Sweep sandbox containers orphaned by a previous run (a `--rm` sandbox stays alive via `tail -f`, so a
   // hard-killed server leaves them behind). Safe: project dirs are bind-mounted; the next exec recreates one.
-  if (hasDocker) {
+  if (runtimeMode === 'docker') {
     const swept = await sweepSandboxContainers().catch(() => 0)
     if (swept) console.log(`Swept ${swept} orphaned sandbox container(s) from a previous run.`)
   }
-  const sandboxFor = hasDocker ? (dir: string) => new DockerSandbox(dir) : undefined
+  // ALWAYS a runtime now. Host mode previously injected nothing, which is why it had no live preview, no
+  // Console pane and no problems panel — the whole product minus the parts that need somewhere to run.
+  // Reads the CURRENT mode on every call, so a live switch takes effect on the next open() without
+  // rebuilding the manager.
+  const sandboxFor = (dir: string) => (runtimeMode === 'docker' ? new DockerSandbox(dir) : new HostSandbox(dir))
+  // Retained under its old name for the many `hasDocker` reads below; it means "the isolated runtime".
+  const hasDocker = runtimeMode === 'docker'
+
+  /** Apply a runtime change and persist it. The CALLER has already torn down the sandboxes that were
+   *  built for the old runtime — this only decides what the next one will be, and records the choice so
+   *  the next launch honours it. Re-probes Docker, because its availability is exactly what changes
+   *  between the moment the app started and the moment someone asks for it. */
+  const applyRuntimeMode = async (mode: RuntimeMode): Promise<RuntimeInfo> => {
+    requestedMode = forcedHost ? 'host' : mode
+    const ready = requestedMode === 'docker' && (await dockerAvailable())
+    runtimeMode = ready ? 'docker' : 'host'
+    // Sweep in BOTH directions. Entering Docker clears containers orphaned by an earlier run; LEAVING it
+    // matters just as much — a container from before this process started was never cached here, so
+    // invalidateSandboxes cannot dispose it, and opting out of Docker would silently leave it running
+    // (measured: a container still publishing its port after the switch to host).
+    await sweepSandboxContainers().catch(() => 0)
+    await deps.config?.setSetting('runtimeMode', requestedMode)
+    return { mode: runtimeMode, requested: requestedMode, dockerAvailable: ready || (await dockerAvailable()), forcedHost }
+  }
 
   // ADR-081: both registries now read through the injected ConfigStore. AWAITED here — every getter they
   // expose is synchronous (they are called from request handlers and session factories), so the one load
@@ -968,7 +1027,16 @@ export async function start(deps: ServerDeps = {}) {
   // WS upgrade's Origin + token (see handleHttp / verifyWsClient).
   const httpServer = createServer(handleHttp)
   const wss = new WebSocketServer({ server: httpServer, verifyClient: verifyWsClient })
-  wss.on('connection', (ws) => handleConnection(ws, manager, preview, previewProxy, PREVIEW_PORT, versions, chatStore, { sandbox: hasDocker, model: MODEL }, deps.traces))
+  wss.on('connection', (ws) =>
+    handleConnection(ws, manager, preview, previewProxy, PREVIEW_PORT, versions, chatStore, {
+      sandbox: runtimeMode === 'docker',
+      model: MODEL,
+      // Fresh per connection: the mode can have changed since boot, and a stale badge is a lie about
+      // whether the user's commands are isolated.
+      runtime: { mode: runtimeMode, requested: requestedMode, dockerAvailable: dockerReady, forcedHost },
+      setRuntimeMode: applyRuntimeMode,
+    }, deps.traces),
+  )
   httpServer.listen(PORT, HOST)
   // Graceful exit (Ctrl-C / SIGTERM): dispose sessions + remove this run's sandbox containers. (A hard
   // SIGKILL skips this — the startup sweep above is the backstop.)
@@ -1007,8 +1075,9 @@ export async function start(deps: ServerDeps = {}) {
     // the first-run seed. A boot line that names a model you aren't running is worse than none.
     `Cascade server listening on ws://${HOST}:${PORT}  (provider: ${manager.currentProvider}, model: ${manager.currentModel}${restored ? ' [restored selection]' : ''}, projects: ${PROJECTS_ROOT}, sandbox: ${hasDocker ? 'docker' : 'host'})`,
   )
-  if (sandboxEnabled && !hasDocker)
-    console.warn('⚠️  Docker not available — agent commands run on the HOST (no isolation). Install/start Docker Desktop for per-project sandboxing.')
+  // Host mode is now a CHOICE, so it is not a warning — it is the default, and the app is fully featured in
+  // it (preview, Console, problems all work). State the trade once, plainly, rather than nagging.
+  if (runtimeMode === 'host') console.log('Runtime: host — agent commands run directly on this machine (no isolation). Switch to Docker in Settings for per-project sandboxing.')
 }
 
 // No self-start: `main.ts` is the entry point (ADR-081 §6). Starting here too would give you a server

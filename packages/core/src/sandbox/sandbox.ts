@@ -28,6 +28,16 @@ export interface Sandbox {
    *  treat this (and a couple of common aliases) as a synonym for the project root, so a model that addresses
    *  files by the in-sandbox path lands in the project instead of escaping to the host. — ADR-033. */
   readonly root: string
+  /**
+   * Which shell syntax `exec` actually accepts. Defaults to 'posix' when absent, because that is what a
+   * container runs regardless of the host.
+   *
+   * Load-bearing, not informational: the loop advertises shell guidance in the Bash tool description from
+   * this, and a mismatch is expensive. A sandbox that runs commands through the HOST shell on Windows
+   * would otherwise be told to use POSIX syntax and open with `mkdir -p`, which cmd.exe rejects — the
+   * exact failure the description was written to prevent (measured, Orbit build 2026-07-27).
+   */
+  readonly shell?: 'posix' | 'win32'
   /** Run a shell command inside the isolated environment, streaming output via opts.onData. */
   exec(command: string, opts?: ExecOptions): Promise<ExecResult>
   /** Tear down the environment (e.g. stop/remove the container). Safe to call more than once. */

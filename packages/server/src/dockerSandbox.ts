@@ -5,7 +5,12 @@
 // the mounted project dir. — see PLAN Step 2 (rule #3).
 
 import { spawn } from 'node:child_process'
-import type { ExecOptions, ExecResult, Sandbox } from '@cascade/core'
+import type { ExecOptions, ExecResult } from '@cascade/core'
+import { type ProjectRuntime, stripAnsi } from './projectRuntime.js'
+
+/** Where the detached dev server's output is redirected INSIDE the container, so the Console pane can
+ *  follow it — a detached `docker exec` discards stdout otherwise. */
+const DEV_LOG = '/tmp/cascade-dev.log'
 
 const DEFAULT_IMAGE = process.env.CASCADE_DOCKER_IMAGE ?? 'node:20-alpine'
 
@@ -81,7 +86,11 @@ export async function sweepSandboxContainers(): Promise<number> {
   return ids.length
 }
 
-export class DockerSandbox implements Sandbox {
+export class DockerSandbox implements ProjectRuntime {
+  readonly kind = 'docker' as const
+  /** A container runs POSIX sh whatever the host is. Stated explicitly rather than left to the default,
+   *  because the host runtime's answer differs and the two sit side by side. */
+  readonly shell = 'posix' as const
   /** In-sandbox mount point of the project (the `-w` / `-v …:/workspace` below). The host file tools treat
    *  this as a synonym for the project root so the model's in-container paths resolve into the project. */
   readonly root = '/workspace'
@@ -162,6 +171,61 @@ export class DockerSandbox implements Sandbox {
     await this.ensure()
     if (!this.hostPort) throw new Error('No published preview port')
     return this.hostPort
+  }
+
+  // ── ProjectRuntime: the preview's intents, in the shell this runtime already has ────────────────────
+
+  /** POPULATED, not merely present: node_modules is a named volume that exists-but-empty before the first
+   *  install, so a bare `[ -d node_modules ]` would skip installing forever. */
+  async hasDependencies(): Promise<boolean> {
+    const has = await this.exec('[ -n "$(ls -A node_modules 2>/dev/null)" ] && echo yes || echo no')
+    return has.output.includes('yes')
+  }
+
+  async installDependencies(onData?: (chunk: string) => void): Promise<boolean> {
+    const res = await this.exec('npm install --no-audit --no-fund', { onData })
+    return res.exitCode === 0
+  }
+
+  /** The published host port — Docker chose it when the container started, so this is race-free. */
+  async previewPort(): Promise<number> {
+    return this.getHostPort()
+  }
+
+  async startDev(env: Record<string, string>): Promise<void> {
+    await this.stopDev()
+    const prefix = Object.entries(env)
+      .map(([k, v]) => k + '=' + v)
+      .join(' ')
+    const cmd = (prefix ? prefix + ' ' : '') + 'npm run dev > ' + DEV_LOG + ' 2>&1'
+    await this.execDetached(cmd)
+  }
+
+  /** ADR-066: reap dev/API processes a PRIOR submit's Bash left running. Measured (luna full-stack run):
+   *  orphaned vite and a stale API server accumulated across submits, causing port conflicts and smoke
+   *  tests that hit the wrong process. Matching by NAME is acceptable here and only here — the container
+   *  holds nothing but this project, so there is no bystander process to hit. The host runtime cannot make
+   *  that assumption and kills by pid instead. */
+  async stopDev(): Promise<void> {
+    await this.exec('pkill -f "vite" ; pkill -f "tsx.*server" ; true').catch(() => {})
+  }
+
+  async devLog(lines: number): Promise<string> {
+    const { output } = await this.exec('tail -' + lines + ' ' + DEV_LOG + ' 2>/dev/null || true')
+    return output
+  }
+
+  followDevLog(onLine: (line: string) => void, signal: AbortSignal): void {
+    let buf = ''
+    void this.exec('tail -n 300 -f ' + DEV_LOG + ' 2>/dev/null', {
+      signal,
+      onData: (chunk) => {
+        buf += chunk
+        const lines = buf.split('\n')
+        buf = lines.pop() ?? '' // keep the partial last line for the next chunk
+        for (const l of lines) onLine(stripAnsi(l))
+      },
+    }).catch(() => {}) // aborted, or the container went away — both fine
   }
 
   /** The running container's id (ensures it's up). Used by the integrated terminal (M7) to exec a shell. */

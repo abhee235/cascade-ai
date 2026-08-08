@@ -171,9 +171,11 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   // ADR-037: one window tier for the whole loop — sizes the system prompt AND the tool descriptions. Explicit
   // deps.tier (subagents inherit the parent's) → the compaction plan's tier → 'full'.
   const tier = deps.tier ?? deps.compact?.plan.tier ?? 'full'
-  // Where COMMANDS execute — a sandbox is always POSIX sh; the host path is whatever this process runs on.
-  // Bash tailors its shell-syntax guidance to this (measured: `mkdir -p` failed on cmd.exe turn 1).
-  const execPlatform: 'win32' | 'posix' = deps.sandbox ? 'posix' : process.platform === 'win32' ? 'win32' : 'posix'
+  // Where COMMANDS execute. Bash tailors its shell-syntax guidance to this (measured: `mkdir -p` failed on
+  // cmd.exe turn 1). A sandbox DECLARES its shell and defaults to POSIX — true for a container whatever the
+  // host is, but NOT for a host-process sandbox on Windows, which runs cmd.exe and must say so.
+  const hostPlatform: 'win32' | 'posix' = process.platform === 'win32' ? 'win32' : 'posix'
+  const execPlatform: 'win32' | 'posix' = deps.sandbox ? (deps.sandbox.shell ?? 'posix') : hostPlatform
   // ADR-052: window-derived Read cap — one bite must never exceed the plate. Budget: a single read may span
   // ~25% of the effective window; at ~4 chars/token that is numerically effectiveWindow in CHARS. 8k window →
   // ~6k chars (~1.5k tok); 32k → ~24k chars; big windows hit the 50k ceiling → unchanged (no-overfitting rule).

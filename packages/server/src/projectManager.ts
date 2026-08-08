@@ -19,6 +19,7 @@ import { createBrowserTool } from './browserTool.js'
 import { createPackTool } from './packTool.js'
 import { createImageSearchTool } from './imageSearchTool.js'
 import { hasVision } from './modelCaps.js'
+import type { ProjectRuntime } from './projectRuntime.js'
 
 /** Initialize a git repo in `dir` with one commit — the baseline for checkpoints (Phase 18). Best-effort. */
 function gitInit(dir: string): void {
@@ -414,6 +415,24 @@ export class ProjectManager {
     }
   }
 
+  /**
+   * ADR-081 §4: drop every cached SANDBOX (and the sessions holding them) so the next open() rebuilds
+   * against the current runtime mode.
+   *
+   * Disposal is not optional here and it is not the same as invalidateSessions: a Docker sandbox owns a
+   * container and a host sandbox owns a detached dev server. Dropping the reference without disposing
+   * leaks both — the container keeps running (it is kept alive by `tail -f`, so nothing reaps it) and the
+   * dev server keeps holding the port the new runtime is about to ask for.
+   */
+  async invalidateSandboxes(): Promise<void> {
+    for (const p of this.projects.values()) {
+      await p.session?.dispose().catch(() => {})
+      p.session = undefined
+      await p.sandbox?.dispose().catch(() => {})
+      p.sandbox = undefined
+    }
+  }
+
   /** Live MCP connection statuses. Prefer the active project's session; else ANY open session — they all
    *  connect the SAME global config, so any one's status is representative. This lets the standalone
    *  Connectors page show real status even though it isn't scoped to a project. [] if nothing is open. */
@@ -430,6 +449,17 @@ export class ProjectManager {
   /** The project's sandbox (created on open) — SERVER-INTERNAL. For live preview (the dev server runs in it). */
   sandboxOf(id: string): Sandbox | undefined {
     return this.projects.get(id)?.sandbox
+  }
+
+  /** The project's sandbox IF it also satisfies the preview contract (ADR-081 §4).
+   *
+   *  A structural narrowing rather than a cast: core's `Sandbox` is deliberately minimal, and a
+   *  deployment is free to inject one that only runs commands. Such a deployment gets no live preview,
+   *  which is the correct answer — better than a cast that pretends the methods are there and throws
+   *  when the user presses Run. */
+  runtimeOf(id: string): ProjectRuntime | undefined {
+    const sandbox = this.projects.get(id)?.sandbox
+    return sandbox && 'kind' in sandbox ? (sandbox as ProjectRuntime) : undefined
   }
 
   /** Public, host-path-free snapshot for the sidebar. */

@@ -35,6 +35,10 @@ const PROJECT_FILES_OK = new Set([
   'packTool.ts',
   'previewManager.ts',
   'dockerSandbox.ts',
+  // The host RUNTIME (ADR-081 §4). It touches the filesystem for the same reason dockerSandbox does — it
+  // runs the user's project — and the project's own files stay real files in every deployment. A hosted
+  // deployment does not use this class at all; it injects a remote-container Sandbox instead.
+  'hostSandbox.ts',
   'versionManager.ts',
   'checkProject.ts',
   'loadDotEnv.ts',
