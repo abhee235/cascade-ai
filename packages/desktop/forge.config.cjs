@@ -21,7 +21,7 @@ const DIST = join(__dirname, 'dist')
  *  run rarely and under pressure; a missing bundle discovered by a user at launch is far more expensive
  *  than a failed build here. */
 function assertBuilt() {
-  for (const required of ['server.mjs', 'main.cjs', join('web', 'index.html'), join('resources', 'skills')]) {
+  for (const required of ['server.mjs', 'main.cjs', join('web', 'index.html'), join('resources', 'skills'), join('node_modules', 'playwright-core')]) {
     if (!existsSync(join(DIST, required))) {
       throw new Error(`packages/desktop/dist/${required} is missing — run "npm run build -w @cascade/desktop" before packaging.`)
     }
@@ -33,8 +33,28 @@ module.exports = {
     name: 'Cascade',
     executableName: process.platform === 'win32' ? 'Cascade' : 'cascade',
     asar: true,
+    /**
+     * What NOT to put inside the asar.
+     *
+     * By default the packager copies the whole package directory in, which here means the browser and the
+     * built web bundle land TWICE — once inside the archive and once beside it as extraResource. Measured:
+     * a 596MB app.asar and a 1.3GB app, roughly double what it should be.
+     *
+     * Only `dist/main.cjs`, `package.json` and `node_modules` belong in the archive; everything the server
+     * reads at runtime must stay outside it, because an asar is a virtual filesystem.
+     */
+    ignore: [
+      /^\/browsers($|\/)/, // shipped via extraResource
+      /^\/out($|\/)/, // previous packaging output
+      /^\/src($|\/)/, // TypeScript sources; only the bundle ships
+      /^\/build\.mts$/,
+      /^\/forge\.config\.cjs$/,
+      /^\/tsconfig\.json$/,
+      /^\/dist\/(web|browsers|resources|node_modules)($|\/)/, // all extraResource
+      /^\/dist\/server\.mjs/, // extraResource (and its .map)
+    ],
     // Copied verbatim into the app's `resources/` directory, beside (not inside) the asar.
-    extraResource: [join(DIST, 'server.mjs'), join(DIST, 'server.mjs.map'), join(DIST, 'web'), join(DIST, 'resources')],
+    extraResource: [join(DIST, 'server.mjs'), join(DIST, 'server.mjs.map'), join(DIST, 'web'), join(DIST, 'resources'), join(DIST, 'node_modules'), ...(existsSync(join(DIST, 'browsers')) ? [join(DIST, 'browsers')] : [])],
     appBundleId: 'ai.cascade.desktop',
     appCategoryType: 'public.app-category.developer-tools',
     // WINDOWS SIGNING. Unsigned builds still work — they just greet the user with SmartScreen — so this is

@@ -77,6 +77,37 @@ describe('packaging invariants', () => {
 		expect(build).toMatch(/playwright-core/)
 	})
 
+	it('ships the externals as a real node_modules tree', () => {
+		// playwright-core and typescript are excluded from the bundle deliberately, so they must exist on
+		// disk. A monorepo HOISTS them to the repo root, and the packager copies only this package's own
+		// directory — so without this the app starts fine and then throws "Cannot find package" the first
+		// time the Browser tool or the LSP is used. Measured: a 68KB app.asar containing neither.
+		const build = read(join(DESKTOP, 'build.mts'))
+		expect(build).toMatch(/node_modules/)
+		expect(read(join(DESKTOP, 'forge.config.cjs'))).toMatch(/join\(DIST, 'node_modules'\)/)
+	})
+
+	it('excludes extraResource directories from the asar, so nothing ships twice', () => {
+		// The packager copies the whole package directory in by default, which put the browser and the web
+		// bundle inside the archive AND beside it: a 596MB app.asar and a 1.3GB app, about double.
+		const forge = read(join(DESKTOP, 'forge.config.cjs'))
+		expect(forge).toMatch(/ignore:/)
+		for (const dir of ['browsers', 'web']) expect(forge, `asar must ignore ${dir}`).toMatch(new RegExp(dir))
+	})
+
+	it('prefers the bundled browser but still falls back to a system one', () => {
+		// The bundled Chromium is pinned to this playwright-core — a mismatched pair fails with the unhelpful
+		// "Executable doesn't exist". A source checkout ships no browser at all, so the Edge/Chrome fallback
+		// must survive; and a build made with CASCADE_SKIP_BROWSER relies on it entirely.
+		const src = read(join(SERVER_SRC, 'browserTool.ts'))
+		expect(src).toMatch(/PLAYWRIGHT_BROWSERS_PATH/)
+		expect(src).toMatch(/msedge/)
+		expect(src).toMatch(/chrome/)
+		// Only set when the browser was actually shipped: pointing Playwright at a missing directory would
+		// turn a working fallback into a failure.
+		expect(read(join(DESKTOP, 'src', 'main.ts'))).toMatch(/existsSync\(BROWSERS_DIR\)/)
+	})
+
 	it('packages the app so the database lives OUTSIDE the asar', () => {
 		// node:sqlite opens a real file; an asar is a virtual filesystem only Node's patched fs understands.
 		// State also must not sit in the install directory, which an update replaces wholesale.

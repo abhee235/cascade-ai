@@ -28,6 +28,7 @@ import { updateElectronApp } from 'update-electron-app'
 /** Packaged: assets sit beside the app in `resources/`. Dev: they are in `dist/` next to this file. */
 const RESOURCES = app.isPackaged ? join(process.resourcesPath, 'resources') : join(__dirname, 'resources')
 const WEB_DIR = app.isPackaged ? join(process.resourcesPath, 'web') : join(__dirname, 'web')
+const BROWSERS_DIR = app.isPackaged ? join(process.resourcesPath, 'browsers') : join(__dirname, 'browsers')
 
 /** The server reads these at import time, so they must be set BEFORE it is loaded. */
 process.env.CASCADE_APP_DATA ||= app.getPath('userData')
@@ -37,6 +38,9 @@ process.env.CASCADE_RESOURCES ||= RESOURCES
 process.env.CASCADE_PROJECTS_ROOT ||= join(app.getPath('userData'), 'projects')
 // Makes the server serve the built UI. Unset in dev, where Vite does it.
 process.env.CASCADE_WEB_ROOT ||= WEB_DIR
+// The bundled headless Chromium for the Browser tool. Only set when it was actually shipped — pointing
+// Playwright at a directory that does not exist turns a working system-browser fallback into a failure.
+if (existsSync(BROWSERS_DIR)) process.env.PLAYWRIGHT_BROWSERS_PATH ||= BROWSERS_DIR
 
 const SERVER_PORT = Number(process.env.CASCADE_PORT ?? 4319)
 

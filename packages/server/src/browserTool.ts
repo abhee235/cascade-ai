@@ -85,16 +85,32 @@ const AUDIT_EXPR = `(async () => {
 async function launchPage(): Promise<{ page: PageLike; close: () => Promise<void> }> {
 	const { chromium } = await import('playwright-core')
 	let browser: import('playwright-core').Browser | undefined
-	// System browsers, best-first: Edge ships with Windows; Chrome is the common fallback.
-	for (const channel of ['msedge', 'chrome']) {
+
+	// 1. The SHIPPED browser, when there is one (ADR-081 §7 — the desktop bundles a headless Chromium and
+	//    points PLAYWRIGHT_BROWSERS_PATH at it). Preferred because its revision is pinned to this exact
+	//    playwright-core: a mismatched pair fails with "Executable doesn't exist", and a browser the user
+	//    happens to have is a version we have never tested against.
+	if (process.env.PLAYWRIGHT_BROWSERS_PATH) {
 		try {
-			browser = await chromium.launch({ channel, headless: true })
-			break
+			browser = await chromium.launch({ headless: true })
 		} catch {
-			/* channel not installed — try the next */
+			/* not shipped in this build, or the revision is wrong — fall through to the system browsers */
 		}
 	}
-	if (!browser) throw new Error('No system browser found (tried Edge, Chrome). Install one, or skip browser checks.')
+
+	// 2. System browsers, best-first: Edge ships with Windows; Chrome is the common fallback. This is what
+	//    a `npm run dev` checkout uses, and it keeps the source install free of a 270MB download.
+	if (!browser) {
+		for (const channel of ['msedge', 'chrome']) {
+			try {
+				browser = await chromium.launch({ channel, headless: true })
+				break
+			} catch {
+				/* channel not installed — try the next */
+			}
+		}
+	}
+	if (!browser) throw new Error('No browser available (tried the bundled Chromium, then Edge and Chrome). Install Edge or Chrome, or skip browser checks.')
 	const raw = await browser.newPage({ viewport: { width: 1280, height: 800 } })
 	const errors: string[] = []
 	raw.on('console', (m) => {

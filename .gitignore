@@ -37,3 +37,4 @@ logs/
 # Desktop build + packaging output (ADR-081 §7)
 packages/desktop/dist/
 packages/desktop/out/
+packages/desktop/browsers/
