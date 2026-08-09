@@ -133,3 +133,26 @@ describe('wire parity — OpenAI Responses', () => {
 		expect(body.max_output_tokens).toBe(DEFAULT_MAX_OUTPUT_TOKENS)
 	})
 })
+
+describe('output-cap clamping — strict servers reject input+cap > window', () => {
+	// Measured on vLLM: a 24,577-token prompt + the fixed 16,384 cap totalled one token over a 40,960
+	// window → HTTP 400 on every retry, in the gap where the prompt is too big for the cap but too small
+	// to trigger compaction. The clamp shrinks the ASK, never the prompt.
+	const big = 'x'.repeat(33_000) // ≈10k tokens by the deliberately-conservative 3.3 chars/token estimate
+
+	it('shrinks max_tokens to the room the window has left', async () => {
+		const { body } = await sent(new OpenAIChatProvider({ id: 'vast', baseUrl: 'http://x' }), { messages: [{ role: 'user', content: big }], model: 'm', contextWindow: 12_000, maxOutputTokens: 16_384 }, SSE_EOS)
+		expect(body.max_tokens).toBeGreaterThanOrEqual(1024)
+		expect(body.max_tokens).toBeLessThan(2_000) // ~12000 − ~10800 estimated input
+	})
+
+	it('floors at 1024 when even that barely fits — a 50-token budget helps nobody', async () => {
+		const { body } = await sent(new OpenAIChatProvider({ id: 'vast', baseUrl: 'http://x' }), { messages: [{ role: 'user', content: big }], model: 'm', contextWindow: 10_000, maxOutputTokens: 16_384 }, SSE_EOS)
+		expect(body.max_tokens).toBe(1024)
+	})
+
+	it('leaves the cap alone when the window has plenty of room', async () => {
+		const { body } = await sent(new OpenAIChatProvider({ id: 'vast', baseUrl: 'http://x' }), { messages: [{ role: 'user', content: 'hi' }], model: 'm', contextWindow: 131_000, maxOutputTokens: 2_048 }, SSE_EOS)
+		expect(body.max_tokens).toBe(2_048)
+	})
+})

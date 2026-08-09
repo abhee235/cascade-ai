@@ -178,7 +178,22 @@ export class OpenAIChatProvider implements ModelProvider {
       // configured without maxOutputTokens — turns came back `finish_reason:"length"` after as few as 38 output
       // tokens, so the loop's max-tokens gate fired 6× and the build stalled mid-answer with empty responses.
       // An explicit generous default makes truncation mean what it says instead of tracking a backend quirk.
-      const cap = req.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS
+      let cap = req.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS
+      // CLAMP to the room the window actually has. Strict servers (vLLM foremost) reject any request where
+      // input + max_tokens exceeds max_model_len — measured killing a turn dead: a 24,577-token prompt plus
+      // our fixed 16,384 cap totalled 40,961 against a 40,960 window, HTTP 400, and every retry identical
+      // (the failure sat in the gap where the prompt is too big for the cap but too small to trigger
+      // compaction). Ollama never rejects, which is why a fixed cap survived until a strict server met it.
+      //
+      // The estimate divides by 3.3 chars/token rather than the usual 4 and adds a fixed guard — BOTH
+      // biases deliberately overestimate the input so the clamp errs toward asking for less output, never
+      // toward another 400. The floor keeps degenerate room from producing a useless 50-token budget; if
+      // even the floor does not fit, the request was doomed regardless and compaction is the real fix.
+      if (req.contextWindow) {
+        const estInputTokens = Math.ceil(JSON.stringify(body.messages).length / 3.3) + 800
+        const room = req.contextWindow - estInputTokens
+        if (room < cap) cap = Math.max(1024, room)
+      }
       if (this.cfg.id === 'openai') body.max_completion_tokens = cap
       else body.max_tokens = cap
     }

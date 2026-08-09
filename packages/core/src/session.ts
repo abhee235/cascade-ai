@@ -426,7 +426,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
           e?.name === 'AbortError'
             ? '⏹ Cancelled.'
             : e?.name === 'RecoveryError'
-              ? `⚠️ The model call kept failing (${detail}). Is Ollama running and the model "${opts.model}" loaded? You can just try again.`
+              ? `⚠️ The model call kept failing (${detail}). Is the ${opts.provider instanceof OllamaProvider ? 'Ollama' : 'model'} server running and the model "${opts.model}" available? You can just try again.`
               : `⚠️ ${detail}`
         tracer.event({ t: 'error', message: msg })
         yield { type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: msg }] } }
