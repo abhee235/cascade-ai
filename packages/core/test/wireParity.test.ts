@@ -172,7 +172,7 @@ describe('strict-server 400 self-heal — retry once with the server’s own num
 		}
 		expect(fetchMock).toHaveBeenCalledTimes(2)
 		const retryBody = JSON.parse(String((fetchMock.mock.calls[1] as any)[1].body))
-		expect(retryBody.max_tokens).toBe(40_960 - 24_577 - 64) // the server said what fits; ask for exactly that
+		expect(retryBody.max_tokens).toBe(40_960 - 24_577 - 768) // server numbers minus a margin that dwarfs the 'at least' slack
 	})
 
 	it('a 400 that is NOT the length rejection still throws immediately — no blind retries', async () => {
@@ -185,3 +185,25 @@ describe('strict-server 400 self-heal — retry once with the server’s own num
 		}).rejects.toThrow(/400/)
 	})
 })
+
+	it('heals TWICE when the bound was loose — the measured one-token loss', async () => {
+		// Real sequence from a live run: first 400 reports "at least 24577", the old retry asked for
+		// 40960−24577−64 = 16319, and vLLM rejected AGAIN reporting "at least 24642" — the bound had been
+		// 65+ tokens loose. The second round parses the fresher numbers with a doubled margin.
+		const R400 = (input: number) => JSON.stringify({ error: { message: `This model's maximum context length is 40960 tokens. However, you requested 16384 output tokens and your prompt contains at least ${input} input tokens, for a total of at least 40961 tokens.` } })
+		let call = 0
+		const fetchMock = vi.fn(async () => {
+			call++
+			if (call === 1) return new Response(R400(24_577), { status: 400 })
+			if (call === 2) return new Response(R400(24_642), { status: 400 })
+			return new Response(SSE_EOS, { status: 200 })
+		})
+		vi.stubGlobal('fetch', fetchMock)
+		const provider = new OpenAIChatProvider({ id: 'vllm', baseUrl: 'http://x' })
+		for await (const _ of provider.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm' })) {
+			/* drain */
+		}
+		expect(fetchMock).toHaveBeenCalledTimes(3)
+		const finalBody = JSON.parse(String((fetchMock.mock.calls[2] as any)[1].body))
+		expect(finalBody.max_tokens).toBe(40_960 - 24_642 - 768 * 2) // fresher bound, doubled margin
+	})

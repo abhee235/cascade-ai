@@ -262,16 +262,28 @@ export class OpenAIChatProvider implements ModelProvider {
 
   async *stream(req: CompletionRequest, signal?: AbortSignal): AsyncIterable<StreamEvent> {
     let res = await this.postChat(req, true, signal)
-    if (!res.ok && res.status === 400) {
-      // The strict-server length rejection carries EXACT numbers — vLLM: "maximum context length is 40960
-      // tokens … you requested 16384 output tokens and your prompt contains at least 24577 input tokens".
-      // Estimation upstream can only approximate the tokenizer; this cannot. Retry ONCE with the cap the
-      // server itself said would fit. Deterministic: same failure twice means something else is wrong.
+    // The strict-server length rejection carries the server's own numbers — vLLM: "maximum context length
+    // is 40960 tokens … your prompt contains AT LEAST 24577 input tokens". Two hard-won details:
+    //
+    //  · "at least" is a LOWER BOUND. The first version subtracted it with a 64-token margin and lost by
+    //    one token — the true prompt was 65+ tokens past the report. The margin is now max(768, 3% of the
+    //    reported input), sized to dwarf any observed slack.
+    //  · This retry succeeding is what breaks a genuine DEADLOCK: compaction occupancy calibrates its wire
+    //    overhead from each response's real usage, a restart resets that calibration, and an uncalibrated
+    //    estimate sits below the trigger — so nothing compacts, and only a successful call can recalibrate.
+    //    One landed retry restores usage flow; the next turn then compacts properly.
+    //
+    // Two rounds, margin doubled the second time (the fresher 400 carries a fresher bound). A third
+    // identical failure means something other than length is wrong — throw honestly.
+    for (let heal = 0; !res.ok && res.status === 400 && heal < 2; heal++) {
       const b = await res.text().catch(() => '')
       const m = /maximum context length is (\d+) tokens[\s\S]{0,200}?at least (\d+) input tokens/.exec(b)
-      const room = m ? Number(m[1]) - Number(m[2]) - 64 : 0
-      if (m && room >= 256) res = await this.postChat({ ...req, maxOutputTokens: room, contextWindow: undefined }, true, signal)
-      else throw new Error(`${this.id} HTTP 400: ${b.slice(0, 300) || res.statusText}`)
+      if (!m) throw new Error(`${this.id} HTTP 400: ${b.slice(0, 300) || res.statusText}`)
+      const reportedInput = Number(m[2])
+      const margin = Math.max(768, Math.ceil(reportedInput * 0.03)) * (heal + 1)
+      const room = Number(m[1]) - reportedInput - margin
+      if (room < 256) throw new Error(`${this.id} HTTP 400: ${b.slice(0, 300)}`)
+      res = await this.postChat({ ...req, maxOutputTokens: room, contextWindow: undefined }, true, signal)
     }
     if (!res.ok || !res.body) {
       const b = await res.text().catch(() => '')
