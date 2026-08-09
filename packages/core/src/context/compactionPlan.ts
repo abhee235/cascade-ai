@@ -163,9 +163,16 @@ export function planCompaction(input: PlanInput): CompactionPlan {
   const hard = Math.floor(Math.min(window, Math.max(effectiveWindow - HARD_BUFFER, auto + HARD_BUFFER)))
 
   const keepRecentTokens = Math.floor(effectiveWindow * keepRecentRatio)
-  // ADR-078 deep target: post-compaction usage ≤ (1 − FREE_TARGET)·window, floored so it never demands less
-  // than the verbatim recent region + a summary's worth of room (tiny windows: the floor wins, by design).
-  const deepTarget = Math.max(keepRecentTokens + Math.min(2_000, Math.floor(window / 8)), Math.floor(window * (1 - CONSTRAINED_FREE_TARGET)))
+  // ADR-078 deep target: post-compaction usage ≤ (1 − FREE_TARGET) of the USABLE window, floored so it
+  // never demands less than the verbatim recent region + a summary's worth of room.
+  //
+  // "Usable" matters when the wire wall clamped `auto` below the proportional point: freeing 45% of the
+  // NOMINAL window then lands a target (0.55 × 40,960 ≈ 22.5k) a hair under a 23.5k trigger — one deep
+  // compaction buys two turns and the thrash continues. Deriving the base from auto/pct recovers the
+  // window the trigger actually governs; where the wall does not bind, auto/pct ≥ window and this is
+  // byte-for-byte the old formula.
+  const usableWindow = Math.min(window, Math.floor(auto / Math.max(pct, 0.1)))
+  const deepTarget = Math.max(keepRecentTokens + Math.min(2_000, Math.floor(window / 8)), Math.floor(usableWindow * (1 - CONSTRAINED_FREE_TARGET)))
 
   return {
     window,

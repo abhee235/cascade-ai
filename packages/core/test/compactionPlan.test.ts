@@ -105,3 +105,19 @@ describe('resolveCompactionPlan — window resolution', () => {
 function window8kReserve(p: { window: number; effectiveWindow: number }): number {
   return p.window - p.effectiveWindow
 }
+
+describe('deep target respects the usable window (the thrash fix)', () => {
+	it('40K/16K: the deep stop sits well below the wall-clamped trigger — one event buys many turns', () => {
+		// Measured thrash: trigger 23,552, old deep target 0.55 × 40,960 ≈ 22,528 — freeing ~1k that regrew
+		// in 1–4 turns (18 compactions in 38 LLM calls). The target now derives from the window the trigger
+		// actually governs.
+		const p = planCompaction({ window: 40_960, economics: 'constrained' })
+		expect(p.deepTarget).toBeLessThan(20_000)
+		expect(p.auto - p.deepTarget).toBeGreaterThan(4_000) // real breathing room, not a hair
+	})
+
+	it('where the wall does not bind, the target is byte-for-byte the old formula', () => {
+		const p = planCompaction({ window: 131_072, maxOutputTokens: 16_384, economics: 'constrained' })
+		expect(p.deepTarget).toBe(Math.floor(131_072 * 0.55))
+	})
+})

@@ -251,7 +251,14 @@ export function createSession(opts: SessionOptions): CascadeSession {
   // ADR-078: pick the compaction cost model. A native-Ollama provider means a local KV wall — every prefix
   // rewrite is a full re-prefill at local speed — so it gets 'constrained' (deep, rare compactions) unless
   // the caller overrides. Hosted APIs keep the standard 'hosted' economics byte-for-byte.
-  const compactEconomics = opts.compactEconomics ?? (opts.provider instanceof OllamaProvider ? 'constrained' : 'hosted')
+  // 'constrained' = the LOCAL-server cost model (ADR-078: deep, rare compactions), and locality is a
+  // property of WHERE the server runs, not which wire protocol it speaks. Keying this on OllamaProvider
+  // alone gave a local vLLM the 'hosted' stop-at-trigger rule — measured thrashing: 18 compactions in 38
+  // LLM calls, each freeing ~1k that regrew within a couple of turns. Self-hosted OpenAI-compat ids
+  // (vllm, llamacpp, custom endpoints) get the same economics as Ollama; the true hosted gateways keep
+  // the standard behavior byte-for-byte.
+  const hostedGateway = ['openai', 'groq', 'openrouter', 'nvidia'].includes(((opts.provider as { id?: string }).id ?? '').toLowerCase())
+  const compactEconomics = opts.compactEconomics ?? (opts.provider instanceof OllamaProvider || !hostedGateway ? 'constrained' : 'hosted')
   // `'auto'` resolves against whatever window we end up confident about (pinned now, or detected later).
   // Declared BEFORE the plan below, which already calls it.
   const autoOutput = opts.maxOutputTokens === 'auto'
