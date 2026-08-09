@@ -11,6 +11,7 @@
 // (compactionPlan.test.ts).
 
 import { contextWindowForModel, windowTier, type WindowTier } from '../llm/contextWindows'
+import { DEFAULT_MAX_OUTPUT_TOKENS } from '../llm/providers/openaiChat'
 
 // ── Buffer constants (the absolute branch) ───────────────────────────────────────────────────────────────
 /** Tokens reserved for the compaction summary output. */
@@ -147,8 +148,18 @@ export function planCompaction(input: PlanInput): CompactionPlan {
   const effectiveWindow = Math.max(0, window - reserveOutput)
 
   // max(proportional, absolute): absolute wins on big windows; proportional wins on small ones.
-  const auto = Math.floor(Math.max(pct * window, effectiveWindow - AUTOCOMPACT_BUFFER))
-  const warn = Math.floor(Math.max(0, Math.max((pct - WARN_PCT_OFFSET) * window, auto - WARN_BUFFER)))
+  let auto = Math.floor(Math.max(pct * window, effectiveWindow - AUTOCOMPACT_BUFFER))
+  // THE WIRE WALL. Providers always send an output cap (the user's, or their 16,384 default), and strict
+  // servers (vLLM) reject any request where input + cap exceeds the window. If `auto` sits above
+  // window − cap, there is a DEAD ZONE where the prompt is too big for the cap but too small to trigger
+  // compaction — measured as an unrecoverable 400 loop at 24,577 tokens on a 40,960 window (auto was
+  // 28,672; the wall was 24,576). Compaction must fire before the wall, not after it. Only applied when
+  // the cap is a minority share of the window — on tiny windows the provider-side clamp is the guard,
+  // and halving their trigger would change long-standing behavior for no benefit.
+  const generationCap = input.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS
+  const WALL_MARGIN = 1024
+  if (generationCap + WALL_MARGIN < Math.floor(window / 2)) auto = Math.min(auto, window - generationCap - WALL_MARGIN)
+  const warn = Math.min(Math.floor(Math.max(0, Math.max((pct - WARN_PCT_OFFSET) * window, auto - WARN_BUFFER))), Math.max(0, auto - 2000))
   const hard = Math.floor(Math.min(window, Math.max(effectiveWindow - HARD_BUFFER, auto + HARD_BUFFER)))
 
   const keepRecentTokens = Math.floor(effectiveWindow * keepRecentRatio)

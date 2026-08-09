@@ -156,3 +156,32 @@ describe('output-cap clamping — strict servers reject input+cap > window', () 
 		expect(body.max_tokens).toBe(2_048)
 	})
 })
+
+describe('strict-server 400 self-heal — retry once with the server’s own numbers', () => {
+	const VLLM_400 = JSON.stringify({ error: { message: "This model's maximum context length is 40960 tokens. However, you requested 16384 output tokens and your prompt contains at least 24577 input tokens, for a total of at least 40961 tokens." } })
+
+	it('parses the exact input count from the 400 and retries with the cap that fits', async () => {
+		// Estimation can only approximate the tokenizer (the 3.3-chars/token version missed by ~1,400 tokens
+		// on dense code and let the 400 through). The server's rejection carries the EXACT numbers — use them.
+		let call = 0
+		const fetchMock = vi.fn(async () => (++call === 1 ? new Response(VLLM_400, { status: 400 }) : new Response(SSE_EOS, { status: 200 })))
+		vi.stubGlobal('fetch', fetchMock)
+		const provider = new OpenAIChatProvider({ id: 'vllm', baseUrl: 'http://x' })
+		for await (const _ of provider.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm', maxOutputTokens: 16_384 })) {
+			/* drain */
+		}
+		expect(fetchMock).toHaveBeenCalledTimes(2)
+		const retryBody = JSON.parse(String((fetchMock.mock.calls[1] as any)[1].body))
+		expect(retryBody.max_tokens).toBe(40_960 - 24_577 - 64) // the server said what fits; ask for exactly that
+	})
+
+	it('a 400 that is NOT the length rejection still throws immediately — no blind retries', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":{"message":"invalid role"}}', { status: 400 })))
+		const provider = new OpenAIChatProvider({ id: 'vllm', baseUrl: 'http://x' })
+		await expect(async () => {
+			for await (const _ of provider.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm' })) {
+				/* drain */
+			}
+		}).rejects.toThrow(/400/)
+	})
+})

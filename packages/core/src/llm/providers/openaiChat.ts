@@ -190,7 +190,10 @@ export class OpenAIChatProvider implements ModelProvider {
       // toward another 400. The floor keeps degenerate room from producing a useless 50-token budget; if
       // even the floor does not fit, the request was doomed regardless and compaction is the real fix.
       if (req.contextWindow) {
-        const estInputTokens = Math.ceil(JSON.stringify(body.messages).length / 3.3) + 800
+        // 3.0 chars/token, not the usual 4: agent prompts are token-DENSE (code, JSON, punctuation), and
+        // the first version of this clamp used 3.3 — which under-counted a real 24,577-token prompt by
+        // ~1,400 tokens, computed room just above the cap, stood down, and the 400 sailed through anyway.
+        const estInputTokens = Math.ceil(JSON.stringify(body.messages).length / 3.0) + 800
         const room = req.contextWindow - estInputTokens
         if (room < cap) cap = Math.max(1024, room)
       }
@@ -258,7 +261,18 @@ export class OpenAIChatProvider implements ModelProvider {
   }
 
   async *stream(req: CompletionRequest, signal?: AbortSignal): AsyncIterable<StreamEvent> {
-    const res = await this.postChat(req, true, signal)
+    let res = await this.postChat(req, true, signal)
+    if (!res.ok && res.status === 400) {
+      // The strict-server length rejection carries EXACT numbers — vLLM: "maximum context length is 40960
+      // tokens … you requested 16384 output tokens and your prompt contains at least 24577 input tokens".
+      // Estimation upstream can only approximate the tokenizer; this cannot. Retry ONCE with the cap the
+      // server itself said would fit. Deterministic: same failure twice means something else is wrong.
+      const b = await res.text().catch(() => '')
+      const m = /maximum context length is (\d+) tokens[\s\S]{0,200}?at least (\d+) input tokens/.exec(b)
+      const room = m ? Number(m[1]) - Number(m[2]) - 64 : 0
+      if (m && room >= 256) res = await this.postChat({ ...req, maxOutputTokens: room, contextWindow: undefined }, true, signal)
+      else throw new Error(`${this.id} HTTP 400: ${b.slice(0, 300) || res.statusText}`)
+    }
     if (!res.ok || !res.body) {
       const b = await res.text().catch(() => '')
       throw new Error(`${this.id} HTTP ${res.status}: ${b.slice(0, 300) || res.statusText}`)

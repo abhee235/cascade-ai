@@ -30,10 +30,28 @@ describe('compactionPlan — no-regression (large windows keep the absolute-buff
     }
   })
 
-  it('reserve is capped at the summary budget even for huge output models', () => {
-    // A model that can emit 128k still only reserves the 20k summary budget on a large window.
+  it('huge-output models: the wire wall now binds BELOW the absolute-buffer trigger — a deliberate divergence', () => {
+    // The old expectation here WAS the fixed-buffer formula (window − 20k reserve − buffer = 367k). But 367k input
+    // plus a 128k output cap is 495k against a 400k window — the exact input+cap>window rejection strict
+    // servers (vLLM) return 400 for, measured as an unrecoverable loop. A frontier hosted API never
+    // collides because its caps and buffers happen to fit; ours must not rely on that luck. The reserve semantics
+    // (20k summary budget) are unchanged — only the trigger moves under the wall.
     const p = planCompaction({ window: 400_000, maxOutputTokens: 128_000 })
-    expect(p.auto).toBe(400_000 - SUMMARY_OUTPUT_RESERVE - AUTOCOMPACT_BUFFER)
+    expect(p.auto).toBe(400_000 - 128_000 - 1_024) // window − cap − wall margin
+    expect(p.auto).toBeLessThan(400_000 - SUMMARY_OUTPUT_RESERVE - AUTOCOMPACT_BUFFER) // below the old fixed-buffer point
+  })
+
+  it('the 40K/16K dead zone is closed: auto fires before the wall', () => {
+    // The measured failure: window 40,960, default 16,384 cap → the old auto (28,672) sat ABOVE the wire
+    // wall (24,576), leaving a band where every request 400s and compaction never rescues it.
+    const p = planCompaction({ window: 40_960 }) // no explicit cap ⇒ the provider default applies
+    expect(p.auto).toBeLessThanOrEqual(40_960 - 16_384 - 1_024)
+    expect(p.warn).toBeLessThan(p.auto)
+  })
+
+  it('tiny windows keep their legacy trigger — the wall only binds when the cap is a minority share', () => {
+    const small = planCompaction({ window: 8_192 })
+    expect(small.auto).toBeGreaterThan(4_096) // NOT halved; the provider-side clamp guards these
   })
 })
 
