@@ -59,7 +59,9 @@ export function buildReEditNudge(path: string, count: number = REEDIT_THRESHOLD)
       `<system-reminder>You have now edited ${path} ${count} times. If the SAME problem keeps returning ` +
       'after each edit, its source is elsewhere: a colour/style comes from a theme token, a shape from a shared ' +
       'type — not the file that uses it. Before editing this file again, use **Grep** to find where the offending ' +
-      'value or symbol is DEFINED, or **Lsp** (definition/references) to jump to it, and fix it there. If these ' +
+      // (This once recommended Lsp — which ADR-075 EXCLUDES from the builder role. A weak model given
+      // advice it cannot follow retries the edit instead; the guidance must only name reachable tools.)
+      'value or symbol is DEFINED and **Read** that exact region before editing it there. If these ' +
       'edits are genuine separate improvements, ignore this. This is a background note, NOT a new request: do not reply — act.</system-reminder>'
     )
   }

@@ -34,5 +34,6 @@ export function createFakeProvider(turns: Turn[]): FakeProvider {
 
 // Small builders to keep test scripts readable.
 export const textDelta = (text: string): StreamEvent => ({ type: 'text_delta', text })
+export const thinkingDelta = (thinking: string): StreamEvent => ({ type: 'thinking_delta', thinking })
 export const toolUse = (id: string, name: string, input: unknown): StreamEvent => ({ type: 'tool_use', id, name, input })
 export const done = (stopReason: 'end_turn' | 'tool_use' | 'max_tokens' = 'end_turn', usage?: TokenUsage): StreamEvent => ({ type: 'done', stopReason, usage })

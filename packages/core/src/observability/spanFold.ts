@@ -63,6 +63,7 @@ const MARK_LABELS: Record<string, (e: Record<string, unknown>) => string> = {
   degenerate_cut: (e) => `cut: degenerate output loop (${e.chars} chars)`,
   planning_stall: () => 'nudge: planning stall → execute now',
   max_tokens_cut: () => 'max-tokens cut — act-now nudge',
+  thinking_only_terminal: () => 'nudge: answer stuck in thinking — restate',
   slow_prefill: (e) => `slow prefill (${Math.round(Number(e.waitedMs) / 1000)}s)`,
   hook: (e) => `hook ${e.event} → ${e.decision}`,
   error: () => 'error',

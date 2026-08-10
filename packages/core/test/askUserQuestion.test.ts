@@ -111,3 +111,49 @@ describe('AskUserQuestion — the loop parks on a `question` event and resumes w
 })
 
 rmSync(cwd, { recursive: true, force: true })
+
+describe('interactive-tool input validation (dokar-9B forensics) — malformed calls never reach the user', () => {
+  // The measured failure: ExitPlanMode called with `{}` skipped schema validation (it lived only on the
+  // call() path) and the user was shown an approval dialog with NO plan — "I cannot see any plan".
+  it('ExitPlanMode with {} → immediate tool error naming the missing plan; ctx.ask is never invoked', async () => {
+    const provider = createFakeProvider([
+      [toolUse('p1', 'ExitPlanMode', {}), done('tool_use')],
+      [textDelta('Understood — writing a real plan.'), done('end_turn')],
+    ])
+    let asked = false
+    const ask: AskController = {
+      request: () => {
+        asked = true
+        return new Promise(() => {}) // if the scheduler parks here the test times out — that IS the failure
+      },
+    }
+    const messages: Message[] = [{ role: 'user', content: 'build it' }]
+    const events: ActivityEvent[] = []
+    for await (const ev of runAgentLoop(messages, { provider, model: 'fake', cwd, signal: new AbortController().signal, ask, maxTurns: 5 })) events.push(ev)
+
+    expect(asked).toBe(false) // the user never saw an empty-plan dialog
+    expect(events.some((e) => e.type === 'question')).toBe(false)
+    const result = messages.flatMap((m) => (Array.isArray(m.content) ? m.content : [])).find((b) => b.type === 'tool_result' && b.tool_use_id === 'p1')
+    expect((result as any)?.isError).toBe(true)
+    expect((result as any)?.content).toMatch(/plan/i) // the error names what is missing
+  })
+
+  it('a VALID interactive call still reaches the user (validation is a filter, not a wall)', async () => {
+    const provider = createFakeProvider([
+      [toolUse('q1', 'AskUserQuestion', { questions: [QUESTION] }), done('tool_use')],
+      [textDelta('Using SQLite.'), done('end_turn')],
+    ])
+    let asked = false
+    const ask: AskController = {
+      request: () => {
+        asked = true
+        return Promise.resolve({ 'Which database?': 'SQLite' })
+      },
+    }
+    const messages: Message[] = [{ role: 'user', content: 'set up the db' }]
+    for await (const _ of runAgentLoop(messages, { provider, model: 'fake', cwd, signal: new AbortController().signal, ask, maxTurns: 5 })) {
+      /* consume */
+    }
+    expect(asked).toBe(true)
+  })
+})

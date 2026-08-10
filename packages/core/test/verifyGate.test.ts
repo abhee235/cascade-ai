@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { runAgentLoop, type LoopDeps } from '../src/agent/agentLoop'
-import { foldVerifyState, isVerifyCommand, resolveCheckCommand } from '../src/agent/verifyGate'
+import { foldVerifyState, isFilteredVerify, isVerifyCommand, resolveCheckCommand } from '../src/agent/verifyGate'
 import type { Message } from '../src/protocol'
 import { createFakeProvider, textDelta, toolUse, done, type FakeProvider } from './fakeProvider'
 
@@ -162,6 +162,43 @@ describe('verify gate — pure helpers', () => {
 		const test = { id: 't', name: 'Bash', input: { command: 'npm test' } }
 		const testResult = [{ type: 'tool_result' as const, tool_use_id: 't', content: 'FAIL', isError: true }]
 		expect(foldVerifyState(true, [test], testResult)).toBe(false) // running a RED suite still counts as verifying
+	})
+
+	it('isFilteredVerify: lossy pipes and `||` fallbacks are filtered; plain runs, 2>&1 and && are honest', () => {
+		// The measured lie (dokar-9B): tsc errors start with `src/…`, so `findstr "^error"` matched nothing
+		// and `|| echo BUILD PASSED` exited 0 on a broken build. None of these may count as verification.
+		const bash = (command: string) => ({ id: 'x', name: 'Bash', input: { command } })
+		expect(isFilteredVerify(bash('call npm run build 2>&1 | findstr /i "^error" || echo BUILD PASSED'))).toBe(true)
+		expect(isFilteredVerify(bash('npm test 2>&1 | grep -i fail'))).toBe(true)
+		expect(isFilteredVerify(bash('npm run build 2>&1 | Select-String "error"'))).toBe(true)
+		expect(isFilteredVerify(bash('npm test || true'))).toBe(true)
+		// head/tail show a truthful PREFIX (errors still reach the model) and are a habitual strong-model
+		// idiom — measured on the first bench run: classifying them as filters bought two pointless nudges.
+		expect(isFilteredVerify(bash('npm run build 2>&1 | tail -20'))).toBe(false)
+		expect(isFilteredVerify(bash('npm run build 2>&1 | head -50'))).toBe(false)
+		expect(isFilteredVerify(bash('npm run build 2>&1'))).toBe(false)
+		expect(isFilteredVerify(bash('npm run build && npm test'))).toBe(false)
+	})
+
+	it('a FILTERED check clears nothing: foldVerifyState keeps the gate armed', () => {
+		const filtered = { id: 't', name: 'Bash', input: { command: 'npm test 2>&1 | grep fail || echo PASSED' } }
+		const r = [{ type: 'tool_result' as const, tool_use_id: 't', content: 'PASSED' }]
+		expect(foldVerifyState(true, [filtered], r)).toBe(true) // still unverified — the model saw a filter, not the truth
+		const honest = { id: 't', name: 'Bash', input: { command: 'npm test 2>&1' } }
+		expect(foldVerifyState(true, [honest], r)).toBe(false)
+	})
+
+	it('through the loop: edit + filtered check → the verify nudge STILL fires', async () => {
+		const provider = createFakeProvider([
+			[toolUse('w1', 'Write', { file_path: 'out.txt', content: 'hello' }), done('tool_use')],
+			[toolUse('b1', 'Bash', { command: 'node --test 2>&1 | grep -c fail || echo PASSED' }), done('tool_use')],
+			[textDelta('Done, checks pass!'), done('end_turn')], // gate must refuse — the "check" was filtered
+			[textDelta('Ran the real check now.'), done('end_turn')],
+		])
+		const messages: Message[] = [{ role: 'user', content: 'write + fake-verify' }]
+		await drain(runAgentLoop(messages, deps(provider)))
+		expect(provider.calls.length).toBe(4) // the nudge bought exactly one extra turn
+		expect(historyText(messages)).toContain('never ran any verification')
 	})
 
 	it('resolveCheckCommand: real test script → npm test; npm placeholder or no package.json → undefined', () => {

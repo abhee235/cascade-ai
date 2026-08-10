@@ -9,6 +9,7 @@ import type { ActivityEvent, ContentBlock } from '../protocol'
 import type { ToolContext } from './Tool'
 import { defaultRegistry, type ToolRegistry } from './toolRegistry'
 import { executeTool, type ToolUse } from './runTool'
+import { describeInvalidInput, normalizeInput } from './inputNormalizer'
 import { checkPermission } from '../permissions/gate'
 import { splitCommandSegments } from '../permissions/bashClassifier'
 import { formatAnswers } from './builtins/AskUserQuestion'
@@ -115,7 +116,32 @@ export async function* scheduleTools(
       //    (and may act — ExitPlanMode flips the permission mode on approval). call() is skipped. Only when a
       //    channel exists — otherwise fall through and the tool returns its no-channel error (headless). ──
       if (tool?.requiresUserInteraction?.() && ctx.ask) {
-        const questions = tool.toQuestions?.(tu.input as never) ?? []
+        // VALIDATE BEFORE ASKING (measured, dokar/qwen3.5-9B 2026-08-09): ExitPlanMode called with `{}`
+        // sailed straight past its schema — validation lived only on the call() path, which interactive
+        // tools skip — so the user was shown an approval dialog with NO plan in it ("I cannot see any
+        // plan"), and the model, told only "not approved", repeated the identical empty call. A malformed
+        // interactive call is a MODEL error to bounce immediately, never a question to put to the user.
+        // Same normalize-then-describe pipeline as executeTool, so key-alias tolerance is identical.
+        // (An interactive tool without a Zod schema — the MCP case — forwards raw input, as before.)
+        let interactiveInput = tu.input as never
+        if (tool.inputSchema) {
+          let parsed = tool.inputSchema.safeParse(tu.input)
+          if (!parsed.success) {
+            const normalized = normalizeInput(tu.input, tool.inputSchema)
+            if (normalized) parsed = tool.inputSchema.safeParse(normalized)
+          }
+          if (!parsed.success) {
+            const msg = describeInvalidInput(tu.name, tu.input, tool.inputSchema, parsed.error.message)
+            byId.set(tu.id, { type: 'tool_result', tool_use_id: tu.id, content: msg, isError: true })
+            tracer.event({ t: 'tool_call', id: tu.id, name: tu.name, input: tu.input })
+            tracer.event({ t: 'tool_result', id: tu.id, name: tu.name, ok: false, ms: 0, content: msg })
+            yield { type: 'toolStart', id: tu.id, name: tu.name, summary: summary(tu, registry) }
+            yield { type: 'toolResult', id: tu.id, ok: false, preview: msg.slice(0, 200) }
+            continue
+          }
+          interactiveInput = parsed.data as never
+        }
+        const questions = tool.toQuestions?.(interactiveInput) ?? []
         // RACE FIX (measured, builder-graduate on gpt-5.6-luna hung on ExitPlanMode): register the answer
         // resolver BEFORE yielding the question. ctx.ask.request() runs its Promise executor synchronously
         // (pendingAnswers.set), so calling it first means a consumer that answers SYNCHRONOUSLY on receiving
@@ -129,7 +155,7 @@ export async function* scheduleTools(
         yield { type: 'toolStart', id: tu.id, name: tu.name, summary: summary(tu, registry) }
         yield { type: 'question', id: tu.id, questions }
         const answers = await answered // ← BLOCKS until respondQuestion(tu.id, answers)
-        const result = tool.applyAnswers ? await tool.applyAnswers(tu.input as never, answers, ctx) : { content: formatAnswers(answers) }
+        const result = tool.applyAnswers ? await tool.applyAnswers(interactiveInput, answers, ctx) : { content: formatAnswers(answers) }
         byId.set(tu.id, { type: 'tool_result', tool_use_id: tu.id, content: result.content, isError: result.isError })
         tracer.event({ t: 'tool_result', id: tu.id, name: tu.name, ok: !result.isError, ms: 0, content: result.content })
         yield { type: 'toolResult', id: tu.id, ok: !result.isError, preview: result.content.slice(0, 200) }

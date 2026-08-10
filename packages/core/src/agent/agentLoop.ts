@@ -21,7 +21,7 @@ import { streamWithRecovery, type RecoveryOptions } from '../llm/resilience'
 import type { ToolUse } from '../tools/runTool'
 import { scheduleTools } from '../tools/scheduler'
 import { buildTodoReminder, shouldRemindTodos, type TodoReminderConfig } from './todoReminder'
-import { buildStalledVerifyNudge, buildVerifyNudge, foldVerifyState, isVerifyCommand, STALLED_VERIFY_TURNS } from './verifyGate'
+import { buildStalledVerifyNudge, buildVerifyNudge, foldVerifyState, isFilteredVerify, isVerifyCommand, STALLED_VERIFY_TURNS } from './verifyGate'
 import { buildDelegateNudgeText, foldReadPressure, READ_PRESSURE_FRACTION, sawSubagent } from './delegateNudge'
 import { buildReadLoopNudge, foldReadLoop } from './readLoopGate'
 import { buildReEditNudge, foldReEdit, reEditCount } from './reEditGate'
@@ -254,6 +254,10 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   let plannerUsed = false
   // Degraded-backend guard: one recycle-and-retry per submit when a terminal response is entirely EMPTY.
   let emptyRetried = false
+  // Thinking-only terminal guard (measured, dokar/qwen3.5-9B 2026-08-09): the final turn carried the whole
+  // completion report INSIDE thinking (1.8k chars) and nothing in content — the visible chat ended in
+  // silence while the report sat one channel over. One restate nudge; a second offense is accepted.
+  let thinkingOnlyNudged = false
   // Todo gate: continue-nudge when the model goes terminal with open todo items. RE-ARMING (measured,
   // Simmer 128k submit 2): the old once-per-submit budget was spent on a turn-0 conversational answer;
   // 7 turns later the model dropped the ball mid-fix with a THINKING-ONLY terminal ("Let me fix data.ts
@@ -577,6 +581,22 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
         turn++
         continue
       }
+      // THINKING-ONLY terminal (measured, dokar/qwen3.5-9B): content empty, thinking full — the model
+      // wrote its final report in the channel the user cannot see, and accepting it ends the session in
+      // apparent silence. Checked LAST among the gates: real unfinished work (todos, verification) takes
+      // priority, and this only fires when the turn would otherwise be accepted with nothing visible.
+      if (!text.trim() && thinking.trim() && !thinkingOnlyNudged && turn + 1 < maxTurns) {
+        thinkingOnlyNudged = true
+        tracer.event({ t: 'thinking_only_terminal', turn })
+        messages.push({
+          role: 'user',
+          content:
+            '<system-reminder>Your turn ended with EMPTY visible output — everything you wrote went into private thinking, which the user cannot see. State your final answer now as plain text outside of thinking. Do not call tools and do not reply to this note — just give the user your answer/summary.</system-reminder>',
+        })
+        yield { type: 'status', text: 'Answer ended up in thinking — asking the agent to restate it…' }
+        turn++
+        continue
+      }
       if (!display.length) yield { type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: '' }] } }
       tracer.event({ t: 'turn_done', turns: turn })
       yield { type: 'turnDone', steps: turn }
@@ -607,7 +627,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
       const failedName = toolUses.find((tu) => tu.id === r.tool_use_id)?.name ?? 'a tool'
       lastToolFailure = `${failedName}: ${r.content.slice(0, 200)}`
     }
-    if (toolUses.some((tu) => isVerifyCommand(tu, deps.check?.command))) verifiedEver = true // ADR-051: a declared check demands ≥1 real run
+    if (toolUses.some((tu) => isVerifyCommand(tu, deps.check?.command) && !isFilteredVerify(tu))) verifiedEver = true // ADR-051: ≥1 real run — filtered runs don't count
 
     // ADR-059/075 POST-EDIT DIAGNOSTICS: the harness type-checks after a mutating turn and PUSHES the errors —
     // the model never has to know the Lsp tool exists (measured: it never called it). Default ON regardless of

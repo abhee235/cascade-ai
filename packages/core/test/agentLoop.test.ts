@@ -3,7 +3,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runAgentLoop } from '../src/agent/agentLoop'
-import { createFakeProvider, textDelta, toolUse, done } from './fakeProvider'
+import { createFakeProvider, textDelta, thinkingDelta, toolUse, done } from './fakeProvider'
 import type { ActivityEvent, Message } from '../src/protocol'
 
 async function collect(gen: AsyncIterable<ActivityEvent>): Promise<ActivityEvent[]> {
@@ -148,6 +148,56 @@ describe('runAgentLoop — identical-call breaker', () => {
       ])
       const events = await collect(runAgentLoop([{ role: 'user', content: 'go' }], deps(provider, dir)))
       expect(nudges(events)).toBe(0)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('thinking-only terminal salvage (dokar-9B forensics)', () => {
+  // The measured silent exit: the model's final turn carried its whole completion report inside
+  // `thinking` and NOTHING in content — the loop accepted it and the chat ended in apparent silence.
+  it('content-empty + thinking-full terminal → ONE restate nudge, then the restated answer is accepted', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'cascade-'))
+    try {
+      const provider = createFakeProvider([
+        [thinkingDelta('Great! The build passes — here is my full report that no one will ever see.'), done('end_turn')],
+        [textDelta('All done: dokar has been scaffolded; the build passes.'), done('end_turn')],
+      ])
+      const messages: Message[] = [{ role: 'user', content: 'build it' }]
+      const events = await collect(runAgentLoop(messages, deps(provider, dir)))
+      expect(provider.calls.length).toBe(2) // exactly one extra turn
+      expect(JSON.stringify(messages)).toContain('EMPTY visible output') // the nudge reached the transcript
+      const lastMsg: any = events.filter((e) => e.type === 'message').pop()
+      expect(lastMsg.message.content.map((b: any) => b.text ?? '').join('')).toContain('All done')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('fires ONCE per submit: a second thinking-only terminal is accepted (no loop)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'cascade-'))
+    try {
+      const provider = createFakeProvider([
+        [thinkingDelta('report one, in the wrong channel'), done('end_turn')],
+        [thinkingDelta('still refusing to speak up'), done('end_turn')],
+      ])
+      const messages: Message[] = [{ role: 'user', content: 'build it' }]
+      await collect(runAgentLoop(messages, deps(provider, dir)))
+      expect(provider.calls.length).toBe(2) // nudged once, second offense accepted — bounded
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a normal text answer never sees the nudge', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'cascade-'))
+    try {
+      const provider = createFakeProvider([[thinkingDelta('let me answer'), textDelta('Paris.'), done('end_turn')]])
+      const messages: Message[] = [{ role: 'user', content: 'capital of France?' }]
+      await collect(runAgentLoop(messages, deps(provider, dir)))
+      expect(provider.calls.length).toBe(1)
+      expect(JSON.stringify(messages)).not.toContain('EMPTY visible output')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

@@ -2,8 +2,8 @@
 
 
 import { z } from 'zod'
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { basename, dirname } from 'node:path'
 import type { Tool } from '../Tool'
 import { normalizeText } from '../fileState'
 import { lineDiff } from '../../utils/diff'
@@ -13,6 +13,23 @@ const inputSchema = z.object({
   file_path: z.string().describe('Path to the file to write, relative to the workspace or absolute.'),
   content: z.string().describe('The full content to write. Overwrites the file if it exists.'),
 })
+
+/** Dependency names declared in `dependencies`/`devDependencies` of OLD but absent from BOTH sections of
+ *  NEW (a dep moved between sections is kept, not removed). Unparseable JSON on either side ⇒ no opinion —
+ *  a malformed manifest is the build's error to report, not this guard's. */
+function removedDependencies(oldJson: string, newJson: string): string[] {
+  try {
+    const declared = (j: unknown): Set<string> => {
+      const p = j as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> }
+      return new Set([...Object.keys(p?.dependencies ?? {}), ...Object.keys(p?.devDependencies ?? {})])
+    }
+    const oldDeps = declared(JSON.parse(oldJson))
+    const newDeps = declared(JSON.parse(newJson))
+    return [...oldDeps].filter((d) => !newDeps.has(d))
+  } catch {
+    return []
+  }
+}
 
 export const WriteTool: Tool<z.infer<typeof inputSchema>> = {
   name: 'Write',
@@ -34,7 +51,44 @@ Prefer Edit for changing part of a file — Write replaces the ENTIRE file, so i
       throw e
     }
     try {
+      // CASE-COLLISION guard (measured, dokar/qwen3.5-9B 2026-08-09): the model wrote `tasks/taskList.tsx`
+      // twice and `tasks/TaskList.tsx` once — on a case-insensitive filesystem (Windows/macOS default)
+      // those are the SAME file, so the two "components" silently overwrote each other while imports of
+      // both names kept the build broken across five runs. And even on a case-sensitive filesystem,
+      // sibling files differing only by case break the project the moment it's opened on Windows/macOS —
+      // so the guard is unconditional: name the existing file and make the model choose deliberately.
+      const name = basename(path)
+      const siblings = await readdir(dirname(path)).catch(() => [] as string[])
+      const collision = siblings.find((s) => s !== name && s.toLowerCase() === name.toLowerCase())
+      if (collision) {
+        return {
+          content:
+            `A file named "${collision}" already exists in that directory — "${name}" differs from it only by CASE, ` +
+            `and on Windows/macOS they are the SAME file (this write would overwrite "${collision}"). ` +
+            `To change the existing file, call Write/Edit with its exact name "${collision}". To create a genuinely new file, pick a clearly different name.`,
+          isError: true,
+        }
+      }
       const before = await readFile(path, 'utf8').catch(() => undefined) // undefined ⇒ new file
+      // SCAFFOLD-CONTRACT guard (measured, hotelnow 2026-08-10): the model rewrote package.json from its
+      // training prior — Tailwind v3, dropping @tailwindcss/vite — while the preview force-restores the
+      // template's vite.config.ts (ensureVisualEditConfig), which imports that very package. Result:
+      // "Cannot find package '@tailwindcss/vite'" on every preview start. Not a weak-model rung: ANY
+      // wholesale rewrite that drops declared dependencies breaks configs pinned by the product, so a
+      // Write that REMOVES existing deps is rejected with the removed names. Deliberate removal stays
+      // possible via Edit, which targets the specific line instead of replacing the manifest.
+      if (name === 'package.json' && before !== undefined) {
+        const removed = removedDependencies(before, input.content)
+        if (removed.length) {
+          return {
+            content:
+              `This Write REMOVES ${removed.length} declared dependenc${removed.length === 1 ? 'y' : 'ies'} from package.json: ${removed.join(', ')}. ` +
+              'The project scaffold (vite config, plugins, styling) depends on the existing entries, and replacing the whole manifest breaks the build/preview even when your version looks self-consistent. ' +
+              'Keep all existing dependencies: ADD what you need with Edit (or a Write that preserves the current entries). If removing a dependency is genuinely intended, remove exactly that line with Edit.',
+            isError: true,
+          }
+        }
+      }
       await mkdir(dirname(path), { recursive: true }) // create parent dirs
       await writeFile(path, input.content, 'utf8')
       // ADR-032: a successful Write IS the freshest possible knowledge of the file — record it, so a

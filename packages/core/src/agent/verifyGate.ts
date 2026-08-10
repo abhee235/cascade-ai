@@ -29,6 +29,27 @@ export function isVerifyCommand(tu: ToolUse, checkCommand?: string): boolean {
 	return VERIFY_COMMAND.test(cmd) || (checkCommand !== undefined && cmd.includes(checkCommand))
 }
 
+/** A verify run whose output the model has WRAPPED so the run can no longer tell it the truth. Measured
+ *  (dokar/qwen3.5-9B 2026-08-09): `npm run build 2>&1 | findstr /i "^error" || echo BUILD PASSED` — tsc
+ *  errors start with `src/…(line,col)`, not `error`, so findstr matched nothing, `||` printed BUILD
+ *  PASSED, and the call exited 0 on a build that was actually broken; the model then shipped "Build
+ *  passes ✅" over a syntax error still on disk. The gate exists to force ground truth to REACH the
+ *  model, and a filtered run is the model averting its eyes — so it neither sets nor clears anything.
+ *  A plain run, `2>&1` redirection, or `&&` chaining stays fully honest and is untouched.
+ *
+ *  Deliberately NARROW (first bench run measured the cost of being wider): `| head -50` was initially
+ *  classified as filtered and bought two pointless verify nudges on a run that solved — head/tail show a
+ *  TRUTHFUL PREFIX (compiler errors still reach the model), and strong models pipe through them
+ *  habitually, so penalizing them is exactly the frontier-hostile overfit this repo bans. Only patterns
+ *  that can REPLACE failure with fiction stay: match-based filters (empty output = looks clean) and
+ *  `||` fallbacks (exit-code laundering). */
+const VERIFY_FILTERS = /\|\s*(findstr|grep|select-string|sls|rg|out-null)\b|\|\|/i
+
+export function isFilteredVerify(tu: ToolUse): boolean {
+	const cmd = (tu.input as { command?: string } | null)?.command
+	return typeof cmd === 'string' && VERIFY_FILTERS.test(cmd)
+}
+
 /**
  * Fold one executed batch into the edited-since-verify state.
  * - a SUCCESSFUL file-mutating call sets it (there is now unverified work);
@@ -43,8 +64,10 @@ export function foldVerifyState(prev: boolean, toolUses: ToolUse[], results: Con
 	}
 	// Clear AFTER setting: an edit and a test run in the SAME batch means the test ran against the new state
 	// (writes are serialized before subsequent reads in the scheduler; good enough at this granularity).
+	// Filtered runs do NOT clear — see isFilteredVerify: a check piped into a lossy filter never showed the
+	// model its errors, which is the exact state this gate exists to prevent.
 	for (const tu of toolUses) {
-		if (isVerifyCommand(tu, checkCommand)) edited = false
+		if (isVerifyCommand(tu, checkCommand) && !isFilteredVerify(tu)) edited = false
 	}
 	return edited
 }

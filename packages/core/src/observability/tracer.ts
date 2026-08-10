@@ -40,6 +40,7 @@ export type TraceEvent =
   | { t: 'post_edit_check'; turn: number; files: number } // ADR-059: harness type check after a mutating turn found errors — pushed to the model
   | { t: 'slow_prefill'; turn: number; waitedMs: number } // ADR-061: pre-first-token silence with a LIVE backend — a big cold prefill, waited out instead of killed
   | { t: 'max_tokens_cut'; turn: number }
+  | { t: 'thinking_only_terminal'; turn: number } // 2026-08-09 (dokar-9B): final turn's whole report landed in thinking, content empty — restate nudge injected once
   | { t: 'degenerate_cut'; turn: number; chars: number } // 2026-07-26: stream tail collapsed to a repeated-token loop ('@@@@…' 186s) — cut mid-stream, garbage discarded, turn re-asked
   | { t: 'planning_stall'; turn: number; idle: number } // RESERVED (ADR-080 finding) — the narration_loop + repeat_call breakers currently cover the TodoWrite-treadmill signatures; this fires only if a mutation-free stall evades both // 2026-07-23: a no-tool-call turn hit the output ceiling (thinking runaway) — continued with an "act now" nudge instead of accepting the truncated answer
   | { t: 'hook'; event: string; id: string; tool: string; decision: string; ms: number } // ADR-036: a project hook decided (allow|deny|ask) for a tool call
