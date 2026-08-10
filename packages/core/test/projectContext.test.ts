@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gatherProjectContext } from '../src/agent/projectContext'
 import { buildSystemPrompt } from '../src/agent/systemPrompt'
-import { memoryFiles } from '../src/memory/memoryStore'
+import { loadMemory, memoryFiles } from '../src/memory/memoryStore'
 
 function seed(files: Record<string, string>): string {
   const dir = mkdtempSync(join(tmpdir(), 'ctx-'))
@@ -99,10 +99,46 @@ describe('buildSystemPrompt — projectContext injection (ADR-046)', () => {
   })
 })
 
-describe('memoryFiles — AGENTS.md interop (ADR-046)', () => {
-  it('reads AGENTS.md alongside CASCADE.md', () => {
+describe('memoryFiles — CASCADE.md only, project root only (prompt-audit finding A, 2026-08-11)', () => {
+  // The measured poisoning: eval workdirs live INSIDE the Cascade repo, and the old root→cwd ancestor
+  // walk + other-agent instruction-file interop fed the repo's own instructions ("do not touch code until the
+  // user confirms") to a builder whose next block says the opposite. Cascade reads its OWN file, in the
+  // project, full stop — other tools' instruction files are other agents' contracts.
+  it('never reads an instruction file that belongs to another tool (AGENTS.md) — only its own CASCADE.md', () => {
     const names = memoryFiles('/proj').map((f) => f.path)
-    expect(names.some((p) => p.endsWith('AGENTS.md'))).toBe(true)
+
+    expect(names.some((p) => p.endsWith('AGENTS.md'))).toBe(false)
     expect(names.some((p) => p.endsWith('CASCADE.md'))).toBe(true)
+    expect(names.some((p) => p.endsWith('CASCADE.local.md'))).toBe(true)
+  })
+
+  it('never walks above the project root — a nested project inherits nothing from ancestors', () => {
+    const files = memoryFiles('/repo/eval/.work/builder-shop-x')
+    const projectLevel = files.filter((f) => f.scope !== 'User')
+    for (const f of projectLevel) {
+      expect(f.path.replaceAll('\\', '/')).toContain('/repo/eval/.work/builder-shop-x/')
+    }
+    // Exactly one project + one local candidate — no ancestor chain.
+    expect(projectLevel.length).toBe(2)
+  })
+
+  it('end-to-end: the loaded memory block is CLEAN of ancestor instruction files', () => {
+    // The measured wire: 22,837 chars of system prompt, ~6.5k of them a foreign instruction file. Never again.
+    const priorHome = process.env.CASCADE_HOME
+    process.env.CASCADE_HOME = seed({}) // hermetic: this machine's real user-global memory stays out
+    const parent = seed({
+      'AGENTS.md': '# Foreign\nTEACH, do not just build. Do not touch code until the user confirms.',
+      'CASCADE.md': '# Ancestor cascade memory that must ALSO stay out',
+      'proj/PLAN.md': 'x',
+    })
+    const cwd = join(parent, 'proj')
+    const block = loadMemory(cwd)
+    expect(block).not.toContain('TEACH')
+    expect(block).not.toContain('Ancestor cascade memory')
+    // And the project's OWN file still loads.
+    writeFileSync(join(cwd, 'CASCADE.md'), 'Always use the premium preset.')
+    expect(loadMemory(cwd)).toContain('premium preset')
+    if (priorHome === undefined) delete process.env.CASCADE_HOME
+    else process.env.CASCADE_HOME = priorHome
   })
 })

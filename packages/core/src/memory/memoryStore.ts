@@ -10,10 +10,13 @@ import { dirname, join, resolve } from 'node:path'
 /** Committable project memory; the `.local` variant is personal/gitignored; user is global. */
 export const MEMORY_FILE = 'CASCADE.md'
 export const MEMORY_LOCAL_FILE = 'CASCADE.local.md'
-// ADR-046: cross-tool interop — a project (especially a real repo opened in the extension) may carry its agent
-// instructions in the emerging-standard AGENTS.md instead of CASCADE.md. Read those too, at LOWER
-// priority than the Cascade-native files, so those conventions are honoured without the user duplicating them.
-const INTEROP_FILES = ['AGENTS.md'] as const
+// Cascade reads CASCADE.md and NOTHING else — deliberately no other-agent instruction-file "interop" (removed
+// 2026-08-11, prompt-audit finding A). Those files are written for OTHER agents' contracts, and ingesting
+// them under the memory header's "OVERRIDES defaults" framing is context poisoning: the measured case fed
+// the Cascade repo's own other-agent instruction file ("TEACH, don't just build" / "do not touch code until the user
+// confirms" / "≤100 lines per edit") to a builder session whose very next block says the opposite of all
+// three. A user who wants shared conventions puts them in CASCADE.md (or @imports the other file
+// EXPLICITLY — the @import mechanism already supports that as an opt-in).
 
 // Cap the always-injected memory so it can't dominate the (small) context window.
 const MAX_LINES = 200
@@ -82,24 +85,20 @@ function readCapped(path: string): string | undefined {
 }
 
 /** Every memory file to load, ordered LOWEST→HIGHEST priority (the model weighs later ones more):
- *  user-global first, then each directory from filesystem-root DOWN to cwd (closer = higher), reading both
- *  the shared `CASCADE.md` and the personal `CASCADE.local.md` at each level. */
+ *  user-global CASCADE.md, then the PROJECT's CASCADE.md and CASCADE.local.md — cwd only.
+ *
+ *  Deliberately NO ancestor walk (removed 2026-08-11, prompt-audit finding A): the session's world ends
+ *  at its project root. The old filesystem-root→cwd chain meant any project nested under a directory
+ *  carrying instruction files silently inherited them — measured: eval workdirs live inside the Cascade
+ *  repo (eval/.work/…, a Storage Sense workaround), so every bench session ingested the repo's own
+ *  instructions and the shop baseline was confounded. A project's instructions live IN the project. */
 export function memoryFiles(cwd: string): { path: string; scope: string }[] {
-  const { user } = memoryPaths(cwd)
-  const files: { path: string; scope: string }[] = [{ path: user, scope: 'User' }]
-  // Ancestor chain root→cwd, so the closest (cwd) is read last (highest priority).
-  const dirs: string[] = []
-  for (let d = resolve(cwd); ; d = dirname(d)) {
-    dirs.push(d)
-    if (dirname(d) === d) break
-  }
-  for (const dir of dirs.reverse()) {
-    // Interop files first (lower priority), then the Cascade-native ones — so on conflict CASCADE.md wins.
-    for (const name of INTEROP_FILES) files.push({ path: join(dir, name), scope: 'Project instructions' })
-    files.push({ path: join(dir, MEMORY_FILE), scope: 'Project' })
-    files.push({ path: join(dir, MEMORY_LOCAL_FILE), scope: 'Local' })
-  }
-  return files
+  const { user, project } = memoryPaths(cwd)
+  return [
+    { path: user, scope: 'User' },
+    { path: project, scope: 'Project' },
+    { path: join(resolve(cwd), MEMORY_LOCAL_FILE), scope: 'Local' },
+  ]
 }
 
 /** The memory block to prepend to the system prompt: all scopes, labeled, under the OVERRIDE header.
