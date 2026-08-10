@@ -1,9 +1,15 @@
-// browserTool.ts — the vision-gated Browser tool (ADR-060 Phase 1, read-only): the agent LOOKS AT the app
-// it built. The observed loop (agent-browser skill: open → a11y snapshot → screenshot → visual judgment)
-// rebuilt for our architecture: Playwright runs headless ON THE HOST against the project's published
-// preview port (the sandbox container has no browser), and screenshots return as data-URI images the loop
-// lifts into vision blocks (Tool.images → ADR-060 core plumbing). Injected per-session via
-// `extraTools` ONLY when the model reports `vision` (modelCaps.ts) — non-vision models never see it.
+// browserTool.ts — the Browser tool (ADR-060 Phase 1, read-only): the agent LOOKS AT the app it built.
+// The agent LOOKS at its work: open → a11y snapshot → screenshot → visual judgment, built for our
+// architecture: Playwright runs headless ON THE HOST against the project's published preview
+// port, and screenshots return as data-URI images the loop lifts into vision blocks (Tool.images).
+//
+// VISION GATES THE SCREENSHOT OP, NOT THE TOOL (revised 2026-08-10; was tool-level). The original
+// all-or-nothing gate meant a text-only model — the normal case for local quants (unsloth IQ builds
+// strip the vision tower) — had NO runtime smoke channel at all: no way to see a dead mount, a console
+// stack, or invisible sections. But Playwright's text channels are the HIGHER-signal debugging surface
+// anyway: ariaSnapshot (semantic structure, ~50 tokens where a screenshot costs ~1,500), audit
+// (computed-style/opacity/console truth), probe (runtime JSON). A blind model keeps all of those;
+// only visual JUDGMENT (op:"screenshot") requires eyes.
 //
 // playwright-core + the system browser channel (msedge/chrome): no 400MB browser download at install.
 // Probe verdict (2026-07-20): qwen36-agentic read every recipe title off a screenshot, named the palette
@@ -11,10 +17,10 @@
 
 import { z } from 'zod'
 import type { Tool } from '@cascade/core'
-import type { DockerSandbox } from './dockerSandbox.js'
+import type { ProjectRuntime } from './projectRuntime.js'
 
 const inputSchema = z.object({
-	op: z.enum(['open', 'snapshot', 'screenshot', 'probe', 'click', 'press', 'audit']).describe('open = load the app (do this first) · snapshot = accessibility tree as text (structure — cheap, prefer this) · screenshot = image for VISUAL judgment (expensive — budget these) · probe = evaluate a JS expression in the live page and get JSON back (RUNTIME state — games/canvas/dynamic behavior that snapshots cannot see) · audit = scroll the WHOLE page and report content stuck invisible (opacity 0) + console errors. ALWAYS run audit before declaring the page done.'),
+	op: z.enum(['open', 'snapshot', 'screenshot', 'probe', 'click', 'press', 'audit']).describe('open = load the app (do this first) · snapshot = accessibility tree as text (structure — cheap, prefer this) · screenshot = image for VISUAL judgment (vision models ONLY — errors without vision; expensive — budget these) · probe = evaluate a JS expression in the live page and get JSON back (RUNTIME state — games/canvas/dynamic behavior that snapshots cannot see) · audit = scroll the WHOLE page and report content stuck invisible (opacity 0) + whether CSS loaded + console errors. ALWAYS run audit before declaring the page done.'),
 	path: z.string().optional().describe('Route to open, e.g. "/" or "/settings". Only with op:"open"; the app origin is fixed.'),
 	expr: z.string().optional().describe('JS expression for op:"probe", evaluated in the page, result JSON-returned. E.g. "__DEBUG__.state()" or "(__DEBUG__.step(60), __DEBUG__.state().ball)". Canvas/game apps expose window.__DEBUG__ (see the game-dev skill).'),
 	target: z.string().optional().describe('For op:"click": visible text of the element (e.g. "START GAME") or a CSS selector. For op:"press": a key name, e.g. "ArrowLeft", "Space", "Enter", "Escape".'),
@@ -79,7 +85,16 @@ const AUDIT_EXPR = `(async () => {
 		steps.push({ y, visible: vis, invisible: bad })
 	}
 	window.scrollTo(0, 0)
-	return { pageHeight: H, steps, stuckSamples: [...stuck.keys()] }
+	// CSS ground truth (2026-08-10, hotelnow: Tailwind pipeline broken ⇒ compiled fine, rendered unstyled —
+	// invisible to a snapshot, obvious to a vision model, and now measurable for blind ones): did ANY
+	// stylesheet load, and does the body carry non-default computed styles?
+	const bodyCS = getComputedStyle(document.body)
+	const css = {
+		sheets: document.styleSheets.length,
+		bodyFont: (bodyCS.fontFamily || '').split(',')[0].trim(),
+		bodyBg: bodyCS.backgroundColor,
+	}
+	return { pageHeight: H, steps, stuckSamples: [...stuck.keys()], css }
 })()`
 
 async function launchPage(): Promise<{ page: PageLike; close: () => Promise<void> }> {
@@ -130,9 +145,36 @@ async function launchPage(): Promise<{ page: PageLike; close: () => Promise<void
 	return { page, close: () => browser!.close() }
 }
 
+/** The narrow runtime surface the tool needs — the Docker sandbox already has this exact shape. */
+export interface BrowserHost {
+	getHostPort(): Promise<number>
+	exec(command: string): Promise<unknown>
+	execDetached(command: string): Promise<unknown>
+}
+
+/** Adapt either runtime to BrowserHost. Docker IS the shape; the HOST runtime (the desktop default —
+ *  ADR-081) maps previewPort/startDev, ensuring dependencies first because the Browser tool may run
+ *  before the user ever opened the Preview pane. startDev reaps its own predecessor (stopDev inside),
+ *  so the docker-path pkill reap becomes a no-op here. Undefined ⇒ no Browser tool for this runtime. */
+export function browserHostFor(runtime: ProjectRuntime | undefined): BrowserHost | undefined {
+	if (!runtime) return undefined
+	if ('getHostPort' in runtime) return runtime as unknown as BrowserHost
+	if (runtime.kind !== 'host') return undefined
+	return {
+		getHostPort: () => runtime.previewPort(),
+		exec: async () => undefined,
+		execDetached: async () => {
+			if (!(await runtime.hasDependencies())) await runtime.installDependencies()
+			await runtime.startDev({})
+		},
+	}
+}
+
 export interface BrowserToolDeps {
-	/** The project's sandbox — used to resolve the published preview port and to start the dev server. */
-	sandbox: DockerSandbox
+	/** The project's runtime, narrowed — resolves the preview port and starts the dev server. */
+	sandbox: BrowserHost
+	/** Does the session's model have vision? Gates ONLY op:"screenshot" — text channels stay. Default true. */
+	vision?: boolean
 	/** Test seam: replace the real Playwright launch. */
 	launch?: () => Promise<{ page: PageLike; close: () => Promise<void> }>
 }
@@ -143,11 +185,13 @@ export function createBrowserTool(deps: BrowserToolDeps): Tool {
 	let session: { page: PageLike; close: () => Promise<void> } | undefined
 	let opened = false
 	let screenshots = 0
+	const vision = deps.vision !== false
 
 	const tool: Tool<z.infer<typeof inputSchema>> = {
 		name: 'Browser',
-		description:
-			'Look at the RUNNING app in a real browser — verify what you built actually renders and works. Use AFTER `npm run build` passes: op:"open" first (starts/loads the live preview), then op:"snapshot" for the accessibility tree (structure: headings, buttons, empty states — cheap text, prefer it), and op:"screenshot" ONLY for visual judgment (colors, layout, imagery — expensive, a few per session). Judge screenshots against the design checklist and FIX what you see. For GAMES/canvas/dynamic behavior use op:"probe" — snapshots cannot see a canvas; probe reads the RUNTIME state (window.__DEBUG__) as JSON so you tune with numbers, not guesses. Before declaring the page done, ALWAYS run op:"audit" — it scrolls the whole page and catches content stuck invisible (a scroll-reveal that never fires leaves sections at opacity 0) plus console errors.',
+		description: vision
+			? 'Look at the RUNNING app in a real browser — verify what you built actually renders and works. Use AFTER `npm run build` passes: op:"open" first (starts/loads the live preview), then op:"snapshot" for the accessibility tree (structure: headings, buttons, empty states — cheap text, prefer it), and op:"screenshot" ONLY for visual judgment (colors, layout, imagery — expensive, a few per session). Judge screenshots against the design checklist and FIX what you see. For GAMES/canvas/dynamic behavior use op:"probe" — snapshots cannot see a canvas; probe reads the RUNTIME state (window.__DEBUG__) as JSON so you tune with numbers, not guesses. Before declaring the page done, ALWAYS run op:"audit" — it scrolls the whole page and catches content stuck invisible (a scroll-reveal that never fires leaves sections at opacity 0) plus console errors.'
+			: 'Check the RUNNING app in a real browser — verify what you built actually renders and works. You have NO vision, so op:"screenshot" is unavailable — the TEXT channels are your eyes, and they are the higher-signal debugging surface anyway: op:"open" first (starts/loads the live preview), then op:"snapshot" for the accessibility tree (structure: headings, buttons, lists, empty states — an almost-empty tree means a dead/blank page), op:"audit" to scroll the whole page and get the ground truth text (content stuck invisible at opacity 0, whether CSS actually loaded, console errors with stacks), and op:"probe" to evaluate a JS expression in the live page and reason about RUNTIME state as JSON (games/canvas/dynamic behavior). ALWAYS run op:"audit" before declaring the page done. A console stack from audit names the broken file:line — fix that, rebuild, re-check.',
 		inputSchema,
 		activitySummary: (input) => `Browser ${input.op}${input.path ? ` ${input.path}` : ''}`,
 		isReadOnly: () => true, // looks at the app; never mutates project files
@@ -229,24 +273,36 @@ ${cut}` }
 						pageHeight: number
 						steps: { y: number; visible: number; invisible: number }[]
 						stuckSamples: string[]
+						css?: { sheets: number; bodyFont: string; bodyBg: string }
 					}
 					const errs = session.page.consoleErrors?.() ?? []
 					const totalStuck = report.steps.reduce((a, s) => a + s.invisible, 0)
+					const cssDead = report.css !== undefined && report.css.sheets === 0
 					const lines = [
 						`Full-page audit of ${session.page.url()} (height ${report.pageHeight}px):`,
 						...report.steps.map((s) => `  scroll ${s.y}px → ${s.visible} visible, ${s.invisible} INVISIBLE text elements`),
 					]
+					if (report.css) lines.push(`  styles: ${report.css.sheets} stylesheet(s), body font ${report.css.bodyFont || '?'}, body background ${report.css.bodyBg}`)
+					if (cssDead) {
+						lines.push('FAIL: ZERO stylesheets loaded — the page renders as unstyled browser defaults (Times New Roman on white). The CSS pipeline is broken: check that src/index.css keeps its tailwind import and that the build reported no CSS errors.')
+					}
 					if (totalStuck > 0) {
 						lines.push(
 							`FAIL: ${totalStuck} content elements are stuck at opacity 0 after scrolling — real visitors see blank sections. Usual cause: a scroll-reveal (IntersectionObserver / whileInView) that never fires. Samples: ${report.stuckSamples.map((s) => JSON.stringify(s)).join(', ')}. Fix the reveal (or remove it) and re-run audit.`,
 						)
 					}
 					if (errs.length) lines.push(`Console errors (${errs.length}): ${errs.slice(0, 5).join(' | ')}`)
-					if (totalStuck === 0 && errs.length === 0) lines.push('PASS: all content renders while scrolling; no console errors.')
-					return { content: lines.join('\n'), isError: totalStuck > 0 }
+					if (totalStuck === 0 && errs.length === 0 && !cssDead) lines.push('PASS: all content renders while scrolling; styles loaded; no console errors.')
+					return { content: lines.join('\n'), isError: totalStuck > 0 || cssDead }
 				}
 
 				// screenshot
+				if (!vision) {
+					return {
+						content: 'This session\'s model has NO vision — a screenshot would be an image you cannot read. Use op:"snapshot" (structure), op:"audit" (invisible content + CSS + console errors), or op:"probe" (runtime state as JSON) instead.',
+						isError: true,
+					}
+				}
 				if (screenshots >= MAX_SCREENSHOTS) {
 					return { content: `Screenshot budget (${MAX_SCREENSHOTS}) exhausted for this session — use op:"snapshot" (text) for further checks.`, isError: true }
 				}

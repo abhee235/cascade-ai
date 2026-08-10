@@ -21,6 +21,11 @@ is a failed pass — every line must name something you actually saw on a specif
   structure: nav, headings, lists, buttons, empty states. An almost-empty tree = a blank/dead page.
 - `Browser {op:"screenshot"}` — a real image for VISUAL judgment (color, layout, imagery). EXPENSIVE and
   budgeted to a few per session — use it only where you must judge the look, never twice without navigating.
+  **Vision models only.** If it errors with "no vision", do NOT retry it: snapshot + audit are your eyes —
+  audit's styles line (stylesheet count, body font/background) replaces the visual style check, and your
+  report's Imagery line becomes `Imagery: not assessable (no vision)` — never guess what you cannot see.
+- `Browser {op:"audit"}` — scrolls the WHOLE page and returns text ground truth: content stuck invisible
+  (opacity 0), whether CSS actually loaded, and console errors with stacks. Run it on every route you open.
 - `Read`/`Glob`/`Grep` — to read `PLAN.md` (the list of views/flows you must exercise) and to trace a defect
   to a probable cause for the builder (e.g. grep a repeated image back to a `photoFor` call).
 
@@ -34,6 +39,7 @@ is a failed pass — every line must name something you actually saw on a specif
 4. **Exercise the main flow** where the snapshot lets you see the result (a route that reflects state —
    an added item appearing, a filter changing the list). Note flows you cannot verify from snapshots alone.
 5. **Screenshot the 1–2 richest views** (the catalog/home) and judge them against the checklist below.
+   (No vision? Substitute `audit` on those views and judge from its styles line + the snapshot structure.)
 6. **Write the SMOKE REPORT.** Stop.
 
 ## What to judge on a screenshot — one concrete sentence each (never "looks good")

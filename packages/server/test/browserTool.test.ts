@@ -2,7 +2,7 @@
 // (no real Playwright/browser in tests) and a fake sandbox (no Docker).
 
 import { describe, expect, it, vi } from 'vitest'
-import { createBrowserTool, type PageLike } from '../src/browserTool'
+import { browserHostFor, createBrowserTool, type PageLike } from '../src/browserTool'
 
 function fakePage(over: Partial<PageLike> = {}): PageLike {
 	return {
@@ -183,5 +183,84 @@ describe('Browser audit (the stuck-at-opacity-0 detector — 3 shipped builds mo
 		const r2 = await tool2.call({ op: 'audit' }, ctx)
 		expect(r2.content).toContain('PASS')
 		f.mockRestore()
+	})
+})
+
+describe('Browser without vision (2026-08-10) — the tool stays, only screenshot is gated', () => {
+	it('screenshot errors with a redirect to the text channels; snapshot/audit still work', async () => {
+		const f = stubFetch(true)
+		const page = fakePage({ evaluate: async () => ({ pageHeight: 900, steps: [{ y: 0, visible: 5, invisible: 0 }], stuckSamples: [], css: { sheets: 2, bodyFont: 'Inter', bodyBg: 'rgb(250, 250, 249)' } }) })
+		const tool = createBrowserTool({ sandbox: fakeSandbox(), vision: false, launch: async () => ({ page, close: async () => {} }) })
+		const ctx = {} as never
+		await tool.call({ op: 'open' }, ctx)
+
+		const shot = await tool.call({ op: 'screenshot' }, ctx)
+		expect(shot.isError).toBe(true)
+		expect(shot.content).toContain('op:"snapshot"')
+		expect(shot.images).toBeUndefined()
+
+		const snap = await tool.call({ op: 'snapshot' }, ctx)
+		expect(snap.isError).toBeFalsy()
+		const audit = await tool.call({ op: 'audit' }, ctx)
+		expect(audit.isError).toBeFalsy()
+		expect(audit.content).toContain('2 stylesheet(s)')
+		f.mockRestore()
+	})
+
+	it('the no-vision description declares screenshot unavailable; the vision one advertises it', () => {
+		const blind = createBrowserTool({ sandbox: fakeSandbox(), vision: false })
+		expect(blind.description).toContain('NO vision')
+		expect(blind.description).toContain('op:"screenshot" is unavailable')
+		const sighted = createBrowserTool({ sandbox: fakeSandbox() })
+		expect(sighted.description).toContain('op:"screenshot" ONLY for visual judgment')
+	})
+})
+
+describe('Browser audit CSS ground truth (hotelnow: styles pipeline broke, page rendered unstyled)', () => {
+	it('ZERO stylesheets ⇒ FAIL naming the CSS pipeline, even with all content visible', async () => {
+		const f = stubFetch(true)
+		const page = fakePage({ evaluate: async () => ({ pageHeight: 900, steps: [{ y: 0, visible: 12, invisible: 0 }], stuckSamples: [], css: { sheets: 0, bodyFont: '"Times New Roman"', bodyBg: 'rgba(0, 0, 0, 0)' } }) })
+		const tool = createBrowserTool({ sandbox: fakeSandbox(), launch: async () => ({ page, close: async () => {} }) })
+		const ctx = {} as never
+		await tool.call({ op: 'open' }, ctx)
+		const r = await tool.call({ op: 'audit' }, ctx)
+		expect(r.isError).toBe(true)
+		expect(r.content).toContain('ZERO stylesheets')
+		f.mockRestore()
+	})
+
+	it('audit tolerates fakes without the css field (older report shape)', async () => {
+		const f = stubFetch(true)
+		const page = fakePage({ evaluate: async () => ({ pageHeight: 900, steps: [{ y: 0, visible: 5, invisible: 0 }], stuckSamples: [] }) })
+		const tool = createBrowserTool({ sandbox: fakeSandbox(), launch: async () => ({ page, close: async () => {} }) })
+		const ctx = {} as never
+		await tool.call({ op: 'open' }, ctx)
+		const r = await tool.call({ op: 'audit' }, ctx)
+		expect(r.isError).toBeFalsy()
+		f.mockRestore()
+	})
+})
+
+describe('browserHostFor — the host runtime gets a Browser too (was Docker-only)', () => {
+	it('docker shape passes through; host maps previewPort/startDev with a deps check first', async () => {
+		const docker = { getHostPort: async () => 1, exec: async () => ({}), execDetached: async () => undefined, kind: 'docker' }
+		expect(browserHostFor(docker as never)).toBe(docker)
+
+		const calls: string[] = []
+		const host = {
+			kind: 'host',
+			previewPort: async () => 51733,
+			hasDependencies: async () => false,
+			installDependencies: async () => { calls.push('install'); return true },
+			startDev: async () => { calls.push('startDev') },
+		}
+		const adapted = browserHostFor(host as never)!
+		expect(await adapted.getHostPort()).toBe(51733)
+		await adapted.execDetached('ignored — the adapter owns the command')
+		expect(calls).toEqual(['install', 'startDev'])
+	})
+
+	it('undefined runtime ⇒ no Browser tool', () => {
+		expect(browserHostFor(undefined)).toBeUndefined()
 	})
 })

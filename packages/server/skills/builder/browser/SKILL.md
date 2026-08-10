@@ -20,6 +20,11 @@ Smoke:
 - [ ] 6. Fix what you saw; build; re-check the one thing you fixed
 ```
 
+**No vision?** If op:"screenshot" errors with "no vision", skip step 5 — do NOT retry it. Steps 2–4 are
+your eyes: the snapshot shows structure (an almost-empty tree = dead page), and audit's styles line
+(stylesheet count, body font/background) plus its console errors replace the visual check. A console
+stack names the broken file:line — that is better debugging data than any screenshot.
+
 **Why audit is mandatory:** a scroll-reveal animation (IntersectionObserver / `whileInView`) that never
 fires leaves whole sections — pricing, specs, CTA — permanently at `opacity: 0`. The code compiles, the
 top-of-page screenshot looks fine, and real visitors see blank page. This exact bug shipped three builds

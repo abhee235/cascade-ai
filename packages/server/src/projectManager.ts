@@ -15,7 +15,7 @@ import { fanout, OtelTracer, type NestableTracer } from './otelTracer.js'
 import type { ProjectInfo } from '@cascade/app-protocol'
 import { applyTemplate, readAiRules } from './templates.js'
 import { createPlannerSession, needsPlanStage } from './planStage.js'
-import { createBrowserTool } from './browserTool.js'
+import { browserHostFor, createBrowserTool } from './browserTool.js'
 import { createPackTool } from './packTool.js'
 import { createImageSearchTool } from './imageSearchTool.js'
 import { hasVision } from './modelCaps.js'
@@ -276,7 +276,11 @@ export class ProjectManager {
           // against the NIM endpoint's real window instead of the model→map guess (or the 8k default).
           contextWindow: this.active.contextWindow,
           // ADR-067: per-model output cap + sampling, applied on every turn (providers ignore what they can't use).
-          maxOutputTokens: this.active.maxOutputTokens,
+          // UNSET means the window-ratio default ('auto' → max(window/8, 2048) capped at 16,384 — core's
+          // recommendedMaxOutputTokens), NOT the flat 16,384 the providers fall back to. On small windows
+          // the flat cap let a weak model's thinking eat 40% of the context (measured: 16,384 of 40,960),
+          // dragging the wire wall and the compaction trigger down with it. An explicit value still wins.
+          maxOutputTokens: this.active.maxOutputTokens ?? ('auto' as const),
           temperature: this.active.temperature,
           topP: this.active.topP,
           topK: this.active.topK,
@@ -348,9 +352,13 @@ export class ProjectManager {
           // - ImageSearch (ADR-071): real stock photos for the app — server-side because it's coupled to the
           //   preview CSP img-src allowlist. Always offered (no gating; it degrades to webPhoto/ArtImage).
           extraTools: [
-            ...(this.visionOk && sandbox && 'getHostPort' in sandbox
-              ? [createBrowserTool({ sandbox: sandbox as import('./dockerSandbox.js').DockerSandbox })]
-              : []),
+            // Browser rides on BOTH runtimes now (browserHostFor adapts host-mode previewPort/startDev),
+            // and vision no longer gates the TOOL — only op:"screenshot" (2026-08-10: a text-only local
+            // quant had no runtime smoke channel at all; snapshot/audit/probe are text and stay).
+            ...((): import('@cascade/core').Tool[] => {
+              const host = browserHostFor(sandbox as unknown as import('./projectRuntime.js').ProjectRuntime | undefined)
+              return host ? [createBrowserTool({ sandbox: host, vision: this.visionOk })] : []
+            })(),
             createImageSearchTool(),
             ...([createPackTool({ projectDir: dir, templateId: 'react' })].filter(Boolean) as import('@cascade/core').Tool[]),
           ],
@@ -381,7 +389,11 @@ export class ProjectManager {
           // The window matters as much as the model: unset, a local backend silently front-truncates the
           // prompt (ADR-038) — so the planner must size against the same window the builder uses.
           contextWindow: this.active.contextWindow,
-          maxOutputTokens: this.active.maxOutputTokens,
+          // UNSET means the window-ratio default ('auto' → max(window/8, 2048) capped at 16,384 — core's
+          // recommendedMaxOutputTokens), NOT the flat 16,384 the providers fall back to. On small windows
+          // the flat cap let a weak model's thinking eat 40% of the context (measured: 16,384 of 40,960),
+          // dragging the wire wall and the compaction trigger down with it. An explicit value still wins.
+          maxOutputTokens: this.active.maxOutputTokens ?? ('auto' as const),
           skillDirs: skillDirsFor(dir),
           sandbox,
           // ADR-081 amendment: the plan stage is a SUB-AGENT of this turn, not a turn of its own. One
