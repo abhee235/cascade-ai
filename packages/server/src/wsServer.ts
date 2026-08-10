@@ -19,7 +19,7 @@ import type { BuilderCommand } from '@cascade/app-protocol'
 import { beginTurn, flushTracers, ProjectManager, setTraceSession, type SessionTracerFactory } from './projectManager.js'
 import { ensurePlanPersisted, planSalvageNudge } from './planStage.js'
 import { DockerSandbox, dockerAvailable, sweepSandboxContainers } from './dockerSandbox.js'
-import { HostSandbox } from './hostSandbox.js'
+import { HostSandbox, sweepHostDevServers } from './hostSandbox.js'
 import { DEFAULT_RUNTIME_MODE, type RuntimeMode } from './projectRuntime.js'
 import type { RuntimeInfo } from '@cascade/app-protocol'
 import { ensureVisualEditConfig, listTemplates } from './templates.js'
@@ -489,6 +489,7 @@ export function handleConnection(
               topP: current?.topP ?? d.topP,
               topK: current?.topK ?? d.topK,
               repeatPenalty: current?.repeatPenalty ?? d.repeatPenalty,
+              presencePenalty: current?.presencePenalty ?? d.presencePenalty,
             }
             setModelParams(msg.provider, msg.model, fill)
             sendEnabledModels()
@@ -1093,6 +1094,10 @@ export async function start(deps: ServerDeps = {}) {
     const swept = await sweepSandboxContainers().catch(() => 0)
     if (swept) console.log(`Swept ${swept} orphaned sandbox container(s) from a previous run.`)
   }
+  // Host mode leaks the same way (measured: 55 stale dev servers across sessions) — sweep the recorded
+  // dev servers of EVERY project at startup, not just the ones that happen to get reopened.
+  const hostSwept = await sweepHostDevServers(PROJECTS_ROOT).catch(() => 0)
+  if (hostSwept) console.log(`Reclaimed ${hostSwept} recorded dev server(s) from previous runs.`)
   // ALWAYS a runtime now. Host mode previously injected nothing, which is why it had no live preview, no
   // Console pane and no problems panel — the whole product minus the parts that need somewhere to run.
   // Reads the CURRENT mode on every call, so a live switch takes effect on the next open() without

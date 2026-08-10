@@ -16,6 +16,7 @@ export interface HfDefaults {
 	topP?: number
 	topK?: number
 	repeatPenalty?: number
+	presencePenalty?: number
 }
 
 /** Only ids that are actually HF repo paths (`org/name`). Plain Ollama tags ("qwen36-agentic") and hosted
@@ -52,14 +53,21 @@ export async function fetchHfDefaults(modelId: string): Promise<HfDefaults | und
 	const base = `https://huggingface.co/${repo}/resolve/main`
 	const [config, gen] = await Promise.all([fetchJson(`${base}/config.json`), fetchJson(`${base}/generation_config.json`)])
 
+	// Multimodal architectures (Qwen3.5's Qwen3_5ForConditionalGeneration, and the *ForConditionalGeneration
+	// family generally) nest the text model's config under `text_config` — the top level carries only the
+	// vision/audio glue. Measured (Qwen/Qwen3.5-9B): max_position_embeddings=262144 lives ONLY there, so the
+	// top-level-only read auto-filled nothing for the entire family.
+	const textConfig = (config?.text_config ?? {}) as Record<string, unknown>
 	const out: HfDefaults = {
 		// The NATIVE trained length. A serving stack may allocate less (--max-model-len) — the live probe
 		// wins for that — but as the default and the slider ceiling, this is the honest number.
-		contextWindow: num(config?.max_position_embeddings),
+		contextWindow: num(config?.max_position_embeddings) ?? num(textConfig.max_position_embeddings),
 		temperature: num(gen?.temperature),
 		topP: num(gen?.top_p),
 		topK: num(gen?.top_k),
 		repeatPenalty: num(gen?.repetition_penalty),
+		// Qwen3.5 ships presence_penalty 1.5 as its author default — its own anti-loop insurance; carry it.
+		presencePenalty: num(gen?.presence_penalty),
 	}
 	const any = Object.values(out).some((v) => v !== undefined)
 	const result = any ? out : undefined

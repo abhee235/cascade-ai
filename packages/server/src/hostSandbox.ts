@@ -274,6 +274,32 @@ export class HostSandbox implements ProjectRuntime {
 	}
 }
 
+/**
+ * Sweep dev servers orphaned by PREVIOUS runs, across every project under `root` — host mode's answer to
+ * `sweepSandboxContainers`. Measured (2026-08-10): 55 stale project dev servers had accumulated across
+ * sessions, each holding a port and memory, because per-project reclaim only runs when THAT project is
+ * reopened — projects never reopened leak forever. Reuses stopDev per recorded project: it already guards
+ * pid reuse (kills only when the recorded port is actually listening) and removes the record either way.
+ * Returns the number of records handled.
+ */
+export async function sweepHostDevServers(root: string): Promise<number> {
+	let dirs: string[]
+	try {
+		dirs = readdirSync(root, { withFileTypes: true })
+			.filter((e) => e.isDirectory())
+			.map((e) => join(root, e.name))
+	} catch {
+		return 0 // no projects root yet — nothing to sweep
+	}
+	let swept = 0
+	for (const dir of dirs) {
+		if (!existsSync(devPidPath(dir))) continue
+		swept++
+		await new HostSandbox(dir).stopDev().catch(() => {})
+	}
+	return swept
+}
+
 /** npm is a .cmd shim on Windows and only resolves through a shell — hence `shell: true` at the call site. */
 const npm = () => (isWindows ? 'npm.cmd' : 'npm')
 

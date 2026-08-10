@@ -9,7 +9,7 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } fro
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { HostSandbox, hostBashPath } from '../src/hostSandbox'
+import { HostSandbox, hostBashPath, sweepHostDevServers } from '../src/hostSandbox'
 import { devServerError } from '../src/previewManager'
 
 const project = () => mkdtempSync(join(tmpdir(), 'cascade-host-'))
@@ -254,5 +254,25 @@ describe('detached children and dev servers', () => {
 		const res = await s.exec('npm run dev')
 		expect(res.exitCode).toBe(1)
 		expect(res.output).toMatch(/Preview/)
+	})
+})
+
+describe('sweepHostDevServers — startup reclaim across ALL projects (measured: 55 orphans)', () => {
+	it('handles every recorded dev server under the root and clears stale records', async () => {
+		const root = mkdtempSync(join(tmpdir(), 'cascade-sweep-'))
+		// Project A: a stale record — pid long gone, port not listening. stopDev's pid-reuse guard means
+		// nothing gets killed, but the record must be handled and removed.
+		mkdirSync(join(root, 'proj-a', '.cascade'), { recursive: true })
+		writeFileSync(join(root, 'proj-a', '.cascade', 'dev.json'), JSON.stringify({ pid: 999999, port: 59998 }))
+		// Project B: no record — untouched.
+		mkdirSync(join(root, 'proj-b'), { recursive: true })
+
+		const swept = await sweepHostDevServers(root)
+		expect(swept).toBe(1)
+		expect(existsSync(join(root, 'proj-a', '.cascade', 'dev.json'))).toBe(false) // record cleared
+	})
+
+	it('a missing projects root sweeps nothing and does not throw', async () => {
+		expect(await sweepHostDevServers(join(tmpdir(), 'does-not-exist-' + Date.now()))).toBe(0)
 	})
 })
