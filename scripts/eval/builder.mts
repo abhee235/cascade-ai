@@ -18,7 +18,8 @@ import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { createProvider, createSession, JsonlTracer, type CascadeSession, type ModelProvider } from '@cascade/core'
 import { BUILDER_BEHAVIOR } from '../../packages/server/src/projectManager'
-import { createPlannerSession, ensurePlanPersisted, needsPlanStage } from '../../packages/server/src/planStage'
+import { createPlannerSession, ensurePlanPersisted, needsPlanStage, planSalvageNudge } from '../../packages/server/src/planStage'
+import { HostSandbox } from '../../packages/server/src/hostSandbox'
 import { createPackTool } from '../../packages/server/src/packTool'
 import { keepAwake } from './keepAwake.mts'
 import { fanout, OtelTracer } from './otelTracer.mts'
@@ -208,6 +209,11 @@ for (const id of wanted) {
 		provider,
 		model: args.model!,
 		mode: 'bypass',
+		// FIDELITY: the product's default runtime is HostSandbox (ADR-081) — on Windows that now means Git
+		// Bash when present, cmd fallback otherwise, and the Bash tool advertises whichever it got. Without
+		// this the bench ran core's sandbox-less spawn (always cmd on Windows) and measured a shell the
+		// product no longer uses.
+		sandbox: new HostSandbox(work),
 		tracer: otel ? fanout(new JsonlTracer(tracePath), otel) : new JsonlTracer(tracePath),
 		autoMemory: false,
 		maxTurns: scenario.budgets.maxTurns,
@@ -256,6 +262,16 @@ for (const id of wanted) {
 					if (ev.type === 'toolStart') process.stdout.write('.')
 					else if (ev.type === 'question') planner.respondQuestion(ev.id, Object.fromEntries(ev.questions.map((q) => [q.question, q.options[0]?.label ?? 'Other'])))
 					else if (ev.type === 'permission') planner.respondPermission(ev.id, 'allow')
+				}
+				// FIDELITY (wsServer submit path): the spoken-questions salvage — when the stage ended with no
+				// plan and no question asked, ONE nudge round names the protocol violation and re-runs.
+				if (!timedOut && !ensurePlanPersisted(work, planner)) {
+					process.stdout.write('p')
+					for await (const ev of planner.submit(planSalvageNudge(planner))) {
+						if (ev.type === 'toolStart') process.stdout.write('.')
+						else if (ev.type === 'question') planner.respondQuestion(ev.id, Object.fromEntries(ev.questions.map((q) => [q.question, q.options[0]?.label ?? 'Other'])))
+						else if (ev.type === 'permission') planner.respondPermission(ev.id, 'allow')
+					}
 				}
 			} finally {
 				stage = undefined

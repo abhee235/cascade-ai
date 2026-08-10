@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { createSession, loadAgentDefs, type CompletionRequest, type ModelProvider } from '@cascade/core'
-import { createPlannerSession, ensurePlanPersisted, needsPlanStage } from '../src/planStage'
+import { createPlannerSession, ensurePlanPersisted, needsPlanStage, planSalvageNudge } from '../src/planStage'
 import { agentDirsFor, ProjectManager } from '../src/projectManager'
 
 // ── fixtures ─────────────────────────────────────────────────────────────────────────────────────────
@@ -227,5 +227,24 @@ describe('ProjectManager.planSessionFor', () => {
 			/* drain — gives the builder session history */
 		}
 		expect(mgr.planSessionFor(p.id)).toBeUndefined() // fresh no more
+	})
+})
+
+describe('planSalvageNudge (dokar-9B forensics) — spoken questions are a protocol violation', () => {
+	// The measured failure: the planner composed three clarifying questions as PROSE, ended its text
+	// "Let me ask these questions:" — and called nothing. The stage fell through with no questions asked
+	// and no plan; the builder assumed everything.
+	const sessionWith = (text: string) =>
+		({ getHistory: () => [{ role: 'user', content: 'build dokar' }, { role: 'assistant', content: [{ type: 'text', text }] }] }) as never
+
+	it('question-shaped final text → the nudge names AskUserQuestion and the plain-TEXT violation', () => {
+		const nudge = planSalvageNudge(sessionWith('Before proceeding: 1. Persistence? 2. Auth needed? Let me ask these questions:'))
+		expect(nudge).toContain('AskUserQuestion')
+		expect(nudge).toContain('plain TEXT')
+	})
+
+	it('no questions, just chatter → the nudge demands the plan itself', () => {
+		const nudge = planSalvageNudge(sessionWith('I will help you build an advanced to-do list app.'))
+		expect(nudge).toContain('Produce the plan NOW')
 	})
 })

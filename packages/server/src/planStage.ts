@@ -50,7 +50,9 @@ export interface PlannerSessionOptions {
   tracer?: Tracer
   /** Eval fidelity: pinned windows carry over to the stage too. */
   contextWindow?: number
-  maxOutputTokens?: number
+  /** A number pins the cap; 'auto' derives it from the window (core's recommendedMaxOutputTokens) — the
+   *  same contract as the builder session, so the planner's thinking is bounded by the same ratio. */
+  maxOutputTokens?: number | 'auto'
 }
 
 /** The planner as its own top-level session: the def's body is its system prompt, its `tools:` allowlist
@@ -103,6 +105,25 @@ function lastAssistantText(history: Message[]): string {
  *  suppresses the rung-2 plan nudge AND pins noise into every builder turn. A plan must have a heading
  *  and enough body to plausibly carry the sections. */
 const MIN_PLAN_CHARS = 200
+
+/**
+ * The one-retry salvage nudge for a stage that ended with NO plan on disk and none in the final message.
+ * Measured (dokar/qwen3.5-9B 2026-08-09): the planner composed three good clarifying questions as PROSE,
+ * ended its text "Let me ask these questions:" — and called nothing. Questions only reach the user through
+ * the AskUserQuestion tool; spoken questions are a protocol violation the model cannot see, and the stage
+ * silently fell through to the builder, which assumed everything. The nudge names the violation and the
+ * tool; the caller runs ONE extra submit with it before the ensurePlanPersisted fallback.
+ */
+export function planSalvageNudge(session: CascadeSession): string {
+  const spokeQuestions = /\?/.test(lastAssistantText(session.getHistory()))
+  return (
+    '<system-reminder>Your planning turn ended with NO plan file and NO question asked. ' +
+    (spokeQuestions
+      ? 'You wrote clarifying questions as plain TEXT — the user never saw them: questions only reach the user through the AskUserQuestion tool. Call AskUserQuestion NOW with your questions (2 at most, concrete options). After the answers — or if you can proceed on reasonable assumptions — produce the plan: terse markdown starting with a # heading (or Write PLAN.md).'
+      : 'Produce the plan NOW: terse markdown starting with a # heading (or Write PLAN.md). If one critical detail truly blocks planning, ask it first with the AskUserQuestion tool.') +
+    ' Do not reply to this note.</system-reminder>'
+  )
+}
 
 export function ensurePlanPersisted(dir: string, session: CascadeSession): boolean {
   const planPath = join(dir, 'PLAN.md')

@@ -17,7 +17,7 @@ import { WebSocketServer, type WebSocket } from 'ws'
 import type { CascadeSession, InboundMessage } from '@cascade/core'
 import type { BuilderCommand } from '@cascade/app-protocol'
 import { beginTurn, flushTracers, ProjectManager, setTraceSession, type SessionTracerFactory } from './projectManager.js'
-import { ensurePlanPersisted } from './planStage.js'
+import { ensurePlanPersisted, planSalvageNudge } from './planStage.js'
 import { DockerSandbox, dockerAvailable, sweepSandboxContainers } from './dockerSandbox.js'
 import { HostSandbox } from './hostSandbox.js'
 import { DEFAULT_RUNTIME_MODE, type RuntimeMode } from './projectRuntime.js'
@@ -623,6 +623,16 @@ export function handleConnection(
                 for await (const ev of planner.submit(msg.text)) {
                   if (ev.type === 'turnDone') continue
                   relay(ev)
+                }
+                // SALVAGE (measured, dokar/qwen3.5-9B): the planner spoke its clarifying questions as
+                // prose and stopped — no AskUserQuestion call, no plan anywhere. One nudge round names
+                // the protocol violation and re-runs the session; a planner that DID produce a plan
+                // (PLAN.md or heading-led final text, which ensurePlanPersisted persists) skips this.
+                if (turnDir && !stageAborted && !ensurePlanPersisted(turnDir, planner)) {
+                  for await (const ev of planner.submit(planSalvageNudge(planner))) {
+                    if (ev.type === 'turnDone') continue
+                    relay(ev)
+                  }
                 }
               } finally {
                 staging = undefined

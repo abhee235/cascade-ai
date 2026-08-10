@@ -9,20 +9,40 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } fro
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { HostSandbox } from '../src/hostSandbox'
+import { HostSandbox, hostBashPath } from '../src/hostSandbox'
 import { devServerError } from '../src/previewManager'
 
 const project = () => mkdtempSync(join(tmpdir(), 'cascade-host-'))
 const isWindows = process.platform === 'win32'
 
 describe('HostSandbox', () => {
-	it('reports the HOST shell, so the loop advertises the right syntax', () => {
-		// The bug this prevents: agentLoop used to infer "sandbox ⇒ posix". Injecting a host runtime on
-		// Windows would then tell the model to use POSIX syntax while commands hit cmd.exe — the measured
-		// `mkdir -p` failure on turn 1, reintroduced by the very feature meant to make host mode work.
+	it('reports the shell run() actually spawns, so the loop advertises the right syntax', () => {
+		// Two measured bugs bracket this: agentLoop once inferred "sandbox ⇒ posix" while commands hit
+		// cmd.exe (`mkdir -p` failed on turn 1); then advertising cmd honestly ALSO failed (dokar-9B:
+		// 19/25 Bash calls lost to dialect chaos). The contract now: Git Bash when found → posix,
+		// cmd.exe fallback → win32 — advertisement and execution always agree.
 		const s = new HostSandbox(project())
-		expect(s.shell).toBe(isWindows ? 'win32' : 'posix')
+		expect(s.shell).toBe(isWindows && !hostBashPath ? 'win32' : 'posix')
 		expect(s.kind).toBe('host')
+	})
+
+	it.runIf(isWindows && !!hostBashPath)('Git Bash executes MULTI-LINE commands fully (cmd stopped at line 1 and exited 0)', async () => {
+		// The dokar-9B "cleanup that never happened": cmd ran only the first line of a multi-line command
+		// and still exited 0, so the model believed four files were deleted when none were.
+		const s = new HostSandbox(project())
+		const res = await s.exec('echo first\necho second')
+		expect(res.output).toContain('first')
+		expect(res.output).toContain('second')
+		expect(res.exitCode).toBe(0)
+	})
+
+	it.runIf(isWindows && !!hostBashPath)('Git Bash gives POSIX semantics on Windows (the dialect the tool name promises)', async () => {
+		const dir = project()
+		const s = new HostSandbox(dir)
+		const res = await s.exec('mkdir -p nested/deep && ls nested')
+		expect(res.exitCode).toBe(0)
+		expect(res.output).toContain('deep')
+		expect(existsSync(join(dir, 'nested', 'deep'))).toBe(true)
 	})
 
 	it('roots the path jail at the real project directory', () => {
@@ -215,13 +235,14 @@ describe('devServerError', () => {
 // The stuck-turn fixes (measured in a desktop trace: an AGENT turn hung on an open Bash span).
 describe('detached children and dev servers', () => {
 	it('settles when the direct child exits, even if a detached grandchild still holds the pipes', async () => {
-		// THE hang: `start /b` leaves a grandchild that inherits stdout, so waiting for 'close' waits for
-		// the grandchild. Settling on 'exit' returns as soon as the shell itself is done. The grandchild
-		// here outlives the call by design — exactly like a detached dev server.
-		if (!isWindows) return // start /b is the Windows-specific reproduction
+		// THE hang: a backgrounded grandchild inherits stdout, so waiting for 'close' waits for the
+		// grandchild. Settling on 'exit' returns as soon as the shell itself is done. The grandchild here
+		// outlives the call by design — exactly like a detached dev server. The reproduction must speak
+		// the dialect run() actually spawns: `&` under Git Bash, `start /b` under the cmd fallback.
+		if (!isWindows) return // ping -n is the Windows flavor; POSIX hosts exercise this path in CI Linux runs
 		const s = new HostSandbox(project())
 		const t0 = Date.now()
-		const res = await s.exec('start /b cmd /c "ping -n 6 127.0.0.1 > nul"')
+		const res = await s.exec(hostBashPath ? 'ping -n 6 127.0.0.1 > /dev/null 2>&1 &' : 'start /b cmd /c "ping -n 6 127.0.0.1 > nul"')
 		expect(Date.now() - t0).toBeLessThan(3000) // grandchild pings for ~5s; we must not wait for it
 		expect(res.exitCode).toBe(0)
 	})

@@ -10,8 +10,9 @@
 // extensions have identical reach. Docker mode is the answer for anyone who wants more.
 //
 // What this deliberately does NOT do is emulate a container. `root` is the real project directory, so the
-// path jail's in-sandbox alias collapses to the identity, and `shell` reports the HOST shell so the loop
-// stops advertising POSIX syntax to a model whose commands will hit cmd.exe.
+// path jail's in-sandbox alias collapses to the identity, and `shell` reports the shell run() will actually
+// spawn — Git Bash (posix) when it can be found, cmd.exe (win32) as the fallback — so the loop advertises
+// the right syntax either way.
 
 import { spawn } from 'node:child_process'
 import { createReadStream, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, watch, writeFileSync } from 'node:fs'
@@ -40,16 +41,41 @@ const devLogPath = (dir: string) => join(dir, '.cascade', 'dev.log')
  */
 const devPidPath = (dir: string) => join(dir, '.cascade', 'dev.json')
 
-/** Windows has no POSIX shell guarantee. `cmd.exe` is always present, and core's Bash tool already teaches
- *  the model cmd syntax when told the target is win32 — which `shell` below does. */
+/** Windows has no POSIX shell GUARANTEE — but one is worth looking for. The original design accepted
+ *  cmd.exe and relied on core's Bash tool teaching cmd syntax when told the target is win32. Measured
+ *  (dokar/qwen3.5-9B, 2026-08-09): that teaching does not hold — 19 of 25 Bash calls failed, the model
+ *  mixing PowerShell (`Select-String`), bash and cmd dialects inside single commands, and multi-line
+ *  commands ran only their FIRST line (cmd stops at the newline) while exiting 0, so its "cleanup"
+ *  deletes silently never happened. A tool NAMED Bash that speaks cmd is a contradiction a weak model
+ *  cannot hold. Git Bash ships with Git for Windows — near-universal on a dev machine — and gives the
+ *  model the one dialect its training prior expects; cmd.exe stays the fallback. */
 const isWindows = process.platform === 'win32'
+
+/** A real bash for host-mode commands. Probes CASCADE_BASH (explicit override), then Git for Windows'
+ *  install locations. Deliberately NEVER bare `bash` from PATH: on Windows that can resolve to
+ *  System32's WSL launcher, whose filesystem view (/mnt/c/…) breaks every path the file tools use. */
+function findHostBash(): string | undefined {
+	if (!isWindows) return undefined
+	const candidates = [
+		process.env.CASCADE_BASH,
+		process.env.ProgramFiles && join(process.env.ProgramFiles, 'Git', 'bin', 'bash.exe'),
+		process.env['ProgramFiles(x86)'] && join(process.env['ProgramFiles(x86)'], 'Git', 'bin', 'bash.exe'),
+		process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Programs', 'Git', 'bin', 'bash.exe'),
+	]
+	for (const c of candidates) if (c && existsSync(c)) return c
+	return undefined
+}
+const hostBash = findHostBash()
+/** Exported for tests: which shell host-mode Bash actually gets on THIS machine. */
+export const hostBashPath = hostBash
 
 export class HostSandbox implements ProjectRuntime {
 	readonly kind = 'host' as const
 	/** The project IS the root here — no mount to translate. */
 	readonly root: string
-	/** Commands run through the host shell, so the loop must advertise ITS syntax (see Sandbox.shell). */
-	readonly shell = isWindows ? ('win32' as const) : ('posix' as const)
+	/** Commands run through the host shell, so the loop must advertise the syntax of the shell run() will
+	 *  actually spawn: Git Bash when found (posix), cmd.exe otherwise (win32). */
+	readonly shell = isWindows && !hostBash ? ('win32' as const) : ('posix' as const)
 
 	private dev?: { pid: number; port: number }
 	private reservedPort?: number
@@ -306,7 +332,8 @@ function freePort(): Promise<number> {
 function run(command: string, cwd: string, opts: { signal?: AbortSignal; onData?: (s: string) => void }): Promise<ExecResult> {
 	return new Promise((resolve) => {
 		if (!existsSync(cwd)) return resolve({ output: `cwd does not exist: ${cwd}`, exitCode: 1 })
-		const child = spawn(command, { cwd, shell: true, windowsHide: true, signal: opts.signal })
+		// Git Bash when available — node spawns a non-cmd shell string as `bash.exe -c <command>` — cmd otherwise.
+		const child = spawn(command, { cwd, shell: hostBash ?? true, windowsHide: true, signal: opts.signal })
 		let output = ''
 		let settled = false
 		const finish = (r: ExecResult) => {
