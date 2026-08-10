@@ -60,6 +60,10 @@ function createWindow(): void {
 		show: false, // avoid the white flash: reveal once the renderer has painted
 		backgroundColor: '#0b0b0c',
 		title: 'Cascade',
+		// Windows/macOS take the app icon from the executable/bundle (forge packagerConfig.icon); Linux
+		// window managers read it from the WINDOW. Dev runs resolve it from the source tree, packaged runs
+		// would need it as an extraResource — harmless to omit there (the zip carries no desktop entry).
+		...(process.platform === 'linux' ? { icon: join(__dirname, '..', 'build', 'icon.png') } : {}),
 		webPreferences: {
 			// The renderer is the same web app the browser serves — it talks to the server over the SAME
 			// WebSocket, with no privileged bridge. Keeping Node out of it means a bug in the app (or in a

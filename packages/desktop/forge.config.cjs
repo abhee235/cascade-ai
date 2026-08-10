@@ -32,6 +32,9 @@ module.exports = {
   packagerConfig: {
     name: 'Cascade',
     executableName: process.platform === 'win32' ? 'Cascade' : 'cascade',
+    // The Cascade mark (generated, not designed — scripts/gen-icon.mjs renders it from code and emits
+    // icon.ico/icns/png into build/). Extension-less: the packager appends .ico on Windows, .icns on mac.
+    icon: join(__dirname, 'build', 'icon'),
     asar: true,
     /**
      * What NOT to put inside the asar.
@@ -93,14 +96,16 @@ module.exports = {
       config: {
         name: 'Cascade',
         setupExe: 'CascadeSetup.exe',
+        setupIcon: join(__dirname, 'build', 'icon.ico'),
         ...(process.env.WINDOWS_CERT_FILE ? { certificateFile: process.env.WINDOWS_CERT_FILE, certificatePassword: process.env.WINDOWS_CERT_PASSWORD } : {}),
       },
     },
     {
       // macOS: a zip, which is what update-electron-app's feed serves. A .dmg is prettier for a first
       // install but cannot be an update artifact, so the zip is the one that must exist.
+      // Linux rides the same maker: a portable zip needs no distro packaging deps on the CI runner.
       name: '@electron-forge/maker-zip',
-      platforms: ['darwin'],
+      platforms: ['darwin', 'linux'],
     },
   ],
 

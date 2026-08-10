@@ -1,0 +1,89 @@
+# desktop-release.yml — build the Cascade desktop app for all three OSes and publish a GitHub Release.
+#
+# Trigger either way:
+#   git tag v0.1.0 && git push origin v0.1.0     → builds + creates the release with all artifacts
+#   workflow_dispatch (Actions tab → Run)        → builds only; artifacts downloadable from the run page
+#
+# Artifacts per OS (electron-forge make):
+#   Windows  out/make/squirrel.windows/x64/CascadeSetup.exe   (+ RELEASES/nupkg — the auto-update feed)
+#   macOS    out/make/zip/darwin/arm64/Cascade-….zip          (unzip → drag Cascade.app to Applications)
+#   Linux    out/make/zip/linux/x64/cascade-….zip             (portable — unzip and run ./cascade)
+#
+# Unsigned by default: Windows shows SmartScreen, macOS requires right-click → Open on first launch
+# (Gatekeeper, unidentified developer). Signing/notarization activate automatically when the secrets
+# WINDOWS_CERT_FILE / APPLE_ID etc. exist — the forge config reads them from the environment.
+
+name: desktop-release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write # create the release + upload assets
+
+jobs:
+  make:
+    name: make (${{ matrix.name }})
+    strategy:
+      fail-fast: false # one OS failing must not cancel the other two builds
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows
+          - os: macos-latest # arm64 (Apple Silicon) — matches the MacBook this is tested on
+            name: macos
+          - os: ubuntu-latest
+            name: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24 # node:sqlite — the storage layer's whole design premise (ADR-081 §1)
+          cache: npm
+
+      - name: Install workspace
+        run: npm ci
+
+      # The bundled headless Chromium the Browser tool uses (ADR-081 §7) — without it a packaged app can
+      # still run, but the agent cannot look at what it built unless Edge/Chrome happen to be installed.
+      - name: Bundle headless Chromium
+        run: npx playwright install chromium --only-shell
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: packages/desktop/browsers
+
+      - name: Build (server + web + main into dist/)
+        run: npm run build -w @cascade/desktop
+
+      - name: Package installers
+        run: npm run make -w @cascade/desktop
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cascade-${{ matrix.name }}
+          path: packages/desktop/out/make/**
+          if-no-files-found: error
+
+  release:
+    # Tag pushes only — a workflow_dispatch run stops at downloadable artifacts.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: make
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true # human-checks the three artifacts, then clicks publish
+          generate_release_notes: true
+          files: |
+            artifacts/cascade-windows/**/CascadeSetup.exe
+            artifacts/cascade-windows/**/*.nupkg
+            artifacts/cascade-windows/**/RELEASES
+            artifacts/cascade-macos/**/*.zip
+            artifacts/cascade-linux/**/*.zip
