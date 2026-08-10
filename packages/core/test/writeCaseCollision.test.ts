@@ -4,7 +4,7 @@
 // the build broken across five runs. Writing a name that differs from an existing sibling only by case
 // is rejected with the existing name spelled out.
 
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -79,6 +79,48 @@ describe('Write — package.json dependency-removal guard (hotelnow forensics, 2
 		const dir = mkdtempSync(join(tmpdir(), 'wpkg-'))
 		await WriteTool.call({ file_path: 'data.json', content: V4 }, ctx(dir))
 		const res = await WriteTool.call({ file_path: 'data.json', content: '{}' }, ctx(dir))
+		expect(res.isError).toBeFalsy()
+	})
+})
+
+describe('Write — overwrite freshness gate (batch-3: the App.tsx-vaporizer hole)', () => {
+	// Edit has always required Read-before-change; Write did not — so an agent told "PLAN files are targets
+	// to create" could Write an EXISTING scaffold file (App.tsx) and silently destroy wiring it never saw.
+	const ctxWithState = (cwd: string) => {
+		const state = new Map()
+		return { ctx: { cwd, readFileState: state } as never, state }
+	}
+
+	it('refuses to overwrite an existing file the model never read; allows it after a read', async () => {
+		const dir = mkdtempSync(join(tmpdir(), 'wfresh-'))
+		writeFileSync(join(dir, 'App.tsx'), 'scaffold wiring the model has not seen')
+		const { ctx, state } = ctxWithState(dir)
+
+		const blind = await WriteTool.call({ file_path: 'App.tsx', content: 'vaporized' }, ctx)
+		expect(blind.isError).toBe(true)
+		expect(blind.content).toContain('has not been read')
+		expect(await readFile(join(dir, 'App.tsx'), 'utf8')).toBe('scaffold wiring the model has not seen')
+
+		// A Read (simulated the way Read.ts records it) unlocks the overwrite.
+		state.set(join(dir, 'App.tsx'), { content: 'scaffold wiring the model has not seen', timestamp: Date.now() + 1000 })
+		const seen = await WriteTool.call({ file_path: 'App.tsx', content: 'deliberate rewrite' }, ctx)
+		expect(seen.isError).toBeFalsy()
+	})
+
+	it('new files need no read, and the model\'s own Write counts as knowledge (ADR-032)', async () => {
+		const dir = mkdtempSync(join(tmpdir(), 'wfresh-'))
+		const { ctx } = ctxWithState(dir)
+		const first = await WriteTool.call({ file_path: 'data.ts', content: 'v1' }, ctx)
+		expect(first.isError).toBeFalsy() // brand-new — no read required
+		const second = await WriteTool.call({ file_path: 'data.ts', content: 'v2' }, ctx)
+		expect(second.isError).toBeFalsy() // its own write registered the knowledge
+		expect(await readFile(join(dir, 'data.ts'), 'utf8')).toBe('v2')
+	})
+
+	it('no freshness cache wired (headless smokes) ⇒ gate is inert', async () => {
+		const dir = mkdtempSync(join(tmpdir(), 'wfresh-'))
+		writeFileSync(join(dir, 'x.ts'), 'old')
+		const res = await WriteTool.call({ file_path: 'x.ts', content: 'new' }, ctx(dir))
 		expect(res.isError).toBeFalsy()
 	})
 })

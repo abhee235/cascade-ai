@@ -6,6 +6,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname } from 'node:path'
 import type { Tool } from '../Tool'
 import { normalizeText } from '../fileState'
+import { readFreshnessError } from '../editCore'
 import { lineDiff } from '../../utils/diff'
 import { displayPath, ProjectPathError, resolveInProject } from '../projectPath'
 
@@ -70,6 +71,17 @@ Prefer Edit for changing part of a file — Write replaces the ENTIRE file, so i
         }
       }
       const before = await readFile(path, 'utf8').catch(() => undefined) // undefined ⇒ new file
+      // FRESHNESS gate for OVERWRITES (batch-3): a Write on an EXISTING file the model never Read silently
+      // destroys content it has never seen — the scaffold's App.tsx wiring is the standing risk, and the
+      // case-collision + package.json guards below were special cases of exactly this hole. Same contract
+      // and same escape hatches as Edit (readFreshnessError): a brand-new file needs no read, the model's
+      // own previous Write counts as knowledge (ADR-032), and headless smokes with no cache are exempt.
+      if (before !== undefined) {
+        const fresh = await readFreshnessError(ctx.readFileState, path, input.file_path, normalizeText(before))
+        if (fresh) {
+          return { content: fresh.replace('before editing it.', 'before overwriting it with Write — or change just part of it with Edit.'), isError: true }
+        }
+      }
       // SCAFFOLD-CONTRACT guard (measured, hotelnow 2026-08-10): the model rewrote package.json from its
       // training prior — Tailwind v3, dropping @tailwindcss/vite — while the preview force-restores the
       // template's vite.config.ts (ensureVisualEditConfig), which imports that very package. Result:
