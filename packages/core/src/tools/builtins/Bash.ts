@@ -44,10 +44,7 @@ const shellNoteLean = (exec: ExecPlatform): string =>
 
 const descriptionFull = (exec: ExecPlatform) => `Run a shell command in the project and return its combined stdout/stderr. Use it for real shell work — building, running tests, installing dependencies, git, and running scripts.
 
-Prefer the dedicated tools over Bash so the user can review your work:
-- Read a file with Read (not cat/head/tail); change one with Edit (not sed/awk); create one with Write (not echo > or heredoc). NEVER write file CONTENT through the shell: the shell EATS characters that are also operators — measured, a test file written with \`echo\` lost every \`>\` so \`() =>\` became \`() =\`, producing a syntactically dead file whose error ("no test suite found") then sent 20 turns chasing a config that was never broken.
-- Find files by name with Glob (not find/ls); search file contents with Grep (not grep/rg).
-Reserve Bash for commands that genuinely need a shell.
+File work belongs to the dedicated tools (Read/Edit/Write/Glob/Grep — the routing lives in "Using your tools" above); reserve Bash for commands that genuinely need a shell. One shell-specific trap stated here because it bites HARD: never write file CONTENT through the shell — the shell EATS characters that are also operators. Measured: a test file written with \`echo\` lost every \`>\` so \`() =>\` became \`() =\`, producing a syntactically dead file whose error ("no test suite found") then sent 20 turns chasing a config that was never broken.
 
 Execution notes:
 ${shellNoteFull(exec)}

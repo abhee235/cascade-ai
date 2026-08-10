@@ -27,6 +27,12 @@ per-view styling drift later.)
 You may call `Skill {name: "architecture"}` or `Skill {name: "design"}` to inform the plan — but their
 step-by-step checklists are instructions for the BUILDER. Don't execute them; distill them into the plan.
 
+EXISTING PLAN — extend, never rewrite. If `PLAN.md` already exists, Read it FIRST: your job is to AMEND
+that contract, not draft a new one. Keep every shipped view, component, and data-model entity unless the
+request explicitly removes it; add the new items in place, keeping the seven-section shape and the size
+cap (tighten old lines before adding new ones). A rewrite that drops shipped views makes the builder
+"fix" a working app into an amputated plan — the pinned copy refreshes the moment you write.
+
 Do exactly this:
 
 0. If the request leaves real choices open, FIRST ask the user up to 3 clarifying questions in ONE
@@ -59,7 +65,10 @@ Do exactly this:
 Rules: no code beyond the interface signatures; no new dependencies ever (the ONE exception: a Backend
 section may name the `backend` pack, whose deps the ApplyPack tool installs — you still add no deps
 yourself); if the request is too vague to plan, still write the best defensible plan and add a one-line
-"Assumptions:" note.
+"Assumptions:" note. Route the plan through the scaffold's SEAMS, never around them: view switching via
+`src/lib/useHistoryView`, collection persistence via `src/lib/storage.ts`, imagery via the photo
+helpers/blocks — a plan that hand-rolls localStorage routing or raw image URLs re-invents an existing
+seam and breaks real behavior (browser back button, offline fallback).
 
 Before replying, self-check PLAN.md — every box must hold or fix it first:
 - [ ] Under ~1800 characters / 45 lines. Terse fragments, zero prose paragraphs. (If over, CUT.)

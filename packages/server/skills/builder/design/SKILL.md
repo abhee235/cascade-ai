@@ -73,6 +73,10 @@ use `flex flex-col gap-*`, never margin stacks.
 
 ## 6. Imagery — never an emoji, never a gray box
 
+**IMAGERY ROUTING (the rule of thumb):** a grid/list of distinct items → `<Photo web="<subject keywords>"
+seed={item.id} kind="product">` (each card gets a distinct real photo) · a single hero/banner →
+`photo()`/`photoFor()` · abstract covers/avatars/decorative → `<ArtImage>`. Details and the why below.
+
 Choose by what the subject needs — don't default to abstract art when a real photo would sell it:
 
 - **Bundled photos** (fast, offline, curated) — for **ONE or TWO big images**: a hero, a section banner,

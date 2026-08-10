@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ProjectManager } from '../src/projectManager'
+import { BUILDER_BEHAVIOR, ProjectManager } from '../src/projectManager'
 import { createSession, type ModelProvider } from '@cascade/core'
 
 const fakeProvider: ModelProvider = {
@@ -112,4 +112,28 @@ describe('ProjectManager (13.2)', () => {
     const reopened = new ProjectManager({ root, model: 'fake', createSessionFor: () => mgr.open(mgr.list()[0].id) })
     expect(reopened.list().map((p) => p.name)).toContain('Persisted')
   })
+})
+
+describe('BUILDER_BEHAVIOR — the prompt-audit shape contract (2026-08-11)', () => {
+	// Pins the recomposition so accretion can't quietly regress it: one identity, headed sections,
+	// declared precedence, and detail that moved to skills staying moved. If a new rule is needed, it
+	// goes under the section whose question it answers — that's the lint this test enforces.
+	it('is one spine: headed sections, one identity, precedence declared once', () => {
+		expect(BUILDER_BEHAVIOR.startsWith('# Builder session')).toBe(true)
+		expect(BUILDER_BEHAVIOR).toContain('this section wins')
+		for (const h of ['## Pace', '## Context you already have', '## Architecture and quality', '## Verifying the running app']) {
+			expect(BUILDER_BEHAVIOR).toContain(h)
+		}
+		expect(BUILDER_BEHAVIOR.match(/You are /g)?.length).toBe(1) // exactly one identity
+	})
+
+	it('moved detail stays moved: imagery routing lives in the design skill, not here', () => {
+		expect(BUILDER_BEHAVIOR).not.toContain('photoFor()') // the routing table left with the skill
+		expect(BUILDER_BEHAVIOR).toContain('IMAGERY ROUTING') // the pointer to it remains
+	})
+
+	it('shouting stays rationed: single-digit emphasis, not the old wall of caps', () => {
+		const shouts = BUILDER_BEHAVIOR.match(/\bNEVER\b|\bMANDATORY\b|\bDO NOT\b/g) ?? []
+		expect(shouts.length).toBeLessThanOrEqual(4) // was ~15 — uniform intensity reads as uniform priority
+	})
 })

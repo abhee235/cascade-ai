@@ -107,7 +107,10 @@ const skillInputSchema = z.object({
 export function createSkillTool(skills: Skill[]): Tool<z.infer<typeof skillInputSchema>> {
 	return {
 		name: 'Skill',
-		description: `Load a project skill — curated, authoritative instructions for a specific kind of work. Read the matching skill BEFORE building in its area. Available: ${skills.map((s) => s.name).join(', ')}.`,
+		// One home per rule (prompt-audit C): the "## Skills" catalog in the system prompt owns the inventory
+		// and the load-when routing; this description only says what the tool does. Listing names here too
+		// doubled every skill name in every prompt.
+		description: `Load a project skill — curated, authoritative instructions for a specific kind of work. The "## Skills" catalog in your system prompt lists each skill and when to load it.`,
 		inputSchema: skillInputSchema,
 		activitySummary: (input) => `Loading skill "${input.name}"${input.file ? ` (${input.file})` : ''}`,
 		isReadOnly: () => true,
