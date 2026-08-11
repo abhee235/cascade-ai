@@ -18,6 +18,7 @@
 - select
 - separator
 - skeleton
+- sonner
 - switch
 - table
 - tabs
@@ -172,6 +173,20 @@ Exports: Separator
 Import: `import { Skeleton } from '@/components/ui/skeleton'`
 
 Exports: Skeleton
+
+## sonner
+
+Import: `import { Toaster, toast } from '@/components/ui/sonner'`
+
+Exports: Toaster, toast
+
+```tsx
+// Mount ONCE in App, then call toast() from anywhere. This is the "feedback after an action" rule:
+// every create/update/delete says something, or the user cannot tell whether it worked.
+<Toaster />                                  // in App.tsx, beside your view switch
+toast.success('Order placed')                // after a successful submit
+toast.error('Could not save — try again')    // after a failure
+```
 
 ## switch
 

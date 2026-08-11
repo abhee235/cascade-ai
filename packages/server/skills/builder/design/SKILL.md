@@ -79,6 +79,22 @@ Common traps — the SUBSTITUTES are: star ratings → `text-primary` (never tex
 stock" → `text-primary` or a `<Badge variant="secondary">` (never text-green-*); warnings/errors →
 `text-destructive` (never text-red-*).
 
+### Tokens in JS (charts, canvas, inline styles)
+
+Utilities are the normal path. When you MUST pass a colour to JavaScript — recharts, a canvas, an
+inline `style` — use the PRESET variable, never the Tailwind alias:
+
+```tsx
+fill="var(--chart-1)"   stroke="var(--border)"   background: 'var(--popover)'   // ✅ always defined
+fill="var(--color-chart-1)"                                                     // ❌ silently empty
+```
+
+Why: `@theme inline` only emits a `--color-*` alias when some generated UTILITY references it. Nothing
+uses `bg-chart-1`, so `--color-chart-1` does not exist at runtime and the chart paints black-on-black
+(measured, 2026-08-11). The preset variables — `--chart-1..5`, `--primary`, `--accent`, `--border`,
+`--popover`, `--muted-foreground`, `--radius` — are declared by the theme file itself and always resolve.
+`<ChartCard>` already does this for you; follow it if you ever drop to a raw chart.
+
 ## 5. Type & rhythm
 
 Display headlines (Hero, Section headings): `font-serif tracking-tight` — the serif is the personality;

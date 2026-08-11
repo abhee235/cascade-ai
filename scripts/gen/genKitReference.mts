@@ -15,6 +15,13 @@ const OUT_DIR = join(ROOT, 'packages', 'server', 'skills', 'builder', 'design', 
 
 /** Hand-written composition examples for the workhorses (generated facts + curated usage = precise AND practical). */
 const EXAMPLES: Record<string, string> = {
+	sonner: `\`\`\`tsx
+// Mount ONCE in App, then call toast() from anywhere. This is the "feedback after an action" rule:
+// every create/update/delete says something, or the user cannot tell whether it worked.
+<Toaster />                                  // in App.tsx, beside your view switch
+toast.success('Order placed')                // after a successful submit
+toast.error('Could not save — try again')    // after a failure
+\`\`\``,
 	button: `\`\`\`tsx
 <Button onClick={save}>Save</Button>
 <Button variant="secondary">Cancel</Button>
@@ -76,6 +83,39 @@ const EXAMPLES: Record<string, string> = {
 
 /** Hand-written composition examples for the blocks (same idea: generated facts + curated usage). */
 const BLOCK_EXAMPLES: Record<string, string> = {
+	StatCard: `\`\`\`tsx
+// A dashboard's top row is 3–4 of these. Values are DERIVED (useMemo), never hardcoded, and always
+// carry a comparison — a number with nothing to compare it to tells the reader nothing.
+<StatCard label="Revenue (paid)" value={\`$\${revenue.toLocaleString()}\`} delta={12.4} deltaLabel="vs last week" icon={CreditCard} />
+<StatCard label="Failure rate" value="0.42%" delta={-1.1} deltaLabel="vs last week" lowerIsBetter />  // down = good
+\`\`\``,
+	ChartCard: `\`\`\`tsx
+// ONE series per card. tone picks the preset's chart colour; the block handles axes, grid and tooltip.
+<ChartCard title="Runs per day" description="Scheduled and manual." kind="area" tone={1}
+  data={[{ label: 'Mon', value: 820 }, { label: 'Tue', value: 932 }]} />
+// In your OWN chart code use the PRESET vars — var(--chart-1), var(--border) — never var(--color-chart-1):
+// Tailwind only emits a --color-* alias when a utility uses it, so that one is empty at runtime.
+\`\`\``,
+	DataTable: `\`\`\`tsx
+// Sorting/filtering happen ONCE upstream in a useMemo; this block just renders and reports sort clicks.
+const columns: DataColumn<Order>[] = [
+  { key: 'id', header: 'Invoice', cell: (o) => o.id, sortable: true },
+  { key: 'status', header: 'Status', cell: (o) => <Badge variant="secondary">{o.status}</Badge> },
+  { key: 'amount', header: 'Amount', cell: (o) => \`$\${o.amount}\`, numeric: true, sortable: true },
+]
+<DataTable columns={columns} rows={rows} rowKey={(o) => o.id} sort={sort}
+  onSortChange={(key) => setSort((s) => ({ key, dir: s.key === key && s.dir === 'desc' ? 'asc' : 'desc' }))}
+  empty={<EmptyState title="No invoices match" action={<Button variant="outline" onClick={clear}>Clear filters</Button>} />} />
+\`\`\``,
+	FilterBar: `\`\`\`tsx
+// Active filters must be VISIBLE (chips) and reversible (clear) — a filtered list that looks like an
+// empty list is the most common way a dashboard lies to its user.
+<FilterBar query={query} onQueryChange={setQuery} placeholder="Search invoices…"
+  chips={plan === 'all' ? [] : [{ label: \`Plan: \${plan}\`, onRemove: () => setPlan('all') }]}
+  onClear={dirty ? clearAll : undefined} action={<Button>New invoice</Button>}>
+  <Select value={plan} onValueChange={setPlan}>…</Select>
+</FilterBar>
+\`\`\``,
 	PricingTable: `\`\`\`tsx
 // 2–4 tiers, EXACTLY ONE highlighted — an undifferentiated row makes the visitor choose, and they leave.
 <PricingTable tiers={[

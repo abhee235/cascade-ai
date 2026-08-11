@@ -24,7 +24,7 @@ export function Section({ eyebrow, heading, description, tone = 'default', child
 					className="pointer-events-none absolute inset-0 -z-10"
 					style={{
 						background:
-							'radial-gradient(55% 45% at 12% -5%, color-mix(in oklab, var(--color-primary) 16%, transparent), transparent 70%), radial-gradient(50% 42% at 92% 0%, color-mix(in oklab, var(--color-accent) 70%, transparent), transparent 72%)',
+							'radial-gradient(55% 45% at 12% -5%, color-mix(in oklab, var(--primary) 16%, transparent), transparent 70%), radial-gradient(50% 42% at 92% 0%, color-mix(in oklab, var(--accent) 70%, transparent), transparent 72%)',
 					}}
 				/>
 			) : null}

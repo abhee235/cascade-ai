@@ -6,10 +6,13 @@
 - BentoGrid
 - CTASection
 - CartRow
+- ChartCard
 - CheckoutPanel
+- DataTable
 - EmptyState
 - FAQ
 - FeatureGrid
+- FilterBar
 - Footer
 - Hero
 - LogoStrip
@@ -19,6 +22,7 @@
 - Photo
 - PricingTable
 - Section
+- StatCard
 - StatStrip
 - Testimonial
 
@@ -93,6 +97,22 @@ Props: `media?: ReactNode` · `title: ReactNode` · `unitPrice: ReactNode` · `m
 ))}
 ```
 
+## ChartCard
+
+Import: `import { ChartCard } from '@/components/blocks/ChartCard'`
+
+Exports: ChartCard
+
+Props: `title: ReactNode` · `description?: ReactNode` · `data: Record<string, string | number>[]` · `xKey?: string` · `yKey?: string` · `kind?: 'area' | 'bar' | 'line'` · `tone?: 1 | 2 | 3 | 4 | 5` · `action?: ReactNode` · `height?: number` · `className?: string`
+
+```tsx
+// ONE series per card. tone picks the preset's chart colour; the block handles axes, grid and tooltip.
+<ChartCard title="Runs per day" description="Scheduled and manual." kind="area" tone={1}
+  data={[{ label: 'Mon', value: 820 }, { label: 'Tue', value: 932 }]} />
+// In your OWN chart code use the PRESET vars — var(--chart-1), var(--border) — never var(--color-chart-1):
+// Tailwind only emits a --color-* alias when a utility uses it, so that one is empty at runtime.
+```
+
 ## CheckoutPanel
 
 Import: `import { CheckoutPanel } from '@/components/blocks/CheckoutPanel'`
@@ -111,6 +131,26 @@ Props: `lines: OrderLine[]` · `total: ReactNode` · `totalLabel?: ReactNode` ·
   <Label htmlFor="email">Email</Label>
   <Input id="email" value={form.email} onChange={set('email')} aria-invalid={!!errors.email} />
 </CheckoutPanel>
+```
+
+## DataTable
+
+Import: `import { DataTable } from '@/components/blocks/DataTable'`
+
+Exports: DataTable
+
+Props: `columns: DataColumn<T>[]` · `rows: T[]` · `rowKey: (row: T) => string` · `sort?: { key: string; dir: 'asc' | 'desc' }` · `onSortChange?: (key: string) => void` · `onRowClick?: (row: T) => void` · `empty?: ReactNode` · `className?: string`
+
+```tsx
+// Sorting/filtering happen ONCE upstream in a useMemo; this block just renders and reports sort clicks.
+const columns: DataColumn<Order>[] = [
+  { key: 'id', header: 'Invoice', cell: (o) => o.id, sortable: true },
+  { key: 'status', header: 'Status', cell: (o) => <Badge variant="secondary">{o.status}</Badge> },
+  { key: 'amount', header: 'Amount', cell: (o) => `$${o.amount}`, numeric: true, sortable: true },
+]
+<DataTable columns={columns} rows={rows} rowKey={(o) => o.id} sort={sort}
+  onSortChange={(key) => setSort((s) => ({ key, dir: s.key === key && s.dir === 'desc' ? 'asc' : 'desc' }))}
+  empty={<EmptyState title="No invoices match" action={<Button variant="outline" onClick={clear}>Clear filters</Button>} />} />
 ```
 
 ## EmptyState
@@ -151,6 +191,24 @@ Props: `features: Feature[]` · `columns?: 2 | 3` · `className?: string`
 
 ```tsx
 <FeatureGrid features={[{ icon: Truck, title: 'Free shipping', description: 'Over $50, everywhere.' }, …]} />
+```
+
+## FilterBar
+
+Import: `import { FilterBar } from '@/components/blocks/FilterBar'`
+
+Exports: FilterBar
+
+Props: `query?: string` · `onQueryChange?: (value: string) => void` · `placeholder?: string` · `children?: ReactNode` · `chips?: { label: ReactNode; onRemove?: () => void }[]` · `onClear?: () => void` · `action?: ReactNode` · `className?: string`
+
+```tsx
+// Active filters must be VISIBLE (chips) and reversible (clear) — a filtered list that looks like an
+// empty list is the most common way a dashboard lies to its user.
+<FilterBar query={query} onQueryChange={setQuery} placeholder="Search invoices…"
+  chips={plan === 'all' ? [] : [{ label: `Plan: ${plan}`, onRemove: () => setPlan('all') }]}
+  onClear={dirty ? clearAll : undefined} action={<Button>New invoice</Button>}>
+  <Select value={plan} onValueChange={setPlan}>…</Select>
+</FilterBar>
 ```
 
 ## Footer
@@ -295,6 +353,21 @@ Props: `eyebrow?: string` · `heading?: ReactNode` · `description?: ReactNode` 
 <Section eyebrow="How it works" heading="Three steps" description="One line." tone="muted">
   {/* any content — grids, FeatureGrid, StatStrip… */}
 </Section>
+```
+
+## StatCard
+
+Import: `import { StatCard } from '@/components/blocks/StatCard'`
+
+Exports: StatCard
+
+Props: `label: ReactNode` · `value: ReactNode` · `delta?: number` · `deltaLabel?: ReactNode` · `icon?: ComponentType<{ className?: string }>` · `lowerIsBetter?: boolean` · `className?: string`
+
+```tsx
+// A dashboard's top row is 3–4 of these. Values are DERIVED (useMemo), never hardcoded, and always
+// carry a comparison — a number with nothing to compare it to tells the reader nothing.
+<StatCard label="Revenue (paid)" value={`$${revenue.toLocaleString()}`} delta={12.4} deltaLabel="vs last week" icon={CreditCard} />
+<StatCard label="Failure rate" value="0.42%" delta={-1.1} deltaLabel="vs last week" lowerIsBetter />  // down = good
 ```
 
 ## StatStrip
