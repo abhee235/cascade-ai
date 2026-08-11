@@ -96,6 +96,37 @@ export function resolveCheckCommand(cwd: string): string | undefined {
 	return undefined
 }
 
+// ── Design-overhaul P1 (generalized): the RUN-BEFORE-DONE gate ────────────────────────────────────────────
+// Same doctrine as ADR-049 (prompt text alone doesn't hold weak models), different evidence: the measured
+// Meridian failures shipped template residue behind a GREEN build, so a build-command gate can never catch
+// them. The DECLARATION rides the Tool contract (Tool.mustRunBeforeDone) instead of a per-tool session
+// option — a frontend gates a tool at its definition site, and core tracks all declarers generically: a
+// successful file mutation re-arms every declared tool; any call of one clears it (even a call reporting
+// findings — the report reaching the model is what drives the fixes, identical to a red check run).
+
+/** Fold one executed batch into pending-before-done state. `declared` = the registry's current
+ *  mustRunBeforeDone tool names (recomputed per turn — MCP tools may join mid-session). */
+export function foldRunBeforeDone(pending: ReadonlySet<string>, declared: string[], toolUses: ToolUse[], results: ContentBlock[]): Set<string> {
+	if (declared.length === 0) return new Set() // nothing declared ⇒ permanently clean ⇒ the gate never fires
+	const okById = new Map(results.map((r) => [r.type === 'tool_result' ? r.tool_use_id : '', r.type === 'tool_result' && !r.isError]))
+	const next = new Set(pending)
+	for (const tu of toolUses) {
+		if (FILE_MUTATING_TOOLS.has(tu.name) && okById.get(tu.id)) for (const name of declared) next.add(name)
+	}
+	for (const tu of toolUses) next.delete(tu.name)
+	return next
+}
+
+/** The one run-before-done nudge, same channel and same re-anchoring shape as the verify nudge. */
+export function buildRunBeforeDoneNudge(pending: string[]): Message {
+	const names = pending.join(' and ')
+	return {
+		role: 'user',
+		content:
+			`<system-reminder>You edited files but never ran ${names} afterwards. Run ${names} NOW and fix every blocking finding reported before finishing. This is a background note, NOT a new request: do not reply to it — run the tool${pending.length > 1 ? 's' : ''}, then give your final answer on the ORIGINAL task.</system-reminder>`,
+	}
+}
+
 // ── ADR-058: the MID-FLIGHT check nudge (the Simmer live-lock) ─────────────────────────────────────────────
 // The terminal gate only fires when the model STOPS calling tools — a live-lock never reaches it (measured:
 // 53 turns of tool calls, edits since turn 8, `npm run build` never run once). Compiler/test output is

@@ -26,6 +26,7 @@ export type TraceEvent =
   | { t: 'tool_result'; id: string; name: string; ok: boolean; ms: number; content: string }
   | { t: 'compaction'; kind: string; tokensBefore: number; tokensAfter: number; forced: boolean } // E1/ADR-039: which layer fired + what it reclaimed (estimates)
   | { t: 'verify_gate'; turn: number } // ADR-049: terminal answer refused — edits happened, nothing verified them; nudge injected
+  | { t: 'audit_gate'; turn: number; tools: string[] } // design-overhaul P1 (generalized): terminal refused once — mustRunBeforeDone tools still pending since the last mutation; nudge names them
   | { t: 'delegate_nudge'; turn: number; readTokens: number } // ADR-050: bulk-read pressure crossed the threshold with zero delegation; reminder injected
   | { t: 'plan_nudge'; turn: number } // ADR-056 rung 2: writes began with no PLAN.md and no planner spawn; exact Subagent call injected
   | { t: 'degraded_retry'; turn: number } // empty terminal response (no text/thinking/tools) — backend recycled once and the turn re-asked
