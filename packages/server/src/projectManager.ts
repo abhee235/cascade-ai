@@ -17,6 +17,7 @@ import { applyTemplate, readAiRules } from './templates.js'
 import { createPlannerSession, needsPlanStage } from './planStage.js'
 import { browserHostFor, createBrowserTool } from './browserTool.js'
 import { createPackTool } from './packTool.js'
+import { createTemplateAuditTool } from './auditTool.js'
 import { createImageSearchTool } from './imageSearchTool.js'
 import { hasVision } from './modelCaps.js'
 import type { ProjectRuntime } from './projectRuntime.js'
@@ -138,7 +139,7 @@ export const BUILDER_BEHAVIOR = [
   '## Verifying the running app',
   // Batch-3 (critique): three documents stated "done" at three bars, and the strongest imperative was the
   // weakest bar — a green tsc is fully compatible with a blank page. ONE canonical checklist, stated here.
-  '- Done means, in order: `npm run build` green (the declared check) → Browser {op:"open"} loads → Browser {op:"audit"} clean (no invisible content, CSS loaded, no console errors). Then end the turn.',
+  '- Done means, in order: `npm run build` green (the declared check) → TemplateAudit clean (zero HARD findings — no demo residue, no unreplaced placeholders) → Browser {op:"open"} loads → Browser {op:"audit"} clean (no invisible content, CSS loaded, no console errors). Then end the turn.',
   // Batch-3 (critique): "only end when green" + "never ask" had no legal exit when green is impossible —
   // which contradicted "Report faithfully". The honest red is that exit; the gates bound the loop anyway.
   '- If the build still fails after 3 distinct fix attempts on the SAME error, stop: report the exact final error, what you tried, and what was completed. An honest red build is a valid ending; a loop is not.',
@@ -378,7 +379,11 @@ export class ProjectManager {
               return host ? [createBrowserTool({ sandbox: host, vision: this.visionOk })] : []
             })(),
             createImageSearchTool(),
-            ...([createPackTool({ projectDir: dir, templateId: 'react' })].filter(Boolean) as import('@cascade/core').Tool[]),
+            ...([
+              createPackTool({ projectDir: dir, templateId: 'react' }),
+              // P1: the residue audit — self-gates to undefined when the template ships no contract.
+              createTemplateAuditTool({ projectDir: dir, templateId: 'react' }),
+            ].filter(Boolean) as import('@cascade/core').Tool[]),
           ],
         }))
     this.load()

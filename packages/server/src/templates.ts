@@ -26,6 +26,42 @@ export function listTemplates(): TemplateInfo[] {
   return REGISTRY.filter((t) => existsSync(join(TEMPLATES_DIR, t.id)))
 }
 
+// ── Residue contract (design-overhaul P1): what must be GONE before a generated app is "done" ─────────────
+// The contract lives in the template dir (data beside the data it describes, like package.pack.json) and is
+// read from TEMPLATES_DIR — outside the project and outside the model's Read jail, so the builder can never
+// edit the contract to pass its own audit. The TemplateAudit tool (auditTool.ts) is its only consumer.
+
+export interface ResidueFinding {
+  kind: 'path' | 'string' | 'file'
+  /** kind 'path'/'file': project-relative path. */
+  path?: string
+  /** kind 'string': the literal needle that must not appear. */
+  needle?: string
+  /** kind 'string': project-relative directory to scan (default 'src'). */
+  scope?: string
+  /** kind 'file': the literal content that must not appear in `path`. */
+  mustNotContain?: string
+  why: string
+  fix: string
+}
+
+export interface ResidueContract {
+  hard: ResidueFinding[]
+  soft: ResidueFinding[]
+}
+
+/** The template's residue contract, or undefined when the template ships none (audit self-disables). */
+export function readResidueContract(templateId: string): ResidueContract | undefined {
+  try {
+    const raw = readFileSync(join(TEMPLATES_DIR, templateId, 'residue.json'), 'utf8')
+    const parsed = JSON.parse(raw) as Partial<ResidueContract>
+    if (!Array.isArray(parsed.hard) && !Array.isArray(parsed.soft)) return undefined
+    return { hard: parsed.hard ?? [], soft: parsed.soft ?? [] }
+  } catch {
+    return undefined // no contract, unreadable, malformed — the audit simply doesn't exist for this template
+  }
+}
+
 /** Copy a template's files into `dest` (skipping node_modules/.git/dist; `_gitignore` → `.gitignore`). */
 export function applyTemplate(templateId: string, dest: string): void {
   const src = join(TEMPLATES_DIR, templateId)
@@ -34,7 +70,11 @@ export function applyTemplate(templateId: string, dest: string): void {
     recursive: true,
     // `packs` is EXCLUDED (ADR-066): packs are optional add-ons applied ON DEMAND by applyPack, never
     // copied into a fresh prototype — a new project starts frontend-only.
-    filter: (p) => !/[\\/](node_modules|\.git|dist|packs)([\\/]|$)/.test(p),
+    // `demo` is EXCLUDED (design-overhaul P1): the gallery lives at the template ROOT and never ships —
+    // demo residue in generated apps (the measured Meridian class) becomes structurally impossible.
+    // `residue.json` is the audit contract, read server-side from TEMPLATES_DIR — never copied, so the
+    // builder can't edit the contract to pass its own audit.
+    filter: (p) => !/[\\/](node_modules|\.git|dist|packs|demo|residue\.json)([\\/]|$)/.test(p),
   })
   // Templates ship `_gitignore` (so it doesn't affect the Cascade repo); restore the dotfile in the project.
   const underscored = join(dest, '_gitignore')

@@ -21,6 +21,7 @@ import { BUILDER_BEHAVIOR } from '../../packages/server/src/projectManager'
 import { createPlannerSession, ensurePlanPersisted, needsPlanStage, planSalvageNudge } from '../../packages/server/src/planStage'
 import { HostSandbox } from '../../packages/server/src/hostSandbox'
 import { createPackTool } from '../../packages/server/src/packTool'
+import { createTemplateAuditTool } from '../../packages/server/src/auditTool'
 import { keepAwake } from './keepAwake.mts'
 import { fanout, OtelTracer } from './otelTracer.mts'
 
@@ -228,7 +229,7 @@ for (const id of wanted) {
 		// ADR-066 fidelity: the product injects the ApplyPack tool (projectManager). Without it, a graduation
 		// scenario couldn't call it. Self-gates to undefined once applied (createPackTool → filter Boolean).
 		// (The Browser tool is product-only — it needs a Docker sandbox the bench doesn't have.)
-		extraTools: [createPackTool({ projectDir: work, templateId: 'react' })].filter(Boolean) as import('@cascade/core').Tool[],
+		extraTools: [createPackTool({ projectDir: work, templateId: 'react' }), createTemplateAuditTool({ projectDir: work, templateId: 'react' })].filter(Boolean) as import('@cascade/core').Tool[],
 	})
 	const t0 = Date.now()
 	let timedOut = false

@@ -33,6 +33,9 @@ const PROJECT_FILES_OK = new Set([
   'projectManager.ts',
   'templates.ts',
   'packTool.ts',
+  // Design-overhaul P1: scans the PROJECT's files for template residue (and reads the template's own
+  // residue.json via templates.ts) — project files stay real files in every deployment, same as packTool.
+  'auditTool.ts',
   'previewManager.ts',
   'dockerSandbox.ts',
   // The host RUNTIME (ADR-081 §4). It touches the filesystem for the same reason dockerSandbox does — it

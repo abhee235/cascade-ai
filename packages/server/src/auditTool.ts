@@ -1,0 +1,178 @@
+// auditTool.ts — the TemplateAudit tool (design-overhaul P1): scan a generated app for TEMPLATE RESIDUE
+// before it may be called done. Measured motivation: two consecutive builder-shop runs shipped the demo
+// shell ("Meridian" brand, demo imports in App.tsx) behind a green build — the prose rule "delete the
+// demo" (AI_RULES.md) demonstrably doesn't hold a weak model; this is the same class ADR-049 fixed for
+// verification, solved the same way: structurally.
+//
+// Shape follows packTool.ts: injected deps, a factory returning `Tool | undefined` (self-gating — no
+// residue contract ⇒ the tool never exists), findings returned as text the model acts on. HARD findings
+// block "done" (the core audit gate + the done-ladder enforce running this tool; its OUTPUT semantics
+// stay server-side — core only tracks that it ran). SOFT findings are fix-or-override-with-a-reason.
+// Read-only: it never edits the project; the model does the fixing.
+
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { join, relative } from 'node:path'
+import { z } from 'zod'
+import type { Tool } from '@cascade/core'
+import { readResidueContract, type ResidueFinding } from './templates.js'
+
+const inputSchema = z.object({})
+
+/** Directories never scanned — bulk, and node_modules legitimately contains anything. */
+const SKIP = new Set(['node_modules', 'dist', '.git', '.cascade'])
+
+/** Source-ish files worth scanning for string needles. */
+const SCAN_EXT = /\.(tsx?|jsx?|css|html|json|md)$/
+
+interface Hit {
+	finding: ResidueFinding
+	where: string // "src/App.tsx:11" or a path
+}
+
+function* walk(dir: string, root: string): Generator<string> {
+	let entries: import('node:fs').Dirent[]
+	try {
+		entries = readdirSync(dir, { withFileTypes: true })
+	} catch {
+		return
+	}
+	for (const e of entries) {
+		if (e.isDirectory()) {
+			if (!SKIP.has(e.name)) yield* walk(join(dir, e.name), root)
+		} else if (SCAN_EXT.test(e.name)) {
+			yield join(dir, e.name)
+		}
+	}
+}
+
+function scan(projectDir: string, findings: ResidueFinding[]): Hit[] {
+	const hits: Hit[] = []
+	// Cache file contents per scope so N needles over one scope read each file once.
+	const filesOf = new Map<string, { path: string; lines: string[] }[]>()
+	const loadScope = (scope: string) => {
+		if (!filesOf.has(scope)) {
+			const abs = join(projectDir, scope)
+			const list: { path: string; lines: string[] }[] = []
+			for (const f of walk(abs, abs)) {
+				try {
+					list.push({ path: relative(projectDir, f).replaceAll('\\', '/'), lines: readFileSync(f, 'utf8').split('\n') })
+				} catch {
+					/* unreadable file — skip */
+				}
+			}
+			filesOf.set(scope, list)
+		}
+		return filesOf.get(scope)!
+	}
+
+	for (const finding of findings) {
+		if (finding.kind === 'path' && finding.path) {
+			if (existsSync(join(projectDir, finding.path))) hits.push({ finding, where: finding.path })
+		} else if (finding.kind === 'string' && finding.needle) {
+			for (const file of loadScope(finding.scope ?? 'src')) {
+				const line = file.lines.findIndex((l) => l.includes(finding.needle!))
+				if (line >= 0) {
+					hits.push({ finding, where: `${file.path}:${line + 1}` })
+					break // one location per finding is enough to act on
+				}
+			}
+		} else if (finding.kind === 'file' && finding.path && finding.mustNotContain) {
+			try {
+				const text = readFileSync(join(projectDir, finding.path), 'utf8')
+				const line = text.split('\n').findIndex((l) => l.includes(finding.mustNotContain!))
+				if (line >= 0) hits.push({ finding, where: `${finding.path}:${line + 1}` })
+			} catch {
+				/* file absent — nothing to flag */
+			}
+		}
+	}
+	return hits
+}
+
+/** Built-in SOFT style pre-flights — source-side twins of eval designLint, so the model hears about a
+ *  style landmine BEFORE the bench (or the user) does. Template-generic by construction (tokens/blocks
+ *  are the house system), so they live here rather than in the per-template contract. */
+function styleSoftHits(projectDir: string): Hit[] {
+	const hits: Hit[] = []
+	const src = join(projectDir, 'src')
+	const raw = /\b(?:bg|text|border|from|to|ring)-(?:white|black|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone)-\d{2,3}\b/
+	let blockImportSeen = false
+	let firstView: string | undefined
+	for (const f of walk(src, src)) {
+		if (!/\.tsx?$/.test(f)) continue
+		const rel = relative(projectDir, f).replaceAll('\\', '/')
+		if (rel.startsWith('src/components/ui/')) continue // the vendored kit is not the model's styling
+		let text: string
+		try {
+			text = readFileSync(f, 'utf8')
+		} catch {
+			continue
+		}
+		if (!blockImportSeen && text.includes('@/components/blocks/')) blockImportSeen = true
+		if (!firstView && rel.startsWith('src/') && rel.endsWith('.tsx')) firstView = rel
+		const lines = text.split('\n')
+		const rawAt = lines.findIndex((l) => raw.test(l))
+		if (rawAt >= 0) {
+			hits.push({ finding: { kind: 'string', why: 'raw color utility — the design system is token-only (bg-primary, text-muted-foreground, …)', fix: 'Replace with the token utility (design skill §4 has the substitution table).' }, where: `${rel}:${rawAt + 1}` })
+		}
+		// photoFor inside a .map() render — the "all my products look like the same watch" bug: flag a
+		// photoFor call on the same line as .map( or within the 6 lines after one (the callback body).
+		const photoForInMap = lines.findIndex((l, i) => /photoFor\(/.test(l) && lines.slice(Math.max(0, i - 6), i + 1).some((p) => /\.map\(/.test(p)))
+		if (photoForInMap >= 0) {
+			hits.push({ finding: { kind: 'string', why: 'photoFor inside a list render — the ~2-per-category pack repeats visibly on grids', fix: 'Use <Photo web="<subject>" seed={item.id}> per item (design skill IMAGERY ROUTING).' }, where: `${rel}:${photoForInMap + 1}` })
+		}
+	}
+	if (!blockImportSeen && firstView) {
+		hits.push({ finding: { kind: 'string', why: 'no @/components/blocks imports anywhere — pages are being hand-rolled instead of block-composed', fix: 'Assemble pages from NavBar/Hero/Section/MediaCard/EmptyState… (design skill §3).' }, where: firstView })
+	}
+	return hits
+}
+
+export interface AuditToolDeps {
+	projectDir: string
+	templateId: string
+}
+
+/** Build the per-session TemplateAudit tool, or undefined when the template ships no residue contract. */
+export function createTemplateAuditTool(deps: AuditToolDeps): Tool | undefined {
+	const contract = readResidueContract(deps.templateId)
+	if (!contract || (contract.hard.length === 0 && contract.soft.length === 0)) return undefined
+
+	const tool: Tool<z.infer<typeof inputSchema>> = {
+		name: 'TemplateAudit',
+		description:
+			'Scan the project for TEMPLATE RESIDUE — demo content, unreplaced placeholders, an entry point still wired to the scaffold. Run it before declaring the app done: HARD findings BLOCK done (fix every one, then re-run until clean); SOFT findings should be fixed or overridden with a stated reason. No input needed.',
+		inputSchema,
+		activitySummary: () => 'Auditing for template residue',
+		isReadOnly: () => true,
+		isConcurrencySafe: () => true,
+		// The gate contract rides the TOOL, not a session option (the reviewed alternative — one core
+		// name-knob per gated tool — does not scale): registering this tool is what arms the loop's
+		// run-before-done gate; no other wiring exists.
+		mustRunBeforeDone: true,
+
+		async call() {
+			try {
+				const hard = scan(deps.projectDir, contract.hard)
+				const soft = [...scan(deps.projectDir, contract.soft), ...styleSoftHits(deps.projectDir)]
+				if (hard.length === 0 && soft.length === 0) {
+					return { content: 'TemplateAudit clean — no template residue. The scaffold has been fully replaced by the app.' }
+				}
+				const lines: string[] = []
+				if (hard.length) {
+					lines.push(`HARD residue (${hard.length}) — the app is NOT done until every one is fixed:`)
+					for (const h of hard) lines.push(`- ${h.where} — ${h.finding.why}. FIX: ${h.finding.fix}`)
+				}
+				if (soft.length) {
+					lines.push(`SOFT findings (${soft.length}) — fix, or override with a one-line reason:`)
+					for (const s of soft) lines.push(`- ${s.where} — ${s.finding.why}. FIX: ${s.finding.fix}`)
+				}
+				lines.push(hard.length ? 'Fix the HARD findings and run TemplateAudit again.' : 'No HARD residue — address the SOFT findings or state why not.')
+				return { content: lines.join('\n'), isError: hard.length > 0 }
+			} catch (e) {
+				return { content: `TemplateAudit failed: ${e instanceof Error ? e.message : String(e)}`, isError: true }
+			}
+		},
+	}
+	return tool as Tool
+}
