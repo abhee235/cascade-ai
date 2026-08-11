@@ -33,6 +33,8 @@ the entire operation — colors, fonts, radius, and shadows all follow.
 `src/components/blocks/` (READ-ONLY, like the kit) are the page sections. Assemble pages from blocks
 FIRST, then fill their slots with the kit:
 
+- `AppShell` — the chrome for any SIGNED-IN view (sidebar nav + sticky header + content well). A
+  dashboard/admin/settings page belongs inside one; a bare centred column reads as a marketing page.
 - `NavBar` — every page's header (brand, links, actions). `Hero` — landing headline
   (`layout="split|centered|bleed|collage"`; **collage** layers the image over offset panels — the modern
   depth look, and it needs only ONE image).
