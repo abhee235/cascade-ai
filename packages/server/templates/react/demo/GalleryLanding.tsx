@@ -1,17 +1,21 @@
-// Starter showcase (delete src/demo/ when building the real app). A complete premium landing page
-// assembled ONLY from blocks + kit + tokens — this is what "designed, not scaffolded" looks like.
+// The LOOK — the canonical modern landing page, assembled ONLY from blocks + kit + tokens. This is the
+// exemplar a model copies, so it deliberately demonstrates the CURRENT landing vocabulary (verified
+// against the 21st.dev catalog, 2026-08): a two-tone display headline, a collage hero with depth, a
+// wordmark trust strip, a BENTO band of mixed-weight tiles, then the product grid, a gradient-wash
+// editorial band, and a closing CTA. Nothing here is bespoke CSS — every effect is a block prop.
+// (This dir never ships to a generated project; it lives in the template for review + reference.)
 
-import { Leaf, ShieldCheck, Sparkles, Truck } from 'lucide-react'
+import { Compass, Leaf, Recycle, ShieldCheck, Sparkles, Truck } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ArtImage } from '@/components/blocks/ArtImage'
+import { BentoGrid } from '@/components/blocks/BentoGrid'
 import { FeatureGrid } from '@/components/blocks/FeatureGrid'
 import { Footer } from '@/components/blocks/Footer'
 import { Hero } from '@/components/blocks/Hero'
+import { LogoStrip } from '@/components/blocks/LogoStrip'
 import { MediaCard } from '@/components/blocks/MediaCard'
-import { Photo } from '@/components/blocks/Photo'
 import { Section } from '@/components/blocks/Section'
-import { StatStrip } from '@/components/blocks/StatStrip'
 import { photo } from '@/lib/photos'
 
 const PRODUCTS = [
@@ -26,9 +30,20 @@ const PRODUCTS = [
 export function GalleryLanding() {
 	return (
 		<div>
+			{/* Hero: two-tone headline (the second clause drops to muted — the current landing idiom) and
+			    layout="collage", which layers the photo over offset token-tinted panels. */}
 			<Hero
-				badge={<Badge variant="secondary">New — the Autumn collection</Badge>}
-				headline="Objects made to be kept, not replaced."
+				layout="collage"
+				badge={
+					<Badge variant="secondary" className="gap-1.5">
+						<Sparkles className="size-3" /> New — the Autumn collection
+					</Badge>
+				}
+				headline={
+					<>
+						Objects made to be kept, <span className="text-muted-foreground">not replaced.</span>
+					</>
+				}
 				subcopy="Meridian makes small-batch goods for people who notice the difference. Considered materials, honest prices, lifetime repairs."
 				actions={
 					<>
@@ -38,20 +53,40 @@ export function GalleryLanding() {
 						</Button>
 					</>
 				}
-				media={<img src={photo('product-watch')} alt="Meridian field watch on linen" />}
+				media={<img src={photo('product-watch')} alt="The Meridian field watch" />}
 			/>
 
+			{/* Trust strip — wordmarks, not logos: credible while prototyping, zero assets. */}
+			<Section>
+				<LogoStrip
+					label="Stocked by independent shops in 14 countries"
+					items={['Northline', 'Hallowell', 'Studio Mena', 'The Good Press', 'Fieldnote', 'Vestry & Co']}
+				/>
+			</Section>
+
+			{/* BENTO — mixed-weight tiles instead of a row of identical cards: one media anchor, two stats,
+			    one filled accent tile carrying the CTA, plus plain tiles. The 2026 feature-section idiom. */}
 			<Section tone="muted" eyebrow="Why Meridian" heading="Built for the long haul" description="Every piece earns its place — no filler, no seasonal churn.">
-				<FeatureGrid
-					features={[
-						{ icon: ShieldCheck, title: 'Lifetime repairs', description: 'Send anything back, any time. We mend it and return it.' },
-						{ icon: Leaf, title: 'Traceable materials', description: 'Every supplier named, every mill visited, every year.' },
-						{ icon: Truck, title: 'Carbon-neutral delivery', description: 'Ground-first logistics, plastic-free packaging.' },
+				<BentoGrid
+					tiles={[
+						{
+							kind: 'media',
+							span: 2,
+							title: 'Repaired, not replaced',
+							description: 'Send anything back, any year — we fix it and return it.',
+							media: <img src={photo('workspace-code')} alt="The repair bench" />,
+						},
+						{ kind: 'stat', value: '11 yrs', label: 'Median product lifespan' },
+						{ kind: 'plain', icon: ShieldCheck, title: 'Lifetime repairs', description: 'Free for the first decade, at cost after.' },
+						{ kind: 'plain', icon: Leaf, title: 'Traceable materials', description: 'Every mill and tannery named on the label.' },
+						{ kind: 'accent', title: 'Join the workshop list', description: 'One letter a month: new pieces, repair clinics, field notes.', action: <Button variant="secondary">Subscribe</Button> },
 					]}
 				/>
 			</Section>
 
-			<Section eyebrow="The collection" heading="This season's bestsellers" description="Six pieces, chosen slowly.">
+			{/* The product grid — a bundled photo where one fits the subject, <ArtImage> otherwise; in a real
+			    catalog use <Photo web="<subject>" seed={item.id}> so every card is a DISTINCT photo. */}
+			<Section eyebrow="The collection" heading="Autumn, in six pieces" description="Small runs. Made to be used, not stored.">
 				<div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
 					{PRODUCTS.map((p) => (
 						<MediaCard
@@ -59,9 +94,9 @@ export function GalleryLanding() {
 							media={p.img ? <img src={p.img} alt={p.name} /> : <ArtImage seed={p.name} kind="product" />}
 							title={p.name}
 							meta={p.meta}
-							aside={p.price}
+							aside={<span className="font-medium">{p.price}</span>}
 							actions={
-								<Button size="sm" variant="outline">
+								<Button variant="outline" size="sm">
 									Add to cart
 								</Button>
 							}
@@ -70,39 +105,37 @@ export function GalleryLanding() {
 				</div>
 			</Section>
 
-			<Section tone="muted">
-				<StatStrip
-					stats={[
-						{ value: '12 yrs', label: 'making goods' },
-						{ value: '48k', label: 'repairs completed' },
-						{ value: '4.9★', label: 'average review' },
-						{ value: '0', label: 'landfilled returns' },
+			{/* Wash band — a soft gradient field built from the preset's own primary/accent. */}
+			<Section tone="wash" eyebrow="Field notes" heading="From the workshop">
+				<div className="grid gap-6 md:grid-cols-2">
+					<MediaCard media={<img src={photo('interior-living')} alt="The Meridian workshop" />} title="Why we visit every mill ourselves" meta="Provenance · 6 min read" />
+					<MediaCard media={<img src={photo('nature-beach')} alt="Coastal trail" />} title="Testing the Trailline on 400 km of coast path" meta="Field test · 9 min read" />
+				</div>
+			</Section>
+
+			<Section>
+				<FeatureGrid
+					features={[
+						{ icon: Truck, title: 'Free shipping over $75', description: 'Carbon-neutral, tracked, two to four days.' },
+						{ icon: Recycle, title: 'Take-back programme', description: 'Send a worn piece back for credit; we rehome or recycle it.' },
+						{ icon: Compass, title: 'Try it for 60 days', description: 'Use it properly. If it is not right, return it worn.' },
 					]}
 				/>
 			</Section>
 
-			{/* Distinct-subject cards route through <Photo web> — the imagery rule this page exemplifies
-			    (photoFor is for a SINGLE hero/banner; on grids its ~2-per-category pack visibly repeats). */}
-			<Section eyebrow="Field notes" heading="From the workshop">
-				<div className="grid gap-6 md:grid-cols-2">
-					<MediaCard media={<Photo web="textile mill workshop" seed="workshop-notes" alt="The Meridian workshop" />} title="Why we visit every mill ourselves" meta="Provenance · 6 min read" />
-					<MediaCard media={<Photo web="coastal hiking trail" seed="coast-notes" alt="Coastal trail" />} title="Testing the Trailline on 400 km of coast path" meta="Field test · 9 min read" />
-				</div>
-			</Section>
-
 			<Footer
 				brand={
-					<span className="flex items-center gap-2">
+					<>
 						<Sparkles className="size-4 text-primary" /> Meridian
-					</span>
+					</>
 				}
 				tagline="Small-batch goods, made to be kept."
 				columns={[
-					{ heading: 'Shop', links: ['Instruments', 'Carry', 'Home', 'Textiles'] },
-					{ heading: 'Company', links: ['Our story', 'Repairs', 'Journal'] },
-					{ heading: 'Support', links: ['Shipping', 'Returns', 'Contact'] },
+					{ heading: 'Shop', links: ['New arrivals', 'Instruments', 'Carry', 'Home'] },
+					{ heading: 'Company', links: ['Our story', 'Repairs', 'Stockists', 'Careers'] },
+					{ heading: 'Support', links: ['Shipping', 'Returns', 'Care guide', 'Contact'] },
 				]}
-				fineprint="© 2026 Meridian Goods Co. Demo page — every pixel from the block kit."
+				fineprint="© 2026 Meridian Goods Co. All rights reserved."
 			/>
 		</div>
 	)

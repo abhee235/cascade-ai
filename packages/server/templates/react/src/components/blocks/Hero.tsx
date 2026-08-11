@@ -12,8 +12,9 @@ export interface HeroProps {
 	actions?: ReactNode
 	/** Media slot: a photo (`<img src={photo('…')}/>`), an <ArtImage>, or any visual. */
 	media?: ReactNode
-	/** split: text left, media right · centered: no media emphasis, text centered · bleed: media as full background. */
-	layout?: 'split' | 'centered' | 'bleed'
+	/** split: text left, media right · centered: text centered, no media emphasis · bleed: media as full
+	 *  background · collage: media layered over offset tinted panels (the modern, depth-y landing look). */
+	layout?: 'split' | 'centered' | 'bleed' | 'collage'
 	className?: string
 }
 
@@ -22,7 +23,7 @@ export function Hero({ badge, headline, subcopy, actions, media, layout = 'split
 	const text = (
 		<div className={cn('flex max-w-xl flex-col gap-5', layout === 'centered' && 'items-center text-center', layout === 'bleed' && 'items-start')}>
 			{badge ? <div>{badge}</div> : null}
-			<h1 className={cn('font-serif font-semibold tracking-tight', layout === 'centered' ? 'text-5xl' : 'text-4xl md:text-5xl', layout === 'bleed' && 'text-background')}>{headline}</h1>
+			<h1 className={cn('font-serif font-semibold tracking-display', layout === 'centered' ? 'text-5xl md:text-6xl' : 'text-4xl md:text-5xl lg:text-6xl', layout === 'bleed' && 'text-background')}>{headline}</h1>
 			{subcopy ? <p className={cn('text-lg', layout === 'bleed' ? 'text-background/80' : 'text-muted-foreground')}>{subcopy}</p> : null}
 			{actions ? <div className="mt-1 flex flex-wrap items-center gap-3">{actions}</div> : null}
 		</div>
@@ -37,8 +38,25 @@ export function Hero({ badge, headline, subcopy, actions, media, layout = 'split
 			</section>
 		)
 	}
+	if (layout === 'collage') {
+		return (
+			<section data-block="hero" className={cn('mx-auto max-w-6xl px-6 py-section-y md:py-hero-y', className)}>
+				<div className="grid items-center gap-12 md:grid-cols-2">
+					{text}
+					{media ? (
+						<div className="relative isolate">
+							{/* Offset panels give a flat image depth — decorative, token-tinted, no extra assets. */}
+							<div aria-hidden className="absolute -right-3 -top-5 -z-10 h-full w-3/4 rounded-xl bg-accent" />
+							<div aria-hidden className="absolute -bottom-5 -left-4 -z-10 h-2/3 w-2/3 rounded-xl border bg-card" />
+							<div className="overflow-hidden rounded-xl border shadow-xl [&_img]:aspect-[4/3] [&_img]:size-full [&_img]:object-cover">{media}</div>
+						</div>
+					) : null}
+				</div>
+			</section>
+		)
+	}
 	return (
-		<section data-block="hero" className={cn('mx-auto max-w-6xl px-6 py-16 md:py-24', className)}>
+		<section data-block="hero" className={cn('mx-auto max-w-6xl px-6 py-section-y md:py-hero-y', className)}>
 			{layout === 'centered' ? (
 				<div className="flex flex-col items-center">{text}</div>
 			) : (

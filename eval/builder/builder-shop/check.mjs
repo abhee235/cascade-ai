@@ -38,7 +38,7 @@ if (literalPrices < 4 && priceFields < 6) {
 	process.exit(1)
 }
 // Design-system v2: objective design assertions (tokens-only colors, block assembly, real imagery).
-if (runDesignLint(bundle, { blocks: ['navbar', 'media-card', 'empty-state'] }) > 0) process.exit(1)
+if (runDesignLint(bundle, { blocks: ['navbar', 'media-card', 'empty-state'], preset: 'premium', quality: process.env.EVAL_BAR === 'quality' }) > 0) process.exit(1)
 // Design-overhaul P1: no template residue (demo branding, unreplaced placeholders, unwired entry).
 if (noResidue(process.cwd()) > 0) process.exit(1)
 console.log('builder-shop check passed')

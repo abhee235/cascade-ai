@@ -42,6 +42,16 @@
 	--font-sans: var(--font-sans);
 	--font-serif: var(--font-serif);
 	--font-mono: var(--font-mono);
+	/* Contract v2 (design-overhaul P2): DENSITY as tokens — a preset can now change rhythm, not just
+	   color. Blocks consume these via spacing utilities (py-section-y, h-nav); every preset defines
+	   --section-y / --section-y-lg / --nav-h. */
+	--spacing-section-y: var(--section-y);
+	--spacing-section-y-lg: var(--section-y-lg);
+	--spacing-nav: var(--nav-h);
+	--spacing-hero-y: var(--hero-y);
+	/* Display-heading letterspacing, preset-tunable (was declared-but-dead — now consumed by
+	   Hero/Section/PageHeader via the tracking-display utility). */
+	--tracking-display: var(--tracking-display);
 	/* Preset-tinted shadows: every shadow-* utility composes the preset's shadow color + opacity. */
 	--shadow-2xs: 0 1px 2px 0 oklch(from var(--shadow-color) l c h / calc(var(--shadow-opacity) * 0.6));
 	--shadow-xs: 0 1px 2px 0 oklch(from var(--shadow-color) l c h / calc(var(--shadow-opacity) * 0.8));

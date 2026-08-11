@@ -2,13 +2,23 @@
    Character: restrained, confident, expensive. Generous whitespace does the talking; color is spent
    on exactly one accent. Fraunces (serif) owns display headlines; Inter owns everything else.
 
-   CONTRACT (every preset in src/themes/ defines this exact variable set, light AND dark):
-   color roles (shadcn) · font trio · radius · shadow color/opacity · display tracking.
+   CONTRACT v2 (every preset in src/themes/ defines this exact variable set, light AND dark):
+   color roles (shadcn) · font trio (mode-invariant — defined once in :root; CSS inheritance carries
+   them into .dark, and a per-mode font would be a taste error) · radius · shadow color/opacity ·
+   display tracking · DENSITY (--section-y/--section-y-lg/--hero-y/--nav-h — the vertical rhythm, so a
+   preset can be airy or tight) · --preset (the machine-readable fingerprint asserted by eval).
    To ACTIVATE a preset: edit the single `@import './themes/….css'` line in src/index.css.
    Never edit token values inside components — compose with token utilities only. */
 
 :root {
+	--preset: 'premium';
 	--radius: 0.75rem;
+
+	/* Density: premium breathes — generous sections, standard nav. */
+	--section-y: 4rem;
+	--section-y-lg: 5rem;
+	--hero-y: 6rem;
+	--nav-h: 4rem;
 
 	/* Warm off-white paper, near-black warm ink. Hue 80 = a whisper of warmth in every neutral. */
 	--background: oklch(0.985 0.002 80);

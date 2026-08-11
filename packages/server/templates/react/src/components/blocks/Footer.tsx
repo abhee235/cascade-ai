@@ -21,13 +21,14 @@ export interface FooterProps {
 export function Footer({ brand, tagline, columns = [], fineprint, className }: FooterProps) {
 	return (
 		<footer data-block="footer" className={cn('border-t bg-muted/50', className)}>
-			<div className="mx-auto grid max-w-6xl gap-10 px-6 py-14 md:grid-cols-[2fr_repeat(auto-fit,minmax(0,1fr))]">
+			<div className="mx-auto flex max-w-6xl flex-col gap-10 px-6 py-14 md:flex-row md:justify-between">
 				<div className="flex flex-col gap-2">
-					<div className="font-serif text-lg font-semibold tracking-tight">{brand}</div>
+					<div className="flex items-center gap-2.5 font-serif text-lg font-semibold tracking-display">{brand}</div>
 					{tagline ? <p className="max-w-xs text-sm text-muted-foreground">{tagline}</p> : null}
 				</div>
-				{columns.map((col) => (
-					<div key={col.heading} className="flex flex-col gap-2.5">
+				<div className="flex flex-wrap gap-10 sm:gap-14">
+					{columns.map((col) => (
+					<div key={col.heading} className="flex min-w-32 flex-col gap-2.5">
 						<h4 className="text-xs font-medium uppercase tracking-widest text-muted-foreground">{col.heading}</h4>
 						{col.links.map((link, i) => (
 							<span key={i} className="text-sm text-muted-foreground transition-colors hover:text-foreground">
@@ -35,7 +36,8 @@ export function Footer({ brand, tagline, columns = [], fineprint, className }: F
 							</span>
 						))}
 					</div>
-				))}
+					))}
+				</div>
 			</div>
 			{fineprint ? (
 				<div className="border-t">

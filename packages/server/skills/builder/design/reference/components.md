@@ -35,7 +35,7 @@ Exports: Button, buttonVariants
 
 variant: `default` · `destructive` · `outline` · `secondary` · `ghost` · `link`
 
-size: `default` · `xs` · `sm` · `lg` · `icon`
+size: `default` · `xs` · `sm` · `lg` · `icon` · `icon-xs` · `icon-sm` · `icon-lg`
 
 ```tsx
 <Button onClick={save}>Save</Button>

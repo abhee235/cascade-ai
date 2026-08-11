@@ -18,7 +18,12 @@ Installed presets = the files in `src/themes/`. Pick by matching the USER'S adje
 
 | preset | character — pick when the user says… |
 |---|---|
-| `premium` | DEFAULT. Refined, minimal, elegant, luxury, professional, SaaS, boutique |
+| `premium` | DEFAULT. Refined, elegant, boutique, considered, expensive, editorial-commerce |
+| `minimal-mono` | Minimal, monochrome, precise, engineering, developer tool, dashboard, admin, data-heavy |
+| `editorial` | Warm, literary, magazine, portfolio, blog, story, calm, print-like |
+| `luxe-dark` | Dark, premium, luxury, cinematic, gaming, product launch, "make it dark" |
+| `playful` | Fun, friendly, bright, colorful, consumer, food, kids, social |
+| `aurora-glass` | Modern SaaS, AI startup, gradient, glassy, futuristic, "like Linear/Vercel" |
 
 To apply a different preset: edit the ONE `@import './themes/….css'` line in `src/index.css`. That is
 the entire operation — colors, fonts, radius, and shadows all follow.
@@ -28,11 +33,22 @@ the entire operation — colors, fonts, radius, and shadows all follow.
 `src/components/blocks/` (READ-ONLY, like the kit) are the page sections. Assemble pages from blocks
 FIRST, then fill their slots with the kit:
 
-- `NavBar` — every page's header (brand, links, actions). `Hero` — landing headline (split|centered|bleed).
-- `Section` — every content band (eyebrow/heading/muted tone). `PageHeader` — app-view headers.
+- `NavBar` — every page's header (brand, links, actions). `Hero` — landing headline
+  (`layout="split|centered|bleed|collage"`; **collage** layers the image over offset panels — the modern
+  depth look, and it needs only ONE image).
+- `Section` — every content band (`tone="default|muted|wash"`; **wash** paints a soft gradient field from
+  the preset's own colors). `PageHeader` — app-view headers.
+- `BentoGrid` — **the modern feature band**: MIXED-weight tiles (`media` anchor + `stat` numbers + ONE
+  filled `accent` CTA + `plain`), not a row of identical cards. Reach for this before FeatureGrid on a
+  landing page.
+- `LogoStrip` — social proof under the hero; plain TEXT wordmarks are the default (zero assets needed).
 - `FeatureGrid` — icon+title cards. `MediaCard` — product/article/listing cards. `StatStrip` — big numbers.
 - `EmptyState` — REQUIRED for every list's empty case. `Footer` — landing pages end with one.
-- `ArtImage` — deterministic token-colored SVG art (see Imagery).
+- `Photo` — a real photo per item in a grid (see Imagery). `ArtImage` — token-colored SVG art.
+
+**A modern landing reads: Hero(collage) → LogoStrip → Section+BentoGrid → Section+MediaCard grid →
+Section(tone="wash") → Footer.** Two-tone headlines are the current idiom — put the second clause in
+`<span className="text-muted-foreground">`.
 
 **Never hand-roll a card grid or an empty state — these two are the workhorses, copy them:**
 

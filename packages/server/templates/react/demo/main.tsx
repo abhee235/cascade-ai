@@ -11,6 +11,22 @@ import { GalleryKit } from './GalleryKit'
 import { GalleryLanding } from './GalleryLanding'
 import '@/index.css'
 
+// PRESET SWITCHER — demo-only (this file never ships): ?preset=<name> loads that theme AFTER index.css,
+// so its :root/.dark declarations win and the whole gallery re-skins. Real apps keep the one-@import
+// mechanism; this exists so authoring sessions can flip presets from the URL and screenshot each.
+const PRESETS = import.meta.glob('/src/themes/*.css', { query: '?url', import: 'default', eager: true }) as Record<string, string>
+const presetNames = Object.keys(PRESETS).map((p) => p.replace('/src/themes/', '').replace('.css', ''))
+const activePreset = new URLSearchParams(location.search).get('preset') ?? 'premium'
+{
+	const url = PRESETS[`/src/themes/${activePreset}.css`]
+	if (url && activePreset !== 'premium') {
+		const link = document.createElement('link')
+		link.rel = 'stylesheet'
+		link.href = url
+		document.head.appendChild(link)
+	}
+}
+
 type View = 'landing' | 'kit'
 
 function DemoApp() {
@@ -47,9 +63,27 @@ function DemoApp() {
 					</>
 				}
 				actions={
-					<Button variant="ghost" size="icon" aria-label="Toggle dark mode" onClick={() => setDark((d) => !d)}>
-						{dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
-					</Button>
+					<>
+						<select
+							aria-label="Theme preset"
+							className="h-8 rounded-md border bg-background px-2 text-sm text-foreground"
+							value={activePreset}
+							onChange={(e) => {
+								const q = new URLSearchParams(location.search)
+								q.set('preset', e.target.value)
+								location.search = q.toString()
+							}}
+						>
+							{presetNames.map((n) => (
+								<option key={n} value={n}>
+									{n}
+								</option>
+							))}
+						</select>
+						<Button variant="ghost" size="icon" aria-label="Toggle dark mode" onClick={() => setDark((d) => !d)}>
+							{dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+						</Button>
+					</>
 				}
 			/>
 			{view === 'landing' ? <GalleryLanding /> : <GalleryKit />}

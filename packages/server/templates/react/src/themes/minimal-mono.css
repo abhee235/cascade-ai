@@ -1,0 +1,88 @@
+/* THEME PRESET: minimal-mono — near-monochrome precision for dashboards and product UI.
+   Character: engineering-grade restraint (Linear/Vercel register). Ink on paper, almost no chroma;
+   hierarchy comes from weight and spacing, not color. The single indulgence is a cold electric blue,
+   spent ONLY on the primary action and focus rings. Display type is the SANS itself — the serif slot
+   maps to Inter, because a serif would be ornament and this preset refuses ornament. Tight rhythm:
+   sections sit close, the nav is slim — density is the aesthetic.
+
+   CONTRACT v2 — see premium.css for the canonical contract comment. */
+
+:root {
+	--preset: 'minimal-mono';
+	--radius: 0.375rem;
+
+	/* Density: tight — the dashboard register. */
+	--section-y: 3rem;
+	--section-y-lg: 3.5rem;
+	--hero-y: 4.5rem;
+	--nav-h: 3.5rem;
+
+	/* True neutrals — zero hue bias; the coldness IS the character. */
+	--background: oklch(0.99 0 0);
+	--foreground: oklch(0.18 0 0);
+	--card: oklch(1 0 0);
+	--card-foreground: oklch(0.18 0 0);
+	--popover: oklch(1 0 0);
+	--popover-foreground: oklch(0.18 0 0);
+	/* The one indulgence: cold electric blue, primary action only. */
+	--primary: oklch(0.52 0.19 255);
+	--primary-foreground: oklch(0.99 0.01 255);
+	--secondary: oklch(0.96 0 0);
+	--secondary-foreground: oklch(0.25 0 0);
+	--muted: oklch(0.96 0 0);
+	--muted-foreground: oklch(0.5 0 0);
+	--accent: oklch(0.94 0.02 255);
+	--accent-foreground: oklch(0.35 0.12 255);
+	--destructive: oklch(0.55 0.21 27);
+	--destructive-foreground: oklch(0.985 0 0);
+	--border: oklch(0.92 0 0);
+	--input: oklch(0.92 0 0);
+	--ring: oklch(0.6 0.15 255);
+	/* Charts: a disciplined cold ramp — blue first, then grays with one teal escape. */
+	--chart-1: oklch(0.55 0.17 255);
+	--chart-2: oklch(0.45 0 0);
+	--chart-3: oklch(0.65 0.1 210);
+	--chart-4: oklch(0.7 0 0);
+	--chart-5: oklch(0.35 0.06 255);
+
+	/* Fonts (mode-invariant): the display slot IS the sans — no serif in this register. */
+	--font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+	--font-serif: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+	--font-mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
+
+	/* Shadows: barely there — edges are drawn by borders here, not elevation. */
+	--shadow-color: oklch(0.2 0 0);
+	--shadow-opacity: 0.05;
+
+	/* Display headlines sit tight but not crushed — sans at large sizes needs less negative tracking. */
+	--tracking-display: -0.015em;
+}
+
+.dark {
+	--background: oklch(0.145 0 0);
+	--foreground: oklch(0.95 0 0);
+	--card: oklch(0.185 0 0);
+	--card-foreground: oklch(0.95 0 0);
+	--popover: oklch(0.185 0 0);
+	--popover-foreground: oklch(0.95 0 0);
+	--primary: oklch(0.68 0.16 255);
+	--primary-foreground: oklch(0.15 0.03 255);
+	--secondary: oklch(0.24 0 0);
+	--secondary-foreground: oklch(0.95 0 0);
+	--muted: oklch(0.24 0 0);
+	--muted-foreground: oklch(0.68 0 0);
+	--accent: oklch(0.27 0.05 255);
+	--accent-foreground: oklch(0.85 0.08 255);
+	--destructive: oklch(0.65 0.19 25);
+	--destructive-foreground: oklch(0.985 0 0);
+	--border: oklch(1 0 0 / 10%);
+	--input: oklch(1 0 0 / 14%);
+	--ring: oklch(0.62 0.14 255);
+	--chart-1: oklch(0.66 0.15 255);
+	--chart-2: oklch(0.75 0 0);
+	--chart-3: oklch(0.72 0.1 210);
+	--chart-4: oklch(0.55 0 0);
+	--chart-5: oklch(0.8 0.06 255);
+	--shadow-color: oklch(0 0 0);
+	--shadow-opacity: 0.4;
+}

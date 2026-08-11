@@ -3,13 +3,16 @@
 
 ## Contents
 - ArtImage
+- BentoGrid
 - EmptyState
 - FeatureGrid
 - Footer
 - Hero
+- LogoStrip
 - MediaCard
 - NavBar
 - PageHeader
+- Photo
 - Section
 - StatStrip
 
@@ -19,9 +22,34 @@ Import: `import { ArtImage } from '@/components/blocks/ArtImage'`
 
 Exports: ArtImage
 
+Props: `seed: string` · `kind?: 'product' | 'banner' | 'avatar' | 'abstract'` · `className?: string`
+
 ```tsx
 <ArtImage seed={product.name} kind="product" />   // deterministic token-colored art — same seed, same art
 <ArtImage seed={user.name} kind="avatar" />        // initials avatar
+```
+
+## BentoGrid
+
+Import: `import { BentoGrid } from '@/components/blocks/BentoGrid'`
+
+Exports: BentoGrid
+
+Props: `tiles: BentoTile[]` · `columns?: 2 | 3 | 4` · `className?: string`
+
+```tsx
+// The modern feature band: MIXED-weight tiles, not a row of identical cards.
+// Compose 4–7: one media anchor (span 2), one or two stats, ONE accent tile for the CTA, rest plain.
+<BentoGrid
+  tiles={[
+    { kind: 'media', span: 2, title: 'Repaired, not replaced', description: 'Send it back any year.',
+      media: <Photo web="leather workshop" seed="bench" kind="product" /> },
+    { kind: 'stat', value: '11 yrs', label: 'Median product lifespan' },
+    { kind: 'plain', icon: ShieldCheck, title: 'Lifetime repairs', description: 'Free for a decade.' },
+    { kind: 'accent', title: 'Join the list', description: 'One letter a month.',
+      action: <Button variant="secondary">Subscribe</Button> },
+  ]}
+/>
 ```
 
 ## EmptyState
@@ -29,6 +57,8 @@ Exports: ArtImage
 Import: `import { EmptyState } from '@/components/blocks/EmptyState'`
 
 Exports: EmptyState
+
+Props: `icon?: ComponentType<{ className?: string }>` · `title: string` · `description?: ReactNode` · `action?: ReactNode` · `className?: string`
 
 ```tsx
 <EmptyState icon={ShoppingCart} title="Your cart is empty" description="Find something you'll keep." action={<Button variant="outline" onClick={goCatalog}>Browse</Button>} />
@@ -40,6 +70,8 @@ Import: `import { FeatureGrid } from '@/components/blocks/FeatureGrid'`
 
 Exports: FeatureGrid
 
+Props: `features: Feature[]` · `columns?: 2 | 3` · `className?: string`
+
 ```tsx
 <FeatureGrid features={[{ icon: Truck, title: 'Free shipping', description: 'Over $50, everywhere.' }, …]} />
 ```
@@ -50,6 +82,8 @@ Import: `import { Footer } from '@/components/blocks/Footer'`
 
 Exports: Footer
 
+Props: `brand: ReactNode` · `tagline?: string` · `columns?: FooterColumn[]` · `fineprint?: ReactNode` · `className?: string`
+
 ```tsx
 <Footer brand="Meridian" tagline="Small-batch goods." columns={[{ heading: 'Shop', links: ['Instruments', 'Home'] }]} fineprint="© 2026 Meridian" />
 ```
@@ -59,6 +93,8 @@ Exports: Footer
 Import: `import { Hero } from '@/components/blocks/Hero'`
 
 Exports: Hero
+
+Props: `badge?: ReactNode` · `headline: ReactNode` · `subcopy?: ReactNode` · `actions?: ReactNode` · `media?: ReactNode` · `layout?: 'split' | 'centered' | 'bleed' | 'collage'` · `className?: string`
 
 ```tsx
 <Hero
@@ -71,11 +107,29 @@ Exports: Hero
 />
 ```
 
+## LogoStrip
+
+Import: `import { LogoStrip } from '@/components/blocks/LogoStrip'`
+
+Exports: LogoStrip
+
+Props: `label?: ReactNode` · `items: ReactNode[]` · `variant?: 'bordered' | 'bare'` · `className?: string`
+
+```tsx
+// Social proof under the hero. Plain TEXT wordmarks are the intended default — credible with zero assets.
+<LogoStrip
+  label="Stocked by independent shops in 14 countries"
+  items={['Northline', 'Hallowell', 'Studio Mena', 'The Good Press', 'Fieldnote', 'Vestry & Co']}
+/>
+```
+
 ## MediaCard
 
 Import: `import { MediaCard } from '@/components/blocks/MediaCard'`
 
 Exports: MediaCard
+
+Props: `media: ReactNode` · `title: ReactNode` · `meta?: ReactNode` · `aside?: ReactNode` · `actions?: ReactNode` · `onClick?: () => void` · `className?: string`
 
 ```tsx
 <MediaCard
@@ -92,7 +146,9 @@ Import: `import { NavBar } from '@/components/blocks/NavBar'`
 
 Exports: NavBar
 
-variant: `solid` · `Glass` · `floating`
+Props: `brand: ReactNode` · `links?: ReactNode` · `actions?: ReactNode` · `className?: string`
+
+variant: `solid` · `floating`
 
 ```tsx
 <NavBar
@@ -108,8 +164,28 @@ Import: `import { PageHeader } from '@/components/blocks/PageHeader'`
 
 Exports: PageHeader
 
+Props: `title: ReactNode` · `description?: ReactNode` · `actions?: ReactNode` · `className?: string`
+
 ```tsx
 <PageHeader title="Catalog" description="128 products" actions={<><Input placeholder="Search…" /><Button>Add product</Button></>} />
+```
+
+## Photo
+
+Import: `import { Photo } from '@/components/blocks/Photo'`
+
+Exports: Photo
+
+Props: `web?: string` · `seed: string` · `kind?: ArtImageProps['kind']` · `className?: string` · `alt?: string`
+
+```tsx
+// The DEFAULT for any grid/list of distinct subjects: a real, deterministic photo per item, with an
+// automatic <ArtImage> fallback if the host is blocked or slow — never a broken box.
+{products.map((p) => (
+  <MediaCard key={p.id} title={p.name} meta={p.category}
+    media={<Photo web="leather watch minimal" seed={p.id} kind="product" />} />
+))}
+// NEVER photoFor() across a list — the bundled pack holds ~2 photos per category, so every card repeats.
 ```
 
 ## Section
@@ -117,6 +193,8 @@ Exports: PageHeader
 Import: `import { Section } from '@/components/blocks/Section'`
 
 Exports: Section
+
+Props: `eyebrow?: string` · `heading?: ReactNode` · `description?: ReactNode` · `tone?: 'default' | 'muted' | 'wash'` · `children: ReactNode` · `className?: string`
 
 ```tsx
 <Section eyebrow="How it works" heading="Three steps" description="One line." tone="muted">
@@ -129,6 +207,8 @@ Exports: Section
 Import: `import { StatStrip } from '@/components/blocks/StatStrip'`
 
 Exports: StatStrip
+
+Props: `stats: Stat[]` · `className?: string`
 
 ```tsx
 <StatStrip stats={[{ value: '12 yrs', label: 'making goods' }, { value: '48k', label: 'repairs' }]} />
