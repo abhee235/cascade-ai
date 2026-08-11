@@ -4,7 +4,11 @@
 ## Contents
 - ArtImage
 - BentoGrid
+- CTASection
+- CartRow
+- CheckoutPanel
 - EmptyState
+- FAQ
 - FeatureGrid
 - Footer
 - Hero
@@ -13,8 +17,10 @@
 - NavBar
 - PageHeader
 - Photo
+- PricingTable
 - Section
 - StatStrip
+- Testimonial
 
 ## ArtImage
 
@@ -52,6 +58,61 @@ Props: `tiles: BentoTile[]` · `columns?: 2 | 3 | 4` · `className?: string`
 />
 ```
 
+## CTASection
+
+Import: `import { CTASection } from '@/components/blocks/CTASection'`
+
+Exports: CTASection
+
+Props: `headline: ReactNode` · `subcopy?: ReactNode` · `actions?: ReactNode` · `fineprint?: ReactNode` · `variant?: 'panel' | 'full'` · `className?: string`
+
+```tsx
+// The closing ask — the last band before the Footer. variant="full" paints it primary edge-to-edge.
+<CTASection
+  headline="Put your first pipeline on a schedule tonight"
+  subcopy="Fork a template, point it at your warehouse."
+  actions={<><Button size="lg">Start free</Button><Button size="lg" variant="outline">Read the docs</Button></>}
+  fineprint="No card required · Cancel in one click"
+/>
+```
+
+## CartRow
+
+Import: `import { CartRow } from '@/components/blocks/CartRow'`
+
+Exports: CartRow
+
+Props: `media?: ReactNode` · `title: ReactNode` · `unitPrice: ReactNode` · `meta?: ReactNode` · `quantity: number` · `onQuantityChange?: (delta: number) => void` · `onRemove?: () => void` · `lineTotal?: ReactNode` · `className?: string`
+
+```tsx
+// One cart line. The stepper + remove are what make a cart feel real; a static list reads as a receipt.
+{lines.map((l) => (
+  <CartRow key={l.id} media={<Photo web={l.name} seed={l.id} kind="product" />} title={l.name}
+    unitPrice={`$${l.price.toFixed(2)}`} quantity={l.qty} lineTotal={`$${(l.price * l.qty).toFixed(2)}`}
+    onQuantityChange={(d) => changeQty(l.id, d)} onRemove={() => remove(l.id)} />
+))}
+```
+
+## CheckoutPanel
+
+Import: `import { CheckoutPanel } from '@/components/blocks/CheckoutPanel'`
+
+Exports: CheckoutPanel
+
+Props: `lines: OrderLine[]` · `total: ReactNode` · `totalLabel?: ReactNode` · `children?: ReactNode` · `action?: ReactNode` · `confirmation?: ReactNode` · `className?: string`
+
+```tsx
+// Summary beside the form. Validate ON SUBMIT (forms skill); swap in `confirmation` after success.
+<CheckoutPanel
+  lines={[{ label: 'Subtotal', value: '$318.00' }, { label: 'Shipping', value: 'Free', muted: true }]}
+  total="$318.00"
+  action={<Button type="submit" disabled={!valid}>Place order</Button>}
+>
+  <Label htmlFor="email">Email</Label>
+  <Input id="email" value={form.email} onChange={set('email')} aria-invalid={!!errors.email} />
+</CheckoutPanel>
+```
+
 ## EmptyState
 
 Import: `import { EmptyState } from '@/components/blocks/EmptyState'`
@@ -62,6 +123,22 @@ Props: `icon?: ComponentType<{ className?: string }>` · `title: string` · `des
 
 ```tsx
 <EmptyState icon={ShoppingCart} title="Your cart is empty" description="Find something you'll keep." action={<Button variant="outline" onClick={goCatalog}>Browse</Button>} />
+```
+
+## FAQ
+
+Import: `import { FAQ } from '@/components/blocks/FAQ'`
+
+Exports: FAQ
+
+Props: `items: FaqItem[]` · `defaultOpenFirst?: boolean` · `className?: string`
+
+```tsx
+// Answer what BLOCKS a purchase (price, cancellation, data, support) — not what flatters the product.
+<FAQ items={[
+  { question: 'Can I self-host?', answer: 'Yes — the runner is a single binary, on every plan.' },
+  { question: 'Do you charge per seat?', answer: 'No. Pricing follows pipelines and run minutes.' },
+]} />
 ```
 
 ## FeatureGrid
@@ -188,6 +265,24 @@ Props: `web?: string` · `seed: string` · `kind?: ArtImageProps['kind']` · `cl
 // NEVER photoFor() across a list — the bundled pack holds ~2 photos per category, so every card repeats.
 ```
 
+## PricingTable
+
+Import: `import { PricingTable } from '@/components/blocks/PricingTable'`
+
+Exports: PricingTable
+
+Props: `tiers: PricingTier[]` · `className?: string`
+
+```tsx
+// 2–4 tiers, EXACTLY ONE highlighted — an undifferentiated row makes the visitor choose, and they leave.
+<PricingTable tiers={[
+  { name: 'Solo', price: '$0', period: 'mo', features: ['3 pipelines'], action: <Button variant="outline">Start free</Button> },
+  { name: 'Team', price: '$49', period: 'mo', features: ['Unlimited', 'On-call routing'],
+    action: <Button>Start trial</Button>, highlighted: true },
+  { name: 'Company', price: 'Custom', features: ['SSO', 'Residency'], action: <Button variant="outline">Talk to us</Button> },
+]} />
+```
+
 ## Section
 
 Import: `import { Section } from '@/components/blocks/Section'`
@@ -212,6 +307,21 @@ Props: `stats: Stat[]` · `className?: string`
 
 ```tsx
 <StatStrip stats={[{ value: '12 yrs', label: 'making goods' }, { value: '48k', label: 'repairs' }]} />
+```
+
+## Testimonial
+
+Import: `import { Testimonial } from '@/components/blocks/Testimonial'`
+
+Exports: Testimonial
+
+Props: `quotes: TestimonialQuote[]` · `variant?: 'cards' | 'feature'` · `className?: string`
+
+```tsx
+// variant="cards" for 2–3 voices · variant="feature" for one strong quote. Real names + roles only.
+<Testimonial variant="feature" quotes={[
+  { quote: 'We deleted 4,000 lines of glue in a fortnight.', author: 'Priya Raman', role: 'Staff Engineer, Kestrel' },
+]} />
 ```
 
 ## Canonical page assembly

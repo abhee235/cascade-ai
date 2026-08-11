@@ -2,6 +2,8 @@
 # Kit reference — every component, its exports, variants, and canonical usage
 
 ## Contents
+- accordion
+- avatar
 - badge
 - button
 - card
@@ -10,6 +12,9 @@
 - dropdown-menu
 - input
 - label
+- popover
+- progress
+- radio-group
 - select
 - separator
 - skeleton
@@ -18,6 +23,18 @@
 - tabs
 - textarea
 - tooltip
+
+## accordion
+
+Import: `import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion'`
+
+Exports: Accordion, AccordionItem, AccordionTrigger, AccordionContent
+
+## avatar
+
+Import: `import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'`
+
+Exports: Avatar, AvatarImage, AvatarFallback
 
 ## badge
 
@@ -112,6 +129,24 @@ Exports: Input
 Import: `import { Label } from '@/components/ui/label'`
 
 Exports: Label
+
+## popover
+
+Import: `import { Popover, PopoverTrigger, PopoverContent, PopoverAnchor } from '@/components/ui/popover'`
+
+Exports: Popover, PopoverTrigger, PopoverContent, PopoverAnchor
+
+## progress
+
+Import: `import { Progress } from '@/components/ui/progress'`
+
+Exports: Progress
+
+## radio-group
+
+Import: `import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'`
+
+Exports: RadioGroup, RadioGroupItem
 
 ## select
 

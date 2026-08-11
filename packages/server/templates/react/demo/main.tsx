@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { NavBar } from '@/components/blocks/NavBar'
 import { useHistoryView } from '@/lib/useHistoryView'
 import { GalleryKit } from './GalleryKit'
+import { LandingSaaS } from './pages/LandingSaaS'
 import { GalleryLanding } from './GalleryLanding'
 import '@/index.css'
 
@@ -27,7 +28,7 @@ const activePreset = new URLSearchParams(location.search).get('preset') ?? 'prem
 	}
 }
 
-type View = 'landing' | 'kit'
+type View = 'landing' | 'kit' | 'saas'
 
 function DemoApp() {
 	const [view, setView] = useHistoryView<View>('landing')
@@ -60,6 +61,7 @@ function DemoApp() {
 					<>
 						{link('landing', 'The look')}
 						{link('kit', 'The kit')}
+						{link('saas', 'SaaS page')}
 					</>
 				}
 				actions={
@@ -86,7 +88,7 @@ function DemoApp() {
 					</>
 				}
 			/>
-			{view === 'landing' ? <GalleryLanding /> : <GalleryKit />}
+			{view === 'landing' ? <GalleryLanding /> : view === 'kit' ? <GalleryKit /> : <LandingSaaS />}
 		</main>
 	)
 }

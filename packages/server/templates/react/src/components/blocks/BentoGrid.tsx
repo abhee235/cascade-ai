@@ -46,7 +46,7 @@ export function BentoGrid({ tiles, columns = 3, className }: BentoGridProps) {
 							</div>
 						</>
 					) : tile.kind === 'stat' ? (
-						<div className="flex flex-1 flex-col justify-end gap-1">
+						<div className="flex flex-1 flex-col justify-center gap-1">
 							<span className="font-serif text-4xl font-semibold tracking-display">{tile.value}</span>
 							<span className="text-sm text-muted-foreground">{tile.label}</span>
 						</div>

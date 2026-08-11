@@ -76,6 +76,56 @@ const EXAMPLES: Record<string, string> = {
 
 /** Hand-written composition examples for the blocks (same idea: generated facts + curated usage). */
 const BLOCK_EXAMPLES: Record<string, string> = {
+	PricingTable: `\`\`\`tsx
+// 2–4 tiers, EXACTLY ONE highlighted — an undifferentiated row makes the visitor choose, and they leave.
+<PricingTable tiers={[
+  { name: 'Solo', price: '$0', period: 'mo', features: ['3 pipelines'], action: <Button variant="outline">Start free</Button> },
+  { name: 'Team', price: '$49', period: 'mo', features: ['Unlimited', 'On-call routing'],
+    action: <Button>Start trial</Button>, highlighted: true },
+  { name: 'Company', price: 'Custom', features: ['SSO', 'Residency'], action: <Button variant="outline">Talk to us</Button> },
+]} />
+\`\`\``,
+	Testimonial: `\`\`\`tsx
+// variant="cards" for 2–3 voices · variant="feature" for one strong quote. Real names + roles only.
+<Testimonial variant="feature" quotes={[
+  { quote: 'We deleted 4,000 lines of glue in a fortnight.', author: 'Priya Raman', role: 'Staff Engineer, Kestrel' },
+]} />
+\`\`\``,
+	FAQ: `\`\`\`tsx
+// Answer what BLOCKS a purchase (price, cancellation, data, support) — not what flatters the product.
+<FAQ items={[
+  { question: 'Can I self-host?', answer: 'Yes — the runner is a single binary, on every plan.' },
+  { question: 'Do you charge per seat?', answer: 'No. Pricing follows pipelines and run minutes.' },
+]} />
+\`\`\``,
+	CTASection: `\`\`\`tsx
+// The closing ask — the last band before the Footer. variant="full" paints it primary edge-to-edge.
+<CTASection
+  headline="Put your first pipeline on a schedule tonight"
+  subcopy="Fork a template, point it at your warehouse."
+  actions={<><Button size="lg">Start free</Button><Button size="lg" variant="outline">Read the docs</Button></>}
+  fineprint="No card required · Cancel in one click"
+/>
+\`\`\``,
+	CartRow: `\`\`\`tsx
+// One cart line. The stepper + remove are what make a cart feel real; a static list reads as a receipt.
+{lines.map((l) => (
+  <CartRow key={l.id} media={<Photo web={l.name} seed={l.id} kind="product" />} title={l.name}
+    unitPrice={\`$\${l.price.toFixed(2)}\`} quantity={l.qty} lineTotal={\`$\${(l.price * l.qty).toFixed(2)}\`}
+    onQuantityChange={(d) => changeQty(l.id, d)} onRemove={() => remove(l.id)} />
+))}
+\`\`\``,
+	CheckoutPanel: `\`\`\`tsx
+// Summary beside the form. Validate ON SUBMIT (forms skill); swap in \`confirmation\` after success.
+<CheckoutPanel
+  lines={[{ label: 'Subtotal', value: '$318.00' }, { label: 'Shipping', value: 'Free', muted: true }]}
+  total="$318.00"
+  action={<Button type="submit" disabled={!valid}>Place order</Button>}
+>
+  <Label htmlFor="email">Email</Label>
+  <Input id="email" value={form.email} onChange={set('email')} aria-invalid={!!errors.email} />
+</CheckoutPanel>
+\`\`\``,
 	BentoGrid: `\`\`\`tsx
 // The modern feature band: MIXED-weight tiles, not a row of identical cards.
 // Compose 4–7: one media anchor (span 2), one or two stats, ONE accent tile for the CTA, rest plain.
