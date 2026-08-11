@@ -2,6 +2,7 @@
 # Blocks reference — page-section components. Pages are BLOCK COMPOSITIONS: assemble these, fill their slots with the kit.
 
 ## Contents
+- AppShell
 - ArtImage
 - BentoGrid
 - CTASection
@@ -25,6 +26,31 @@
 - StatCard
 - StatStrip
 - Testimonial
+
+## AppShell
+
+Import: `import { AppShell } from '@/components/blocks/AppShell'`
+
+Exports: AppShell
+
+Props: `brand: ReactNode` · `groups: AppNavGroup[]` · `user?: ReactNode` · `header?: ReactNode` · `headerActions?: ReactNode` · `children: ReactNode` · `className?: string`
+
+```tsx
+// EVERY signed-in view (dashboard, admin, settings, account) lives inside one of these. A bare centred
+// column reads as a marketing page, not a product.
+<AppShell
+  brand={<><BarChart3 className="size-4 text-primary" /> Cadence</>}
+  groups={[
+    { items: [{ label: 'Overview', icon: LayoutDashboard, active: true }, { label: 'Runs', icon: Package }] },
+    { heading: 'Billing', items: [{ label: 'Invoices', icon: FileText, onClick: () => setView('invoices') }] },
+  ]}
+  user={<div className="flex items-center gap-3"><Avatar className="size-8"><AvatarFallback>AR</AvatarFallback></Avatar>…</div>}
+  header="Overview"
+  headerActions={<Button>New invoice</Button>}
+>
+  {/* StatCard row → ChartCards → DataTable */}
+</AppShell>
+```
 
 ## ArtImage
 
@@ -103,7 +129,7 @@ Import: `import { ChartCard } from '@/components/blocks/ChartCard'`
 
 Exports: ChartCard
 
-Props: `title: ReactNode` · `description?: ReactNode` · `data: Record<string, string | number>[]` · `xKey?: string` · `yKey?: string` · `kind?: 'area' | 'bar' | 'line'` · `tone?: 1 | 2 | 3 | 4 | 5` · `action?: ReactNode` · `height?: number` · `className?: string`
+Props: `title: ReactNode` · `description?: ReactNode` · `data: Record<string, string | number>[]` · `xKey?: string` · `yKey?: string` · `kind?: 'area' | 'bar' | 'line'` · `tone?: 1 | 2 | 3 | 4 | 5` · `action?: ReactNode` · `showYAxis?: boolean` · `height?: number` · `className?: string`
 
 ```tsx
 // ONE series per card. tone picks the preset's chart colour; the block handles axes, grid and tooltip.
@@ -139,7 +165,7 @@ Import: `import { DataTable } from '@/components/blocks/DataTable'`
 
 Exports: DataTable
 
-Props: `columns: DataColumn<T>[]` · `rows: T[]` · `rowKey: (row: T) => string` · `sort?: { key: string; dir: 'asc' | 'desc' }` · `onSortChange?: (key: string) => void` · `onRowClick?: (row: T) => void` · `empty?: ReactNode` · `className?: string`
+Props: `columns: DataColumn<T>[]` · `rows: T[]` · `rowKey: (row: T) => string` · `sort?: { key: string; dir: 'asc' | 'desc' }` · `onSortChange?: (key: string) => void` · `onRowClick?: (row: T) => void` · `empty?: ReactNode` · `toolbar?: ReactNode` · `caption?: ReactNode` · `className?: string`
 
 ```tsx
 // Sorting/filtering happen ONCE upstream in a useMemo; this block just renders and reports sort clicks.
@@ -361,13 +387,15 @@ Import: `import { StatCard } from '@/components/blocks/StatCard'`
 
 Exports: StatCard
 
-Props: `label: ReactNode` · `value: ReactNode` · `delta?: number` · `deltaLabel?: ReactNode` · `icon?: ComponentType<{ className?: string }>` · `lowerIsBetter?: boolean` · `className?: string`
+Props: `label: ReactNode` · `value: ReactNode` · `delta?: number` · `trendLabel?: ReactNode` · `note?: ReactNode` · `icon?: ComponentType<{ className?: string }>` · `lowerIsBetter?: boolean` · `className?: string`
 
 ```tsx
 // A dashboard's top row is 3–4 of these. Values are DERIVED (useMemo), never hardcoded, and always
 // carry a comparison — a number with nothing to compare it to tells the reader nothing.
-<StatCard label="Revenue (paid)" value={`$${revenue.toLocaleString()}`} delta={12.4} deltaLabel="vs last week" icon={CreditCard} />
-<StatCard label="Failure rate" value="0.42%" delta={-1.1} deltaLabel="vs last week" lowerIsBetter />  // down = good
+// delta renders as a badge top-right; trendLabel is the takeaway, note is the quiet context line.
+<StatCard label="Revenue (paid)" value={`$${revenue.toLocaleString()}`} delta={12.4}
+  trendLabel="Trending up this month" note="Paid invoices in the current view" icon={CreditCard} />
+<StatCard label="Failure rate" value="0.42%" delta={-1.1} trendLabel="Fewer failures" lowerIsBetter />  // down = good
 ```
 
 ## StatStrip

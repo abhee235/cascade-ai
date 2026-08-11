@@ -16,6 +16,9 @@ export interface ChartCardProps {
 	tone?: 1 | 2 | 3 | 4 | 5
 	/** Top-right slot: a range Select, a Badge, a legend. */
 	action?: ReactNode
+	/** Y axis is OFF by default: the tooltip carries the exact number, and the axis is noise in a KPI
+	 *  card (shadcn's dashboard chart shows none). Turn it on for a chart read as a precise instrument. */
+	showYAxis?: boolean
 	height?: number
 	className?: string
 }
@@ -23,7 +26,7 @@ export interface ChartCardProps {
 /** ONE CHART, token-coloured. Charts are the thing dashboards are FOR, so this wraps recharts with the
  *  design system already applied: preset chart colour, token grid/axis, no default recharts palette
  *  (which is off-theme in every preset and the fastest way to make a dashboard look generic). */
-export function ChartCard({ title, description, data, xKey = 'label', yKey = 'value', kind = 'area', tone = 1, action, height = 240, className }: ChartCardProps) {
+export function ChartCard({ title, description, data, xKey = 'label', yKey = 'value', kind = 'area', tone = 1, action, showYAxis = false, height = 260, className }: ChartCardProps) {
 	// PRESET vars, not --color-* aliases: Tailwind v4 emits an alias only when a utility uses it, and
 	// nothing uses `bg-chart-1`, so `var(--color-chart-1)` is undefined at runtime (measured: black charts).
 	const color = `var(--chart-${tone})`
@@ -54,16 +57,16 @@ export function ChartCard({ title, description, data, xKey = 'label', yKey = 'va
 					{kind === 'bar' ? (
 						<BarChart data={data}>
 							<CartesianGrid vertical={false} stroke="var(--border)" />
-							<XAxis dataKey={xKey} {...axis} />
-							<YAxis {...axis} width={40} />
+							<XAxis dataKey={xKey} {...axis} tickMargin={8} />
+							{showYAxis ? <YAxis {...axis} width={40} /> : null}
 							{tooltip}
 							<Bar dataKey={yKey} fill={color} radius={[4, 4, 0, 0]} />
 						</BarChart>
 					) : kind === 'line' ? (
 						<LineChart data={data}>
 							<CartesianGrid vertical={false} stroke="var(--border)" />
-							<XAxis dataKey={xKey} {...axis} />
-							<YAxis {...axis} width={40} />
+							<XAxis dataKey={xKey} {...axis} tickMargin={8} />
+							{showYAxis ? <YAxis {...axis} width={40} /> : null}
 							{tooltip}
 							<Line type="monotone" dataKey={yKey} stroke={color} strokeWidth={2} dot={false} />
 						</LineChart>
@@ -76,8 +79,8 @@ export function ChartCard({ title, description, data, xKey = 'label', yKey = 'va
 								</linearGradient>
 							</defs>
 							<CartesianGrid vertical={false} stroke="var(--border)" />
-							<XAxis dataKey={xKey} {...axis} />
-							<YAxis {...axis} width={40} />
+							<XAxis dataKey={xKey} {...axis} tickMargin={8} />
+							{showYAxis ? <YAxis {...axis} width={40} /> : null}
 							{tooltip}
 							<Area type="monotone" dataKey={yKey} stroke={color} strokeWidth={2} fill={`url(#fill-${tone})`} />
 						</AreaChart>

@@ -25,16 +25,24 @@ export interface DataTableProps<T> {
 	onRowClick?: (row: T) => void
 	/** REQUIRED when rows can be empty — pass <EmptyState …/>. A blank table is a dead end. */
 	empty?: ReactNode
+	/** Above the table: view <Tabs> on the left, column/export controls on the right. */
+	toolbar?: ReactNode
+	/** Under the table, muted — the row count, selection state, or pagination. */
+	caption?: ReactNode
 	className?: string
 }
 
 /** THE dashboard/admin workhorse: a real table with sortable headers, right-aligned numerics, an empty
  *  state, and optional row actions in the last column. Generic over the row type, so the caller keeps its
  *  own data shape and this block never dictates a schema. */
-export function DataTable<T>({ columns, rows, rowKey, sort, onSortChange, onRowClick, empty, className }: DataTableProps<T>) {
-	if (rows.length === 0 && empty) return <div data-block="data-table">{empty}</div>
+export function DataTable<T>({ columns, rows, rowKey, sort, onSortChange, onRowClick, empty, toolbar, caption, className }: DataTableProps<T>) {
 	return (
-		<div data-block="data-table" className={cn('overflow-hidden rounded-xl border bg-card', className)}>
+		<div data-block="data-table" className={cn('flex flex-col gap-3', className)}>
+			{toolbar ? <div className="flex flex-wrap items-center justify-between gap-3">{toolbar}</div> : null}
+			{rows.length === 0 && empty ? (
+				empty
+			) : (
+			<div className="overflow-hidden rounded-xl border bg-card shadow-xs [&_thead]:bg-muted/50">
 			<Table>
 				<TableHeader>
 					<TableRow>
@@ -71,6 +79,9 @@ export function DataTable<T>({ columns, rows, rowKey, sort, onSortChange, onRowC
 					))}
 				</TableBody>
 			</Table>
+			</div>
+			)}
+			{caption ? <p className="px-1 text-sm text-muted-foreground">{caption}</p> : null}
 		</div>
 	)
 }

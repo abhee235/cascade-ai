@@ -1,20 +1,24 @@
 // REFERENCE PAGE — dashboard overview (category: dashboard). Never shipped to a project.
 //
-// The archetype: PageHeader → StatCard row (KPIs with deltas) → ChartCard(s) → FilterBar → DataTable
-// with an EmptyState. Every number here is DERIVED from the rows below it — a dashboard whose totals are
-// hardcoded is the fastest way to lose a user's trust, and useMemo is the only honest way to do it.
+// The archetype: AppShell (sidebar + sticky header) → StatCard row → ChartCards → DataTable with a view
+// toolbar and an EmptyState. Every number is DERIVED by useMemo from the rows beneath it — a dashboard
+// whose totals are hardcoded is the fastest way to lose a user's trust.
+//
+// The refinement pass followed shadcn's dashboard-01: product chrome rather than a centred column,
+// trend as a badge, a two-line takeaway under each KPI, and a chart with a range control and no Y axis.
 
 import { useMemo, useState } from 'react'
-import { CreditCard, Package, TrendingDown, Users } from 'lucide-react'
+import { BarChart3, CreditCard, FileText, LayoutDashboard, LifeBuoy, Package, Settings, TrendingDown, Users } from 'lucide-react'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { AppShell } from '@/components/blocks/AppShell'
 import { ChartCard } from '@/components/blocks/ChartCard'
 import { DataTable, type DataColumn } from '@/components/blocks/DataTable'
 import { EmptyState } from '@/components/blocks/EmptyState'
 import { FilterBar } from '@/components/blocks/FilterBar'
-import { PageHeader } from '@/components/blocks/PageHeader'
-import { Section } from '@/components/blocks/Section'
 import { StatCard } from '@/components/blocks/StatCard'
 
 interface Order {
@@ -74,12 +78,49 @@ export function DashboardHome() {
 		{ key: 'amount', header: 'Amount', cell: (o) => `$${o.amount.toLocaleString()}`, numeric: true, sortable: true },
 	]
 
+	const clearAll = () => {
+		setQuery('')
+		setPlan('all')
+	}
+
 	return (
-		<div>
-			<PageHeader
-				title="Overview"
-				description="Runs, revenue, and invoices for the last 7 days."
-				actions={
+		<AppShell
+			brand={
+				<>
+					<BarChart3 className="size-4 text-primary" /> Cadence
+				</>
+			}
+			groups={[
+				{
+					items: [
+						{ label: 'Overview', icon: LayoutDashboard, active: true },
+						{ label: 'Runs', icon: Package, badge: <Badge variant="secondary">12</Badge> },
+						{ label: 'Customers', icon: Users },
+					],
+				},
+				{
+					heading: 'Billing',
+					items: [
+						{ label: 'Invoices', icon: FileText },
+						{ label: 'Payment methods', icon: CreditCard },
+					],
+				},
+				{ heading: 'Workspace', items: [{ label: 'Settings', icon: Settings }, { label: 'Support', icon: LifeBuoy }] },
+			]}
+			user={
+				<div className="flex items-center gap-3 rounded-md px-2 py-1.5">
+					<Avatar className="size-8">
+						<AvatarFallback>AR</AvatarFallback>
+					</Avatar>
+					<div className="min-w-0 text-sm">
+						<div className="truncate font-medium">Ada Reyes</div>
+						<div className="truncate text-xs text-muted-foreground">ada@cadence.dev</div>
+					</div>
+				</div>
+			}
+			header="Overview"
+			headerActions={
+				<>
 					<Select defaultValue="7d">
 						<SelectTrigger className="w-36">
 							<SelectValue />
@@ -90,54 +131,79 @@ export function DashboardHome() {
 							<SelectItem value="90d">Last quarter</SelectItem>
 						</SelectContent>
 					</Select>
-				}
-			/>
-
-			<Section className="pt-0">
-				<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-					<StatCard label="Revenue (paid)" value={`$${revenue.toLocaleString()}`} delta={12.4} deltaLabel="vs last week" icon={CreditCard} />
-					<StatCard label="Runs" value="6,313" delta={8.1} deltaLabel="vs last week" icon={Package} />
-					<StatCard label="Active teams" value="248" delta={3.2} deltaLabel="vs last week" icon={Users} />
-					<StatCard label="Failure rate" value="0.42%" delta={-1.1} deltaLabel="vs last week" icon={TrendingDown} lowerIsBetter />
+					<Button>New invoice</Button>
+				</>
+			}
+		>
+			<div className="flex flex-col gap-6">
+				<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+					<StatCard label="Revenue (paid)" value={`$${revenue.toLocaleString()}`} delta={12.4} trendLabel="Trending up this month" note="Paid invoices in the current view" icon={CreditCard} />
+					<StatCard label="Runs" value="6,313" delta={8.1} trendLabel="Steady growth" note="Scheduled and manual, combined" icon={Package} />
+					<StatCard label="Active teams" value="248" delta={3.2} trendLabel="Retention holding" note="Teams with a run this week" icon={Users} />
+					<StatCard label="Failure rate" value="0.42%" delta={-1.1} trendLabel="Fewer failures" note="Retried before alerting" icon={TrendingDown} lowerIsBetter />
 				</div>
 
-				<div className="mt-6 grid gap-4 lg:grid-cols-[2fr_1fr]">
-					<ChartCard title="Runs per day" description="Scheduled and manual, combined." data={RUNS} kind="area" tone={1} />
+				<div className="grid gap-4 xl:grid-cols-[2fr_1fr]">
+					<ChartCard
+						title="Runs per day"
+						description="Scheduled and manual, combined."
+						data={RUNS}
+						kind="area"
+						tone={1}
+						action={
+							<Tabs defaultValue="7d">
+								<TabsList>
+									<TabsTrigger value="90d">90 days</TabsTrigger>
+									<TabsTrigger value="30d">30 days</TabsTrigger>
+									<TabsTrigger value="7d">7 days</TabsTrigger>
+								</TabsList>
+							</Tabs>
+						}
+					/>
 					<ChartCard title="Failures" description="Retried before alerting." data={RUNS.map((r) => ({ ...r, value: Math.round(r.value * 0.04) }))} kind="bar" tone={4} />
 				</div>
 
-				<div className="mt-8 flex flex-col gap-4">
-					<FilterBar
-						query={query}
-						onQueryChange={setQuery}
-						placeholder="Search invoices or customers…"
-						chips={plan === 'all' ? [] : [{ label: `Plan: ${plan}`, onRemove: () => setPlan('all') }]}
-						onClear={query || plan !== 'all' ? () => { setQuery(''); setPlan('all') } : undefined}
-						action={<Button>New invoice</Button>}
-					>
-						<Select value={plan} onValueChange={setPlan}>
-							<SelectTrigger className="w-40">
-								<SelectValue placeholder="Plan" />
-							</SelectTrigger>
-							<SelectContent>
-								<SelectItem value="all">All plans</SelectItem>
-								<SelectItem value="Solo">Solo</SelectItem>
-								<SelectItem value="Team">Team</SelectItem>
-								<SelectItem value="Company">Company</SelectItem>
-							</SelectContent>
-						</Select>
-					</FilterBar>
-
-					<DataTable
-						columns={columns}
-						rows={rows}
-						rowKey={(o) => o.id}
-						sort={sort}
-						onSortChange={(key) => setSort((s) => ({ key, dir: s.key === key && s.dir === 'desc' ? 'asc' : 'desc' }))}
-						empty={<EmptyState title="No invoices match" description="Try a different search or clear the plan filter." action={<Button variant="outline" onClick={() => { setQuery(''); setPlan('all') }}>Clear filters</Button>} />}
-					/>
-				</div>
-			</Section>
-		</div>
+				<DataTable
+					columns={columns}
+					rows={rows}
+					rowKey={(o) => o.id}
+					sort={sort}
+					onSortChange={(key) => setSort((s) => ({ key, dir: s.key === key && s.dir === 'desc' ? 'asc' : 'desc' }))}
+					toolbar={
+						<>
+							<Tabs defaultValue="all">
+								<TabsList>
+									<TabsTrigger value="all">All</TabsTrigger>
+									<TabsTrigger value="paid">Paid</TabsTrigger>
+									<TabsTrigger value="pending">Pending</TabsTrigger>
+								</TabsList>
+							</Tabs>
+							<FilterBar
+								className="w-full sm:w-auto"
+								query={query}
+								onQueryChange={setQuery}
+								placeholder="Search invoices…"
+								chips={plan === 'all' ? [] : [{ label: `Plan: ${plan}`, onRemove: () => setPlan('all') }]}
+								onClear={query || plan !== 'all' ? clearAll : undefined}
+							>
+								<Select value={plan} onValueChange={setPlan}>
+									<SelectTrigger className="w-36">
+										<SelectValue placeholder="Plan" />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="all">All plans</SelectItem>
+										<SelectItem value="Solo">Solo</SelectItem>
+										<SelectItem value="Team">Team</SelectItem>
+										<SelectItem value="Company">Company</SelectItem>
+									</SelectContent>
+								</Select>
+							</FilterBar>
+						</>
+					}
+					caption={`${rows.length} of ${ORDERS.length} invoices`}
+					empty={<EmptyState title="No invoices match" description="Try a different search or clear the plan filter." action={<Button variant="outline" onClick={clearAll}>Clear filters</Button>} />}
+				/>
+			</div>
+		</AppShell>
 	)
 }

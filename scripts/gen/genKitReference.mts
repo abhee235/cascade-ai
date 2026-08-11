@@ -86,8 +86,26 @@ const BLOCK_EXAMPLES: Record<string, string> = {
 	StatCard: `\`\`\`tsx
 // A dashboard's top row is 3–4 of these. Values are DERIVED (useMemo), never hardcoded, and always
 // carry a comparison — a number with nothing to compare it to tells the reader nothing.
-<StatCard label="Revenue (paid)" value={\`$\${revenue.toLocaleString()}\`} delta={12.4} deltaLabel="vs last week" icon={CreditCard} />
-<StatCard label="Failure rate" value="0.42%" delta={-1.1} deltaLabel="vs last week" lowerIsBetter />  // down = good
+// delta renders as a badge top-right; trendLabel is the takeaway, note is the quiet context line.
+<StatCard label="Revenue (paid)" value={\`$\${revenue.toLocaleString()}\`} delta={12.4}
+  trendLabel="Trending up this month" note="Paid invoices in the current view" icon={CreditCard} />
+<StatCard label="Failure rate" value="0.42%" delta={-1.1} trendLabel="Fewer failures" lowerIsBetter />  // down = good
+\`\`\``,
+	AppShell: `\`\`\`tsx
+// EVERY signed-in view (dashboard, admin, settings, account) lives inside one of these. A bare centred
+// column reads as a marketing page, not a product.
+<AppShell
+  brand={<><BarChart3 className="size-4 text-primary" /> Cadence</>}
+  groups={[
+    { items: [{ label: 'Overview', icon: LayoutDashboard, active: true }, { label: 'Runs', icon: Package }] },
+    { heading: 'Billing', items: [{ label: 'Invoices', icon: FileText, onClick: () => setView('invoices') }] },
+  ]}
+  user={<div className="flex items-center gap-3"><Avatar className="size-8"><AvatarFallback>AR</AvatarFallback></Avatar>…</div>}
+  header="Overview"
+  headerActions={<Button>New invoice</Button>}
+>
+  {/* StatCard row → ChartCards → DataTable */}
+</AppShell>
 \`\`\``,
 	ChartCard: `\`\`\`tsx
 // ONE series per card. tone picks the preset's chart colour; the block handles axes, grid and tooltip.
