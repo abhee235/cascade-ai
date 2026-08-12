@@ -43,6 +43,10 @@ const setQty = (id: string, delta: number) =>
 Never store `total`, `count`, or the joined product — they are `useMemo`, always. A stored total drifts
 from the cart the first time a quantity changes, and that bug is invisible until a user complains.
 
+The FULL working shop — all four views, the state flow, the derived totals — is one call away:
+`Skill {name: "commerce", file: "reference/pages.md"}`. It is the verbatim source of a page that renders,
+so it cannot drift from reality. Read it when a view fights you; copy its SHAPE, never its copy or data.
+
 ## The page assembly — copy this shape
 
 ```tsx

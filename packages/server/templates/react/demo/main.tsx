@@ -8,8 +8,13 @@ import { Button } from '@/components/ui/button'
 import { NavBar } from '@/components/blocks/NavBar'
 import { useHistoryView } from '@/lib/useHistoryView'
 import { GalleryKit } from './GalleryKit'
+import { AppShellPages } from './pages/AppShellPages'
 import { DashboardHome } from './pages/DashboardHome'
+import { ShopCatalog } from './pages/ShopCatalog'
 import { LandingSaaS } from './pages/LandingSaaS'
+import { LandingLaunch } from './pages/LandingLaunch'
+import { LandingPortfolio } from './pages/LandingPortfolio'
+import { LandingWaitlist } from './pages/LandingWaitlist'
 import { GalleryLanding } from './GalleryLanding'
 import '@/index.css'
 
@@ -29,7 +34,7 @@ const activePreset = new URLSearchParams(location.search).get('preset') ?? 'prem
 	}
 }
 
-type View = 'landing' | 'kit' | 'saas' | 'dashboard'
+type View = 'landing' | 'kit' | 'saas' | 'launch' | 'portfolio' | 'waitlist' | 'dashboard' | 'shop' | 'shell'
 
 function DemoApp() {
 	const [view, setView] = useHistoryView<View>('landing')
@@ -62,8 +67,13 @@ function DemoApp() {
 					<>
 						{link('landing', 'The look')}
 						{link('kit', 'The kit')}
-						{link('saas', 'SaaS page')}
+						{link('saas', 'SaaS')}
+						{link('launch', 'Launch')}
+						{link('portfolio', 'Portfolio')}
+						{link('waitlist', 'Waitlist')}
 						{link('dashboard', 'Dashboard')}
+						{link('shop', 'Shop')}
+						{link('shell', 'App shell')}
 					</>
 				}
 				actions={
@@ -90,7 +100,25 @@ function DemoApp() {
 					</>
 				}
 			/>
-			{view === 'landing' ? <GalleryLanding /> : view === 'kit' ? <GalleryKit /> : view === 'saas' ? <LandingSaaS /> : <DashboardHome />}
+			{view === 'landing' ? (
+				<GalleryLanding />
+			) : view === 'kit' ? (
+				<GalleryKit />
+			) : view === 'saas' ? (
+				<LandingSaaS />
+			) : view === 'launch' ? (
+				<LandingLaunch />
+			) : view === 'portfolio' ? (
+				<LandingPortfolio />
+			) : view === 'waitlist' ? (
+				<LandingWaitlist />
+			) : view === 'dashboard' ? (
+				<DashboardHome />
+			) : view === 'shell' ? (
+				<AppShellPages />
+			) : (
+				<ShopCatalog />
+			)}
 		</main>
 	)
 }

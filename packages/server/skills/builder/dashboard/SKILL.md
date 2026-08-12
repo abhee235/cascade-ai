@@ -18,6 +18,10 @@ This skill is the shape that avoids both.
 | trend | `<ChartCard>` × 1–2 | one series per card, `tone` picks the preset's chart colour |
 | records | `<DataTable>` + `<FilterBar>` | sortable, filterable, right-aligned numerics, `<EmptyState>` when filtered to nothing |
 
+The FULL working dashboard — AppShell chrome, KPI row, charts, filtered table — is one call away:
+`Skill {name: "dashboard", file: "reference/pages.md"}`. Verbatim source of a page that renders, so it
+cannot drift. Read it when a view fights you; copy its SHAPE, never its copy or data.
+
 ## The page assembly — copy this shape
 
 ```tsx

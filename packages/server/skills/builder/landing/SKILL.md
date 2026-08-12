@@ -28,6 +28,10 @@ The **two-tone headline** is the current idiom — put the second clause in mute
 headline={<>Ship your pipeline, <span className="text-muted-foreground">not your weekend.</span></>}
 ```
 
+All FOUR variants exist as working pages — `Skill {name: "landing", file: "reference/pages.md"}` is
+their verbatim source. They differ in STRUCTURE, not just copy, so read the one whose shape matches the
+ask before you compose bands from scratch.
+
 ## The four variants — same spine, different emphasis
 
 | variant | preset that suits it | keep | drop | hero |
