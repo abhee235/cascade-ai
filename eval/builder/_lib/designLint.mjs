@@ -15,7 +15,14 @@ export function readBundleJs() {
 
 /** Raw-color utilities are design-system violations: the tokens exist precisely so these never appear. */
 export function noRawColors(bundle) {
-	const rawShade = bundle.match(/\b(?:bg|text|border|from|to|ring|fill|stroke)-(?:white|black|(?:red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone)-\d{2,3})\b/g)
+	// THE MODAL SCRIM IS NOT A VIOLATION. shadcn's Dialog/AlertDialog/Sheet/Drawer overlays ship
+	// `bg-black/50`, and that is CORRECT: a scrim must darken in BOTH themes, so a token would invert it
+	// to a white veil in dark mode. This lint reads the bundle, which cannot tell vendored kit from app
+	// code — so the opacity-suffixed black is stripped before scanning. A bare `bg-black` still fails.
+	// (Found 2026-08-13 by builder-appshell, whose brief requires a confirm dialog: the kit's own scrim
+	// failed the fixture's own solution.)
+	const scanned = bundle.replace(/\bbg-black\/\d{1,3}\b/g, '')
+	const rawShade = scanned.match(/\b(?:bg|text|border|from|to|ring|fill|stroke)-(?:white|black|(?:red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone)-\d{2,3})\b/g)
 	const arbitraryHex = bundle.match(/\b(?:bg|text|border)-\[#[0-9a-fA-F]{3,8}\]/g)
 	const hits = [...new Set([...(rawShade ?? []), ...(arbitraryHex ?? [])])]
 	if (hits.length > 0) return `raw color utilities in the bundle (use tokens): ${hits.slice(0, 8).join(', ')}`
