@@ -171,10 +171,31 @@ export function planQualityIssues(text: string): string[] {
   // single inference made from the brief on turn one and then compacted away. Missing ⇒ the builder
   // falls back to guessing from the prompt, which is exactly how a shop gets built without the commerce
   // view contract. Accepted values mirror the mounted category skills.
-  if (!/\bcategory:\s*(commerce|dashboard|landing|app-shell|game|none)\b/i.test(text)) {
+  const declared = text.match(/\bcategory:\s*(commerce|dashboard|landing|app-shell|game|none)\b/i)
+  if (!declared) {
     issues.push(
       'its Design line has no `category:` token. Start that line with `category: <commerce|dashboard|landing|app-shell|game|none>` — the builder reads it off the plan every turn to load the matching skill, which carries that category\'s view contract and reference page.',
     )
+  } else if (declared[1].toLowerCase() === 'none') {
+    // `none` is legitimate (a todo app, a calculator) but it is also the escape hatch a model takes to
+    // avoid deciding — measured 2026-08-11: a planner declared `category: none` for a SaaS MARKETING
+    // LANDING PAGE, then self-corrected on a second write. Self-correction is luck, and `none` silently
+    // defeats the whole routing rung. So `none` is only accepted when the plan does NOT read like a
+    // category. Two independent signals are required before contradicting it, to stay off correct plans.
+    const SIGNALS: [string, RegExp[]][] = [
+      ['commerce', [/\bcart\b/i, /\bcheckout\b/i, /\bCartRow\b/, /\bCheckoutPanel\b/, /add to cart/i]],
+      ['dashboard', [/\bKPI\b/i, /\bStatCard\b/, /\bDataTable\b/, /\bChartCard\b/, /\bAppShell\b/]],
+      ['landing', [/\bPricingTable\b/, /\bTestimonial\b/, /\bFAQ\b/, /\bCTASection\b/, /pricing tier/i]],
+    ]
+    for (const [name, patterns] of SIGNALS) {
+      const hits = patterns.filter((p) => p.test(text))
+      if (hits.length >= 2) {
+        issues.push(
+          `it declares \`category: none\`, but the plan itself reads like **${name}** (it names ${hits.length} ${name} surfaces). Set \`category: ${name}\` so the builder loads that skill — \`none\` is only for apps no category fits, and it silently skips the view contract and the reference page.`,
+        )
+        break
+      }
+    }
   }
   // Line-scan rather than one multiline regex: `photoFor` is CORRECT for a single hero, and only
   // becomes the repeat bug when the plan applies it per item.

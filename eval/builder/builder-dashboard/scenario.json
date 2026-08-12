@@ -1,0 +1,6 @@
+{
+	"id": "builder-dashboard",
+	"template": "react",
+	"prompt": "Build an internal operations dashboard called 'Northwind Ops' for a delivery company. Requirements: (1) The whole app sits in a sidebar + sticky-header app shell (not a bare centred column). (2) A hardcoded dataset of at least 12 delivery runs, each with an id, a route name, a driver name, a status ('delivered', 'delayed' or 'cancelled'), a date, and a numeric cost in dollars. (3) An overview with at least 3 KPI cards — total runs, on-time rate as a percentage, and total cost — where every value is COMPUTED from the runs with useMemo, never a typed-in string, and each card shows a delta versus the previous period. (4) At least one chart of runs per day using the project's chart block, with at least 5 data points. (5) A table of the runs with a search box that narrows them and at least one sortable column header that reverses the order; costs are right-aligned. When a search matches nothing the table shows an empty state, never a blank card. (6) A status pill on each row so 'delayed' is visible at a glance. Use client-side state only (no router, no new dependencies), style with Tailwind token utilities, and keep `npm run build` passing.",
+	"budgets": { "maxTurns": 60, "timeoutMs": 1800000 }
+}

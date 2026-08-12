@@ -302,6 +302,23 @@ describe('planQualityIssues — the pinned contract must be usable (35B forensic
 		expect(planQualityIssues(withCat('fintech')).some((i) => i.includes('category:'))).toBe(true)
 	})
 
+	it('rejects `category: none` when the plan itself reads like a category', () => {
+		// Measured (qwen36-agentic-iq4, builder-landing, 2026-08-11): the planner declared `category: none`
+		// for a SaaS MARKETING LANDING PAGE, then happened to self-correct on a second write. `none` is the
+		// escape hatch from deciding, and it silently skips the whole routing rung.
+		const asLanding = ['# Ferrite', '**Design:** category: none; preset: aurora-glass; home: NavBar + Hero + PricingTable + Testimonial + FAQ; imagery: `<Photo web>`'].join('\n')
+		const flagged = planQualityIssues(asLanding)
+		expect(flagged.some((i) => i.includes('landing'))).toBe(true)
+
+		// …but `none` STAYS legitimate for an app no category fits — a todo list is not a landing page.
+		const todo = ['# Todo', '**Design:** category: none; preset: minimal-mono; one list view; imagery: `<ArtImage>` for the empty state'].join('\n')
+		expect(planQualityIssues(todo)).toEqual([])
+
+		// ONE stray signal must not contradict a correct `none` — two independent ones are required.
+		const oneSignal = ['# Notes', '**Design:** category: none; preset: editorial; a FAQ section at the bottom; imagery: `<ArtImage>`'].join('\n')
+		expect(planQualityIssues(oneSignal)).toEqual([])
+	})
+
 	it('planReviseNudge names every issue and points at the design skill', () => {
 		const nudge = planReviseNudge(['it is too long', 'it has no Design section'])
 		expect(nudge).toContain('it is too long')

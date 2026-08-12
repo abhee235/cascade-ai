@@ -39,6 +39,14 @@ export function usesImagery(bundle) {
 	return null
 }
 
+/** The half of usesImagery that applies EVERYWHERE, including surfaces with no photography: an emoji is
+ *  never an image. A dashboard opting out of "must contain a photo" does not get to render 📊 as a chart. */
+export function noEmojiAsImage(bundle) {
+	const emoji = bundle.match(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/gu) ?? []
+	if (emoji.length >= 4) return `${emoji.length} emoji codepoints in the bundle — emoji-as-image is banned; use lucide icons, <ArtImage>, or the photo pack`
+	return null
+}
+
 /** Positive control: token utilities present at all (guards against a check running on the wrong dist). */
 export function tokenBaseline(bundle) {
 	if (!bundle.includes('bg-background') || !bundle.includes('text-muted-foreground')) return 'token utilities absent from bundle — is this the right build?'
@@ -53,6 +61,13 @@ export function presetApplied(name) {
 		.map((f) => readFileSync(join('dist', 'assets', f), 'utf8'))
 		.join('\n')
 	// CSS minifiers drop spaces and may keep either quote style.
+	// `'*'` asserts only that SOME preset is active. Use it when the brief does not name a look: which
+	// preset suits an app is taste, and a fixture that demands one would fail correct work from a model
+	// that chose a defensible different one. What is objective is that a preset is applied at all.
+	if (name === '*') {
+		if (!/--preset:\s*['"][a-z-]+['"]/.test(css)) return 'no preset fingerprint in the built CSS — src/index.css must @import one file from src/themes/'
+		return null
+	}
 	if (!new RegExp(`--preset:\\s*['"]${name}['"]`).test(css)) return `preset "${name}" not applied — edit the ONE @import line in src/index.css to ./themes/${name}.css`
 	return null
 }
@@ -93,11 +108,15 @@ export function photoDistinct(files = readSrc()) {
 /** Run a set of lint fns; print each failure; return count.
  *  `preset` asserts the active theme; `quality: true` adds the source-side judgment checks (the 35B bar —
  *  the 9B integrity floor runs without them; see the eval bar split). */
-export function runDesignLint(bundle, { blocks = [], preset, quality = false } = {}) {
+export function runDesignLint(bundle, { blocks = [], preset, quality = false, imagery = true } = {}) {
 	const failures = [
 		tokenBaseline(bundle),
 		noRawColors(bundle),
-		usesImagery(bundle),
+		// `imagery: false` for app types with NO photographic surface — a dashboard is charts, KPI numbers
+		// and a table, and its avatars are initials. Demanding a photo there would fail correct work, which
+		// teaches models to bolt on a decorative image to satisfy the bar (the reasoning that retired
+		// onePrimaryCta). The emoji half of the rule still applies to every fixture, below.
+		imagery ? usesImagery(bundle) : noEmojiAsImage(bundle),
 		blocks.length ? usesBlocks(bundle, blocks) : null,
 		preset ? presetApplied(preset) : null,
 		...(quality ? [photoDistinct()] : []),
