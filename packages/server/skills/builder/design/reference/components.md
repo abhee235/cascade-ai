@@ -3,26 +3,57 @@
 
 ## Contents
 - accordion
+- alert-dialog
+- alert
+- aspect-ratio
 - avatar
 - badge
+- breadcrumb
+- button-group
 - button
+- calendar
 - card
+- carousel
+- chart
 - checkbox
+- collapsible
+- command
+- context-menu
 - dialog
+- drawer
 - dropdown-menu
+- empty
+- field
+- hover-card
+- input-group
+- input-otp
 - input
+- item
+- kbd
 - label
+- menubar
+- native-select
+- navigation-menu
+- pagination
 - popover
 - progress
 - radio-group
+- resizable
+- scroll-area
 - select
 - separator
+- sheet
+- sidebar
 - skeleton
+- slider
 - sonner
+- spinner
 - switch
 - table
 - tabs
 - textarea
+- toggle-group
+- toggle
 - tooltip
 
 ## accordion
@@ -30,6 +61,26 @@
 Import: `import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion'`
 
 Exports: Accordion, AccordionItem, AccordionTrigger, AccordionContent
+
+## alert-dialog
+
+Import: `import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, … } from '@/components/ui/alert-dialog'`
+
+Exports: AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogMedia, AlertDialogOverlay, AlertDialogPortal, AlertDialogTitle, AlertDialogTrigger
+
+## alert
+
+Import: `import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'`
+
+Exports: Alert, AlertTitle, AlertDescription
+
+variant: `default` · `destructive`
+
+## aspect-ratio
+
+Import: `import { AspectRatio } from '@/components/ui/aspect-ratio'`
+
+Exports: AspectRatio
 
 ## avatar
 
@@ -44,6 +95,20 @@ Import: `import { Badge, badgeVariants } from '@/components/ui/badge'`
 Exports: Badge, badgeVariants
 
 variant: `default` · `secondary` · `destructive` · `outline` · `ghost` · `link`
+
+## breadcrumb
+
+Import: `import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, … } from '@/components/ui/breadcrumb'`
+
+Exports: Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator, BreadcrumbEllipsis
+
+## button-group
+
+Import: `import { ButtonGroup, ButtonGroupSeparator, ButtonGroupText, buttonGroupVariants } from '@/components/ui/button-group'`
+
+Exports: ButtonGroup, ButtonGroupSeparator, ButtonGroupText, buttonGroupVariants
+
+orientation: `horizontal` · `vertical`
 
 ## button
 
@@ -62,6 +127,12 @@ size: `default` · `xs` · `sm` · `lg` · `icon` · `icon-xs` · `icon-sm` · `
 <Button variant="outline" size="icon"><Trash2 /></Button>  // lucide icon button
 ```
 
+## calendar
+
+Import: `import { Calendar, CalendarDayButton } from '@/components/ui/calendar'`
+
+Exports: Calendar, CalendarDayButton
+
 ## card
 
 Import: `import { Card, CardHeader, CardFooter, CardTitle, … } from '@/components/ui/card'`
@@ -79,11 +150,41 @@ Exports: Card, CardHeader, CardFooter, CardTitle, CardAction, CardDescription, C
 </Card>
 ```
 
+## carousel
+
+Import: `import { Carousel, CarouselContent, CarouselItem, CarouselPrevious, … } from '@/components/ui/carousel'`
+
+Exports: Carousel, CarouselContent, CarouselItem, CarouselPrevious, CarouselNext
+
+## chart
+
+Import: `import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, … } from '@/components/ui/chart'`
+
+Exports: ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent, ChartStyle
+
 ## checkbox
 
 Import: `import { Checkbox } from '@/components/ui/checkbox'`
 
 Exports: Checkbox
+
+## collapsible
+
+Import: `import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible'`
+
+Exports: Collapsible, CollapsibleTrigger, CollapsibleContent
+
+## command
+
+Import: `import { Command, CommandDialog, CommandInput, CommandList, … } from '@/components/ui/command'`
+
+Exports: Command, CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem, CommandShortcut, CommandSeparator
+
+## context-menu
+
+Import: `import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, … } from '@/components/ui/context-menu'`
+
+Exports: ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuCheckboxItem, ContextMenuRadioItem, ContextMenuLabel, ContextMenuSeparator, ContextMenuShortcut, ContextMenuGroup, ContextMenuPortal, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuRadioGroup
 
 ## dialog
 
@@ -102,6 +203,12 @@ Exports: Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 </Dialog>
 ```
 
+## drawer
+
+Import: `import { Drawer, DrawerPortal, DrawerOverlay, DrawerTrigger, … } from '@/components/ui/drawer'`
+
+Exports: Drawer, DrawerPortal, DrawerOverlay, DrawerTrigger, DrawerClose, DrawerContent, DrawerHeader, DrawerFooter, DrawerTitle, DrawerDescription
+
 ## dropdown-menu
 
 Import: `import { DropdownMenu, DropdownMenuPortal, DropdownMenuTrigger, DropdownMenuContent, … } from '@/components/ui/dropdown-menu'`
@@ -119,17 +226,93 @@ Exports: DropdownMenu, DropdownMenuPortal, DropdownMenuTrigger, DropdownMenuCont
 </DropdownMenu>
 ```
 
+## empty
+
+Import: `import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, … } from '@/components/ui/empty'`
+
+Exports: Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyContent, EmptyMedia
+
+variant: `default` · `icon`
+
+## field
+
+Import: `import { Field, FieldLabel, FieldDescription, FieldError, … } from '@/components/ui/field'`
+
+Exports: Field, FieldLabel, FieldDescription, FieldError, FieldGroup, FieldLegend, FieldSeparator, FieldSet, FieldContent, FieldTitle
+
+orientation: `vertical` · `horizontal` · `responsive`
+
+## hover-card
+
+Import: `import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/hover-card'`
+
+Exports: HoverCard, HoverCardTrigger, HoverCardContent
+
+## input-group
+
+Import: `import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupText, … } from '@/components/ui/input-group'`
+
+Exports: InputGroup, InputGroupAddon, InputGroupButton, InputGroupText, InputGroupInput, InputGroupTextarea
+
+align: `inline-start` · `inline-end` · `block-start` · `block-end`
+
+## input-otp
+
+Import: `import { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator } from '@/components/ui/input-otp'`
+
+Exports: InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator
+
 ## input
 
 Import: `import { Input } from '@/components/ui/input'`
 
 Exports: Input
 
+## item
+
+Import: `import { Item, ItemMedia, ItemContent, ItemActions, … } from '@/components/ui/item'`
+
+Exports: Item, ItemMedia, ItemContent, ItemActions, ItemGroup, ItemSeparator, ItemTitle, ItemDescription, ItemHeader, ItemFooter
+
+variant: `default` · `outline` · `muted`
+
+size: `default` · `sm`
+
+## kbd
+
+Import: `import { Kbd, KbdGroup } from '@/components/ui/kbd'`
+
+Exports: Kbd, KbdGroup
+
 ## label
 
 Import: `import { Label } from '@/components/ui/label'`
 
 Exports: Label
+
+## menubar
+
+Import: `import { Menubar, MenubarPortal, MenubarMenu, MenubarTrigger, … } from '@/components/ui/menubar'`
+
+Exports: Menubar, MenubarPortal, MenubarMenu, MenubarTrigger, MenubarContent, MenubarGroup, MenubarSeparator, MenubarLabel, MenubarItem, MenubarShortcut, MenubarCheckboxItem, MenubarRadioGroup, MenubarRadioItem, MenubarSub, MenubarSubTrigger, MenubarSubContent
+
+## native-select
+
+Import: `import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from '@/components/ui/native-select'`
+
+Exports: NativeSelect, NativeSelectOptGroup, NativeSelectOption
+
+## navigation-menu
+
+Import: `import { NavigationMenu, NavigationMenuList, NavigationMenuItem, NavigationMenuContent, … } from '@/components/ui/navigation-menu'`
+
+Exports: NavigationMenu, NavigationMenuList, NavigationMenuItem, NavigationMenuContent, NavigationMenuTrigger, NavigationMenuLink, NavigationMenuIndicator, NavigationMenuViewport, navigationMenuTriggerStyle
+
+## pagination
+
+Import: `import { Pagination, PaginationContent, PaginationLink, PaginationItem, … } from '@/components/ui/pagination'`
+
+Exports: Pagination, PaginationContent, PaginationLink, PaginationItem, PaginationPrevious, PaginationNext, PaginationEllipsis
 
 ## popover
 
@@ -148,6 +331,18 @@ Exports: Progress
 Import: `import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'`
 
 Exports: RadioGroup, RadioGroupItem
+
+## resizable
+
+Import: `import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'`
+
+Exports: ResizableHandle, ResizablePanel, ResizablePanelGroup
+
+## scroll-area
+
+Import: `import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'`
+
+Exports: ScrollArea, ScrollBar
 
 ## select
 
@@ -168,11 +363,33 @@ Import: `import { Separator } from '@/components/ui/separator'`
 
 Exports: Separator
 
+## sheet
+
+Import: `import { Sheet, SheetTrigger, SheetClose, SheetContent, … } from '@/components/ui/sheet'`
+
+Exports: Sheet, SheetTrigger, SheetClose, SheetContent, SheetHeader, SheetFooter, SheetTitle, SheetDescription
+
+## sidebar
+
+Import: `import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, … } from '@/components/ui/sidebar'`
+
+Exports: Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupAction, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarInput, SidebarInset, SidebarMenu, SidebarMenuAction, SidebarMenuBadge, SidebarMenuButton, SidebarMenuItem, SidebarMenuSkeleton, SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem, SidebarProvider, SidebarRail, SidebarSeparator, SidebarTrigger, useSidebar
+
+variant: `default` · `outline`
+
+size: `default` · `sm` · `lg`
+
 ## skeleton
 
 Import: `import { Skeleton } from '@/components/ui/skeleton'`
 
 Exports: Skeleton
+
+## slider
+
+Import: `import { Slider } from '@/components/ui/slider'`
+
+Exports: Slider
 
 ## sonner
 
@@ -187,6 +404,12 @@ Exports: Toaster, toast
 toast.success('Order placed')                // after a successful submit
 toast.error('Could not save — try again')    // after a failure
 ```
+
+## spinner
+
+Import: `import { Spinner } from '@/components/ui/spinner'`
+
+Exports: Spinner
 
 ## switch
 
@@ -230,6 +453,22 @@ variant: `default` · `line`
 Import: `import { Textarea } from '@/components/ui/textarea'`
 
 Exports: Textarea
+
+## toggle-group
+
+Import: `import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'`
+
+Exports: ToggleGroup, ToggleGroupItem
+
+## toggle
+
+Import: `import { Toggle, toggleVariants } from '@/components/ui/toggle'`
+
+Exports: Toggle, toggleVariants
+
+variant: `default` · `outline`
+
+size: `default` · `sm` · `lg`
 
 ## tooltip
 

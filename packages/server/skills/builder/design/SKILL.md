@@ -45,7 +45,11 @@ FIRST, then fill their slots with the kit:
   landing page.
 - `LogoStrip` — social proof under the hero; plain TEXT wordmarks are the default (zero assets needed).
 - `FeatureGrid` — icon+title cards. `MediaCard` — product/article/listing cards. `StatStrip` — big numbers.
-- `EmptyState` — REQUIRED for every list's empty case. `Footer` — landing pages end with one.
+- `EmptyState` — the list worked and has no data. `ErrorState` — the list FAILED (`code="404"` for a
+  missing route). `SkeletonList` — the list is loading. Three different causes, three different blocks;
+  see the `app-shell` skill. `Footer` — landing pages end with one.
+- `AuthCard` — sign-in/sign-up, centred, no nav. `SettingRow` — one settings/account row (label left,
+  control right), stacked in a `divide-y` card.
 - `Photo` — a real photo per item in a grid (see Imagery). `ArtImage` — token-colored SVG art.
 
 **A modern landing reads: Hero(collage) → LogoStrip → Section+BentoGrid → Section+MediaCard grid →
@@ -69,6 +73,29 @@ import { ArtImage } from '@/components/blocks/ArtImage'
 
 Other blocks' exact props + the canonical page assembly: `Skill {name: "design", file: "reference/blocks.md"}`.
 For kit components (Dialog, Select, Table…): `Skill {name: "design", file: "reference/components.md"}`.
+
+**The kit is FULL shadcn/ui — 53 components.** Before hand-rolling any interactive control, check the
+reference; it is almost certainly already there. The ones models most often rebuild by hand:
+
+| You need | Use — do NOT hand-roll |
+|---|---|
+| a destructive confirm | `AlertDialog` (never delete on a single click) |
+| mobile nav / side panel | `Sheet` · `Drawer` |
+| a range or price filter | `Slider` |
+| "you are here" nav trail | `Breadcrumb` |
+| long lists split up | `Pagination` |
+| a ⌘K / search palette | `Command` |
+| view switchers | `ToggleGroup` · `ButtonGroup` |
+| show/hide a section | `Collapsible` |
+| dates | `Calendar` (+ `Popover` = date picker) |
+| a scrolling pane | `ScrollArea` |
+| a loading spinner | `Spinner` |
+| a keyboard hint | `Kbd` |
+| a form field + label + error | `Field` · `FieldGroup` |
+| an inline empty block | `Empty` (or the `EmptyState` block for a whole view) |
+
+`Sidebar` also exists, but for a signed-in app shell prefer the `AppShell` **block** — it is prop-driven
+and already wired. Reach for `Sidebar` only when you need its collapsible/mobile behaviour.
 
 ## 4. Color discipline
 
@@ -142,9 +169,12 @@ ArtImage adapts automatically — if something looks wrong in dark, you used a r
 
 ## 8. States & feedback
 
-Every list view needs: an EmptyState (`<EmptyState icon title description action/>` — always one useful
-CTA), feedback after actions (toast/inline text), and disabled buttons for invalid actions (not error
-popups after the click).
+Every list view has FOUR states, and the wrong one is a lie the user acts on: `<SkeletonList>` while
+loading, `<ErrorState>` when the request FAILED (its action retries), `<EmptyState>` when it succeeded
+with no data (its action creates), and data. Check them in that order — `items.length === 0` first
+renders "nothing here" during every load and after every failure. Plus: feedback after actions
+(toast/inline text), and disabled buttons for invalid actions (not error popups after the click).
+The `app-shell` skill has the full pattern, including 404s and filtered-empty.
 
 ## Design pass — run this checklist before calling any UI work done
 
@@ -152,5 +182,5 @@ popups after the click).
 - [ ] Zero raw colors in your diff (no bg-white/black, -500/-600 shades, hex — stars/stock/success = text-primary)
 - [ ] Every image is photo()/photoFor()/<Photo>/<ArtImage> — zero emoji-as-image; any GRID/LIST of distinct items uses `<Photo web="<subject>" seed={item.id}>` (distinct per item), NEVER photoFor (repeats) or abstract art
 - [ ] Opened the grid in the Browser and COUNTED: no two cards share a photo, and each photo matches its label
-- [ ] Exactly one bg-primary CTA per screenful; empty lists show <EmptyState>
+- [ ] Exactly one bg-primary CTA per screenful; every list handles loading/error/empty, not just data
 - [ ] Checked once in light AND dark mode before done
