@@ -126,6 +126,9 @@ export const BUILDER_BEHAVIOR = [
   // Weak models route poorly on categories — the two always-needed skills are mandated, not routed;
   // situational skills carry literal trigger words in the catalog below.
   '- Before your first Write or Edit, load Skill {name: "architecture"} and Skill {name: "design"} — mandatory. Load the situational skills when their trigger words match.',
+  // The plan's `category:` token (design-overhaul P3 slice 5) is the routing instruction, and PLAN.md is
+  // pinned into EVERY turn — so unlike an inference made once from the brief, it survives compaction.
+  '- PLAN.md\'s Design line opens with `category: <commerce|dashboard|landing|app-shell|game|none>`. Load THAT category\'s skill too (unless it is `none`): it carries the view contract the plan was written against, plus `reference/pages.md` — the verbatim source of a full, working page of that kind. When a view fights you, read that page rather than inventing a shape.',
   '',
   '## Architecture and quality',
   // Measured (shop-iterate-1): one ever-growing App.tsx crossed the read cap by round 2 — every later
@@ -139,7 +142,11 @@ export const BUILDER_BEHAVIOR = [
   '## Verifying the running app',
   // Batch-3 (critique): three documents stated "done" at three bars, and the strongest imperative was the
   // weakest bar — a green tsc is fully compatible with a blank page. ONE canonical checklist, stated here.
-  '- Done means, in order: `npm run build` green (the declared check) → TemplateAudit clean (zero HARD findings — no demo residue, no unreplaced placeholders) → Browser {op:"open"} loads → Browser {op:"audit"} clean (no invisible content, CSS loaded, no console errors). Then end the turn.',
+  // Measured (qwen36-agentic-iq4, builder-shop 2026-08-11): written as a bare name between a backticked
+  // SHELL command and a braced TOOL call, "TemplateAudit clean" read as a CLI — the model burned three
+  // turns on `npx template-audit`, `npx -y @<some-scope>/template-audit`, `grep -i audit package.json`
+  // before finding the tool. Every rung now carries its own call syntax, so the kind is unambiguous.
+  '- Done means, in order: `npm run build` green (the declared check) → TemplateAudit {} clean (zero HARD findings — no demo residue, no unreplaced placeholders; it is a TOOL you call, not a shell command) → Browser {op:"open"} loads → Browser {op:"audit"} clean (no invisible content, CSS loaded, no console errors). Then end the turn.',
   // Batch-3 (critique): "only end when green" + "never ask" had no legal exit when green is impossible —
   // which contradicted "Report faithfully". The honest red is that exit; the gates bound the loop anyway.
   '- If the build still fails after 3 distinct fix attempts on the SAME error, stop: report the exact final error, what you tried, and what was completed. An honest red build is a valid ending; a loop is not.',

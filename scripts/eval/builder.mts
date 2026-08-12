@@ -18,10 +18,11 @@ import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { createProvider, createSession, JsonlTracer, type CascadeSession, type ModelProvider } from '@cascade/core'
 import { BUILDER_BEHAVIOR } from '../../packages/server/src/projectManager'
-import { createPlannerSession, ensurePlanPersisted, needsPlanStage, planSalvageNudge } from '../../packages/server/src/planStage'
+import { createPlannerSession, ensurePlanPersisted, needsPlanStage, planQualityIssues, planReviseNudge, planSalvageNudge } from '../../packages/server/src/planStage'
 import { HostSandbox } from '../../packages/server/src/hostSandbox'
 import { createPackTool } from '../../packages/server/src/packTool'
 import { createTemplateAuditTool } from '../../packages/server/src/auditTool'
+import { templateCopyFilter } from '../../packages/server/src/templates'
 import { keepAwake } from './keepAwake.mts'
 import { fanout, OtelTracer } from './otelTracer.mts'
 
@@ -92,7 +93,10 @@ function makeWorkdir(id: string): string {
 	// the scaffold from memory). The OS never cleans repo dirs; eval/.work is gitignored.
 	mkdirSync(join(ROOT, 'eval', '.work'), { recursive: true })
 	const work = mkdtempSync(join(ROOT, 'eval', '.work', `builder-${id}-`))
-	cpSync(TEMPLATE, work, { recursive: true })
+	// The PRODUCT's filter, not a local copy of it: a raw recursive copy handed every run the template's
+	// `demo/` — complete reference implementations of the exact scenarios under test — and choked the
+	// junction below on a stray `node_modules`. The bench must scaffold what applyTemplate ships.
+	cpSync(TEMPLATE, work, { recursive: true, filter: templateCopyFilter })
 	symlinkSync(SHARED_DEPS, join(work, 'node_modules'), 'junction')
 	return work
 }
@@ -272,6 +276,17 @@ for (const id of wanted) {
 						if (ev.type === 'toolStart') process.stdout.write('.')
 						else if (ev.type === 'question') planner.respondQuestion(ev.id, Object.fromEntries(ev.questions.map((q) => [q.question, q.options[0]?.label ?? 'Other'])))
 						else if (ev.type === 'permission') planner.respondPermission(ev.id, 'allow')
+					}
+				} else if (!timedOut) {
+					// FIDELITY: same one-shot plan revision the product path runs (planQualityIssues).
+					const issues = planQualityIssues(readFileSync(join(work, 'PLAN.md'), 'utf8'))
+					if (issues.length) {
+						process.stdout.write('r')
+						for await (const ev of planner.submit(planReviseNudge(issues))) {
+							if (ev.type === 'toolStart') process.stdout.write('.')
+							else if (ev.type === 'question') planner.respondQuestion(ev.id, Object.fromEntries(ev.questions.map((q) => [q.question, q.options[0]?.label ?? 'Other'])))
+							else if (ev.type === 'permission') planner.respondPermission(ev.id, 'allow')
+						}
 					}
 				}
 			} finally {

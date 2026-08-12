@@ -34,7 +34,7 @@ export function usesImagery(bundle) {
 	const hasArt = bundle.includes('data-art') || bundle.includes('"data-art"')
 	const hasPhotos = /assets\/[\w-]+-[\w]+\.webp|photoFor|photos\.ts/.test(bundle)
 	if (!hasArt && !hasPhotos) return 'no real imagery in the bundle — use <ArtImage> or photo()/photoFor() from @/lib/photos'
-	const emoji = bundle.match(/[\u{1F300}-\u{1FAFF}]/gu) ?? []
+	const emoji = bundle.match(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/gu) ?? []
 	if (emoji.length >= 4) return `${emoji.length} emoji codepoints in the bundle — emoji-as-image is banned; use <ArtImage> or the photo pack`
 	return null
 }

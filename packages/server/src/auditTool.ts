@@ -92,6 +92,10 @@ function scan(projectDir: string, findings: ResidueFinding[]): Hit[] {
 /** Built-in SOFT style pre-flights — source-side twins of eval designLint, so the model hears about a
  *  style landmine BEFORE the bench (or the user) does. Template-generic by construction (tokens/blocks
  *  are the house system), so they live here rather than in the per-template contract. */
+/** How many raw-color line numbers to name before summarising the rest — enough to fix in one pass
+ *  without turning a wholesale-untokenized file into a wall of numbers. */
+const RAW_COLOR_LINES_SHOWN = 8
+
 function styleSoftHits(projectDir: string): Hit[] {
 	const hits: Hit[] = []
 	const src = join(projectDir, 'src')
@@ -111,9 +115,21 @@ function styleSoftHits(projectDir: string): Hit[] {
 		if (!blockImportSeen && text.includes('@/components/blocks/')) blockImportSeen = true
 		if (!firstView && rel.startsWith('src/') && rel.endsWith('.tsx')) firstView = rel
 		const lines = text.split('\n')
-		const rawAt = lines.findIndex((l) => raw.test(l))
-		if (rawAt >= 0) {
-			hits.push({ finding: { kind: 'string', why: 'raw color utility — the design system is token-only (bg-primary, text-muted-foreground, …)', fix: 'Replace with the token utility (design skill §4 has the substitution table).' }, where: `${rel}:${rawAt + 1}` })
+		// EVERY raw-color line, not just the first. Measured (qwen36-agentic-iq4, builder-shop 2026-08-11):
+		// reporting one occurrence per file turned a two-instance file into a whack-a-mole — audit, fix :66,
+		// audit, fix :113 — three wasted turns for one class of defect. All the lines at once means one edit.
+		const rawLines = lines.flatMap((l, i) => (raw.test(l) ? [i + 1] : []))
+		if (rawLines.length > 0) {
+			const shown = rawLines.slice(0, RAW_COLOR_LINES_SHOWN)
+			const more = rawLines.length - shown.length
+			hits.push({
+				finding: {
+					kind: 'string',
+					why: `raw color utility on ${rawLines.length === 1 ? 'this line' : `${rawLines.length} lines (${shown.join(', ')}${more > 0 ? `, +${more} more` : ''})`} — the design system is token-only (bg-primary, text-muted-foreground, …)`,
+					fix: 'Replace EVERY one with the token utility in a single pass (design skill §4 has the substitution table).',
+				},
+				where: `${rel}:${rawLines[0]}`,
+			})
 		}
 		// photoFor inside a .map() render — the "all my products look like the same watch" bug: flag a
 		// photoFor call on the same line as .map( or within the 6 lines after one (the callback body).
@@ -167,7 +183,7 @@ export function createTemplateAuditTool(deps: AuditToolDeps): Tool | undefined {
 					lines.push(`SOFT findings (${soft.length}) — fix, or override with a one-line reason:`)
 					for (const s of soft) lines.push(`- ${s.where} — ${s.finding.why}. FIX: ${s.finding.fix}`)
 				}
-				lines.push(hard.length ? 'Fix the HARD findings and run TemplateAudit again.' : 'No HARD residue — address the SOFT findings or state why not.')
+				lines.push(hard.length ? 'Fix the HARD findings, then call TemplateAudit again.' : 'No HARD residue — address the SOFT findings or state why not.')
 				return { content: lines.join('\n'), isError: hard.length > 0 }
 			} catch (e) {
 				return { content: `TemplateAudit failed: ${e instanceof Error ? e.message : String(e)}`, isError: true }

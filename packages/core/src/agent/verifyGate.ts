@@ -123,7 +123,7 @@ export function buildRunBeforeDoneNudge(pending: string[]): Message {
 	return {
 		role: 'user',
 		content:
-			`<system-reminder>You edited files but never ran ${names} afterwards. Run ${names} NOW and fix every blocking finding reported before finishing. This is a background note, NOT a new request: do not reply to it — run the tool${pending.length > 1 ? 's' : ''}, then give your final answer on the ORIGINAL task.</system-reminder>`,
+			`<system-reminder>You edited files but never called the ${names} tool${pending.length > 1 ? 's' : ''} afterwards. Call ${names} NOW — ${pending.length > 1 ? 'they are TOOLS' : 'it is a TOOL'} available in this session, not a shell command — and fix every blocking finding reported before finishing. This is a background note, NOT a new request: do not reply to it — call the tool${pending.length > 1 ? 's' : ''}, then give your final answer on the ORIGINAL task.</system-reminder>`,
 	}
 }
 

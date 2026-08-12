@@ -62,20 +62,31 @@ export function readResidueContract(templateId: string): ResidueContract | undef
   }
 }
 
-/** Copy a template's files into `dest` (skipping node_modules/.git/dist; `_gitignore` → `.gitignore`). */
+/**
+ * What NEVER reaches a generated project:
+ * - `packs` (ADR-066): optional add-ons applied ON DEMAND by applyPack — a new project starts frontend-only.
+ * - `demo` (design-overhaul P1): the gallery lives at the template ROOT and never ships, so demo residue
+ *   in generated apps (the measured Meridian class) is structurally impossible.
+ * - `residue.json`: the audit contract, read server-side from TEMPLATES_DIR — never copied, so the builder
+ *   can't edit the contract to pass its own audit.
+ * - `node_modules`/`.git`/`dist`/`*.tsbuildinfo`: build machinery, never source. (A tsbuildinfo left by a
+ *   local `npm run build` in the template would seed a fresh project with another tree's incremental state.)
+ *
+ * EXPORTED so the eval bench scaffolds byte-identically (scripts/eval/builder.mts). It previously copied
+ * the template raw, which handed every run a `demo/` containing complete reference implementations — an
+ * answer key for the very scenarios being measured — and a stray `node_modules` (from a plain `npm install`
+ * in the template dir, which is a reasonable thing to do) crashed the shared-deps junction outright. One
+ * filter, one scaffold: the bench cannot drift from what users actually get.
+ */
+export function templateCopyFilter(p: string): boolean {
+  return !/[\\/](node_modules|\.git|dist|packs|demo|residue\.json|[^\\/]+\.tsbuildinfo)([\\/]|$)/.test(p)
+}
+
+/** Copy a template's files into `dest` (see templateCopyFilter; `_gitignore` → `.gitignore`). */
 export function applyTemplate(templateId: string, dest: string): void {
   const src = join(TEMPLATES_DIR, templateId)
   if (!existsSync(src)) throw new Error(`Unknown template: ${templateId}`)
-  cpSync(src, dest, {
-    recursive: true,
-    // `packs` is EXCLUDED (ADR-066): packs are optional add-ons applied ON DEMAND by applyPack, never
-    // copied into a fresh prototype — a new project starts frontend-only.
-    // `demo` is EXCLUDED (design-overhaul P1): the gallery lives at the template ROOT and never ships —
-    // demo residue in generated apps (the measured Meridian class) becomes structurally impossible.
-    // `residue.json` is the audit contract, read server-side from TEMPLATES_DIR — never copied, so the
-    // builder can't edit the contract to pass its own audit.
-    filter: (p) => !/[\\/](node_modules|\.git|dist|packs|demo|residue\.json)([\\/]|$)/.test(p),
-  })
+  cpSync(src, dest, { recursive: true, filter: templateCopyFilter })
   // Templates ship `_gitignore` (so it doesn't affect the Cascade repo); restore the dotfile in the project.
   const underscored = join(dest, '_gitignore')
   if (existsSync(underscored)) renameSync(underscored, join(dest, '.gitignore'))

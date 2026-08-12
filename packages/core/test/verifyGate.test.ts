@@ -254,7 +254,7 @@ describe('run-before-done gate (design-overhaul P1, generalized) — the contrac
 		const messages: Message[] = [{ role: 'user', content: 'build' }]
 		await drain(runAgentLoop(messages, deps(provider, { registry: withAudit() })))
 		expect(provider.calls.length).toBe(4)
-		expect(historyText(messages)).toContain('never ran TemplateAudit')
+		expect(historyText(messages)).toContain('never called the TemplateAudit tool')
 	})
 
 	it('through the loop: running the declared tool before the terminal ⇒ no nudge', async () => {
@@ -267,7 +267,7 @@ describe('run-before-done gate (design-overhaul P1, generalized) — the contrac
 		const messages: Message[] = [{ role: 'user', content: 'build' }]
 		await drain(runAgentLoop(messages, deps(provider, { registry: withAudit() })))
 		expect(provider.calls.length).toBe(4)
-		expect(historyText(messages)).not.toContain('never ran TemplateAudit')
+		expect(historyText(messages)).not.toContain('never called the TemplateAudit tool')
 	})
 
 	it('no declarer in the registry ⇒ byte-identical behavior (no nudge ever)', async () => {
@@ -279,7 +279,7 @@ describe('run-before-done gate (design-overhaul P1, generalized) — the contrac
 		const messages: Message[] = [{ role: 'user', content: 'build' }]
 		await drain(runAgentLoop(messages, deps(provider)))
 		expect(provider.calls.length).toBe(3)
-		expect(historyText(messages)).not.toContain('never ran')
+		expect(historyText(messages)).not.toContain('never called the')
 	})
 })
 
