@@ -26,7 +26,7 @@ export function CTASection({ headline, subcopy, actions, fineprint, variant = 'p
 						!full && 'rounded-xl border bg-card px-6 py-12 shadow-sm',
 					)}
 				>
-					<h2 className={cn('max-w-2xl font-serif text-3xl font-semibold tracking-display md:text-4xl')}>{headline}</h2>
+					<h2 className={cn('max-w-2xl font-serif text-3xl font-semibold tracking-display leading-display md:text-4xl')}>{headline}</h2>
 					{subcopy ? <p className={cn('max-w-xl', full ? 'text-primary-foreground/85' : 'text-muted-foreground')}>{subcopy}</p> : null}
 					{actions ? <div className="mt-1 flex flex-wrap items-center justify-center gap-3">{actions}</div> : null}
 					{fineprint ? <p className={cn('text-xs', full ? 'text-primary-foreground/70' : 'text-muted-foreground')}>{fineprint}</p> : null}

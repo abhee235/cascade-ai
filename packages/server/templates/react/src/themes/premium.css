@@ -55,15 +55,27 @@
 	--chart-4: oklch(0.6 0.16 20);
 	--chart-5: oklch(0.5 0.08 250);
 
-	--font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
-	--font-serif: 'Fraunces Variable', Georgia, serif;
-	--font-mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
+	/* Sidebar roles derive from this preset's own tokens — authored once, correct in light AND dark
+	   (`.dark` redefines --card/--accent on the same :root element, so these re-resolve). */
+	--sidebar: var(--card);
+	--sidebar-foreground: var(--card-foreground);
+	--sidebar-primary: var(--primary);
+	--sidebar-primary-foreground: var(--primary-foreground);
+	--sidebar-accent: var(--accent);
+	--sidebar-accent-foreground: var(--accent-foreground);
+	--sidebar-border: var(--border);
+	--sidebar-ring: var(--ring);
+
+	--font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+	--font-serif: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+	--font-mono: 'Geist Mono Variable', ui-monospace, 'Cascadia Code', Consolas, monospace;
 
 	/* Whisper-quiet violet-tinted shadows (composed into shadow-sm..xl in index.css). */
 	--shadow-color: oklch(0.3 0.08 292);
 	--shadow-opacity: 0.08;
 
-	--tracking-display: -0.02em;
+	--tracking-display: -0.03em;
+	--leading-display: 1.05;
 }
 
 .dark {
@@ -103,3 +115,4 @@
 	--shadow-color: oklch(0 0 0);
 	--shadow-opacity: 0.35;
 }
+

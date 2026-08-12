@@ -4,6 +4,7 @@
 ## Contents
 - AppShell
 - ArtImage
+- AuthCard
 - BentoGrid
 - CTASection
 - CartRow
@@ -11,6 +12,7 @@
 - CheckoutPanel
 - DataTable
 - EmptyState
+- ErrorState
 - FAQ
 - FeatureGrid
 - FilterBar
@@ -23,6 +25,8 @@
 - Photo
 - PricingTable
 - Section
+- SettingRow
+- SkeletonList
 - StatCard
 - StatStrip
 - Testimonial
@@ -64,6 +68,14 @@ Props: `seed: string` · `kind?: 'product' | 'banner' | 'avatar' | 'abstract'` �
 <ArtImage seed={product.name} kind="product" />   // deterministic token-colored art — same seed, same art
 <ArtImage seed={user.name} kind="avatar" />        // initials avatar
 ```
+
+## AuthCard
+
+Import: `import { AuthCard } from '@/components/blocks/AuthCard'`
+
+Exports: AuthCard
+
+Props: `brand?: ReactNode` · `title: ReactNode` · `subtitle?: ReactNode` · `children: ReactNode` · `footer?: ReactNode` · `error?: ReactNode` · `className?: string`
 
 ## BentoGrid
 
@@ -190,6 +202,14 @@ Props: `icon?: ComponentType<{ className?: string }>` · `title: string` · `des
 ```tsx
 <EmptyState icon={ShoppingCart} title="Your cart is empty" description="Find something you'll keep." action={<Button variant="outline" onClick={goCatalog}>Browse</Button>} />
 ```
+
+## ErrorState
+
+Import: `import { ErrorState } from '@/components/blocks/ErrorState'`
+
+Exports: ErrorState
+
+Props: `icon?: ComponentType<{ className?: string }>` · `code?: string` · `title: string` · `description?: ReactNode` · `action?: ReactNode` · `className?: string`
 
 ## FAQ
 
@@ -380,6 +400,22 @@ Props: `eyebrow?: string` · `heading?: ReactNode` · `description?: ReactNode` 
   {/* any content — grids, FeatureGrid, StatStrip… */}
 </Section>
 ```
+
+## SettingRow
+
+Import: `import { SettingRow } from '@/components/blocks/SettingRow'`
+
+Exports: SettingRow
+
+Props: `label: ReactNode` · `description?: ReactNode` · `control?: ReactNode` · `children?: ReactNode` · `className?: string`
+
+## SkeletonList
+
+Import: `import { SkeletonList } from '@/components/blocks/SkeletonList'`
+
+Exports: SkeletonList
+
+Props: `count?: number` · `shape?: 'rows' | 'cards' | 'stats'` · `className?: string`
 
 ## StatCard
 

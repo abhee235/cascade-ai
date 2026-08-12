@@ -44,7 +44,7 @@ export function ChartCard({ title, description, data, xKey = 'label', yKey = 'va
 		/>
 	)
 	return (
-		<div data-block="chart-card" className={cn('flex flex-col gap-4 rounded-xl border bg-card p-5', className)}>
+		<div data-block="chart-card" className={cn('flex flex-col gap-4 rounded-xl border bg-card p-6', className)}>
 			<div className="flex items-start justify-between gap-4">
 				<div className="flex flex-col gap-0.5">
 					<h3 className="font-medium">{title}</h3>

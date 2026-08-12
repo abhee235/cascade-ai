@@ -46,16 +46,30 @@
 	--chart-5: oklch(0.35 0.06 255);
 
 	/* Fonts (mode-invariant): the display slot IS the sans — no serif in this register. */
-	--font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
-	--font-serif: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
-	--font-mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
+	/* Sidebar roles derive from this preset's own tokens — authored once, correct in light AND dark
+	   (`.dark` redefines --card/--accent on the same :root element, so these re-resolve). */
+	--sidebar: var(--card);
+	--sidebar-foreground: var(--card-foreground);
+	--sidebar-primary: var(--primary);
+	--sidebar-primary-foreground: var(--primary-foreground);
+	--sidebar-accent: var(--accent);
+	--sidebar-accent-foreground: var(--accent-foreground);
+	--sidebar-border: var(--border);
+	--sidebar-ring: var(--ring);
+
+	--font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+	/* Geist Mono IS the display face here — that is what makes it minimal-mono. */
+	--font-serif: 'Geist Mono Variable', ui-monospace, 'Cascadia Code', Consolas, monospace;
+	--font-mono: 'Geist Mono Variable', ui-monospace, 'Cascadia Code', Consolas, monospace;
 
 	/* Shadows: barely there — edges are drawn by borders here, not elevation. */
 	--shadow-color: oklch(0.2 0 0);
 	--shadow-opacity: 0.05;
 
 	/* Display headlines sit tight but not crushed — sans at large sizes needs less negative tracking. */
-	--tracking-display: -0.015em;
+	/* Mono glyphs are fixed-width — tight tracking fights the grid; mono needs more leading. */
+	--tracking-display: -0.01em;
+	--leading-display: 1.15;
 }
 
 .dark {

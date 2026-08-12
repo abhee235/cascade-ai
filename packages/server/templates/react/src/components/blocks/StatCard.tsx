@@ -31,7 +31,7 @@ export function StatCard({ label, value, delta, trendLabel, note, icon: Icon, lo
 	return (
 		<div
 			data-block="stat-card"
-			className={cn('flex flex-col gap-3 rounded-xl border bg-gradient-to-t from-primary/5 to-card p-5 shadow-xs dark:from-card', className)}
+			className={cn('flex flex-col gap-3 rounded-xl border bg-gradient-to-t from-primary/5 to-card p-6 shadow-xs dark:from-card', className)}
 		>
 			<div className="flex items-start justify-between gap-3">
 				<div className="flex items-center gap-2 text-sm text-muted-foreground">

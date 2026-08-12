@@ -45,15 +45,29 @@
 	--chart-5: oklch(0.64 0.14 240);
 
 	/* Fonts (mode-invariant): sans display — product UI, not print. */
-	--font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
-	--font-serif: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
-	--font-mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
+	/* Sidebar roles derive from this preset's own tokens — authored once, correct in light AND dark
+	   (`.dark` redefines --card/--accent on the same :root element, so these re-resolve). */
+	--sidebar: var(--card);
+	--sidebar-foreground: var(--card-foreground);
+	--sidebar-primary: var(--primary);
+	--sidebar-primary-foreground: var(--primary-foreground);
+	--sidebar-accent: var(--accent);
+	--sidebar-accent-foreground: var(--accent-foreground);
+	--sidebar-border: var(--border);
+	--sidebar-ring: var(--ring);
+
+	--font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+	/* One family — a pure product/tech look has no serif in it. */
+	--font-serif: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+	--font-mono: 'Geist Mono Variable', ui-monospace, 'Cascadia Code', Consolas, monospace;
 
 	/* Shadows: wide, cool, low-opacity — panes floating, never stamped. */
 	--shadow-color: oklch(0.45 0.12 275);
 	--shadow-opacity: 0.1;
 
+	/* Geist display — the tech-product look wants tight tracking. */
 	--tracking-display: -0.02em;
+	--leading-display: 1.05;
 }
 
 .dark {

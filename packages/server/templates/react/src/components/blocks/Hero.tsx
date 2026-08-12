@@ -23,7 +23,7 @@ export function Hero({ badge, headline, subcopy, actions, media, layout = 'split
 	const text = (
 		<div className={cn('flex max-w-xl flex-col gap-5', layout === 'centered' && 'items-center text-center', layout === 'bleed' && 'items-start')}>
 			{badge ? <div>{badge}</div> : null}
-			<h1 className={cn('font-serif font-semibold tracking-display', layout === 'centered' ? 'text-5xl md:text-6xl' : 'text-4xl md:text-5xl lg:text-6xl', layout === 'bleed' && 'text-background')}>{headline}</h1>
+			<h1 className={cn('font-serif font-semibold tracking-display leading-display', layout === 'centered' ? 'text-5xl md:text-6xl' : 'text-4xl md:text-5xl lg:text-6xl', layout === 'bleed' && 'text-background')}>{headline}</h1>
 			{subcopy ? <p className={cn('text-lg', layout === 'bleed' ? 'text-background/80' : 'text-muted-foreground')}>{subcopy}</p> : null}
 			{actions ? <div className="mt-1 flex flex-wrap items-center gap-3">{actions}</div> : null}
 		</div>
@@ -32,7 +32,10 @@ export function Hero({ badge, headline, subcopy, actions, media, layout = 'split
 	if (layout === 'bleed') {
 		return (
 			<section data-block="hero" className={cn('relative overflow-hidden', className)}>
-				<div className="absolute inset-0">{media}</div>
+				{/* The img must be told to FILL — an <img> in an absolutely-positioned box still renders at its
+				    intrinsic size, which left the bleed photo covering ~60% of the width with bare ground
+				    beside it. Same rule the collage layout already applies. */}
+				<div className="absolute inset-0 [&_img]:size-full [&_img]:object-cover">{media}</div>
 				<div className="absolute inset-0 bg-gradient-to-r from-foreground/80 via-foreground/40 to-transparent" />
 				<div className="relative mx-auto flex min-h-[420px] max-w-6xl items-center px-6 py-20">{text}</div>
 			</section>
@@ -62,7 +65,7 @@ export function Hero({ badge, headline, subcopy, actions, media, layout = 'split
 			) : (
 				<div className="grid items-center gap-10 md:grid-cols-2">
 					{text}
-					{media ? <div className="overflow-hidden rounded-xl shadow-lg">{media}</div> : null}
+					{media ? <div className="overflow-hidden rounded-xl shadow-lg [&_img]:aspect-[4/3] [&_img]:size-full [&_img]:object-cover">{media}</div> : null}
 				</div>
 			)}
 		</section>

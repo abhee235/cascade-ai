@@ -45,16 +45,30 @@
 	--chart-5: oklch(0.62 0.15 320);
 
 	/* Fonts (mode-invariant): friendly sans everywhere — a serif would read formal here. */
-	--font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
-	--font-serif: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
-	--font-mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
+	/* Sidebar roles derive from this preset's own tokens — authored once, correct in light AND dark
+	   (`.dark` redefines --card/--accent on the same :root element, so these re-resolve). */
+	--sidebar: var(--card);
+	--sidebar-foreground: var(--card-foreground);
+	--sidebar-primary: var(--primary);
+	--sidebar-primary-foreground: var(--primary-foreground);
+	--sidebar-accent: var(--accent);
+	--sidebar-accent-foreground: var(--accent-foreground);
+	--sidebar-border: var(--border);
+	--sidebar-ring: var(--ring);
+
+	--font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+	/* One family, heavy weights carry the personality instead of a second face. */
+	--font-serif: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+	--font-mono: 'Geist Mono Variable', ui-monospace, 'Cascadia Code', Consolas, monospace;
 
 	/* Shadows: warm and a touch heavier — cards read as objects. */
 	--shadow-color: oklch(0.45 0.09 40);
 	--shadow-opacity: 0.12;
 
 	/* Chunky friendly display type sits closer to neutral tracking. */
+	/* Geist display, gentle tightening. */
 	--tracking-display: -0.01em;
+	--leading-display: 1.05;
 }
 
 .dark {

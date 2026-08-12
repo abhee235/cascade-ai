@@ -6,6 +6,14 @@
 
    CONTRACT v2 — see premium.css for the canonical contract comment. */
 
+@font-face {
+	font-family: 'Fraunces Variable';
+	font-style: normal;
+	font-weight: 100 900;
+	font-display: swap;
+	src: url('../assets/fonts/fraunces-var-latin.woff2') format('woff2-variations');
+}
+
 :root {
 	--preset: 'editorial';
 	--radius: 0.5rem;
@@ -45,16 +53,30 @@
 	--chart-5: oklch(0.6 0.1 50);
 
 	/* Fonts (mode-invariant): Fraunces is the voice; Inter serves quietly for UI text. */
-	--font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+	/* Sidebar roles derive from this preset's own tokens — authored once, correct in light AND dark
+	   (`.dark` redefines --card/--accent on the same :root element, so these re-resolve). */
+	--sidebar: var(--card);
+	--sidebar-foreground: var(--card-foreground);
+	--sidebar-primary: var(--primary);
+	--sidebar-primary-foreground: var(--primary-foreground);
+	--sidebar-accent: var(--accent);
+	--sidebar-accent-foreground: var(--accent-foreground);
+	--sidebar-border: var(--border);
+	--sidebar-ring: var(--ring);
+
+	--font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+	/* Fraunces owns display AND lead paragraphs — this preset is about reading. */
 	--font-serif: 'Fraunces Variable', Georgia, serif;
-	--font-mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
+	--font-mono: 'Geist Mono Variable', ui-monospace, 'Cascadia Code', Consolas, monospace;
 
 	/* Shadows: warm and soft, like page curvature — not elevation. */
 	--shadow-color: oklch(0.35 0.05 60);
 	--shadow-opacity: 0.07;
 
 	/* Print-tight display tracking — Fraunces at size wants to close up. */
-	--tracking-display: -0.03em;
+	/* Fraunces is wide enough to take negative tracking; editorial leading is looser. */
+	--tracking-display: -0.02em;
+	--leading-display: 1.1;
 }
 
 .dark {

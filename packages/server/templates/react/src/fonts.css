@@ -1,20 +1,23 @@
-/* Bundled variable fonts (OFL — see assets/fonts/LICENSE.txt). Local files: the template must render
-   identically offline and across OSes — system stacks would make the premium look mushy on Windows.
-   Weight axes are variable (wght 100–900 for Inter, 100–900 + optical sizing for Fraunces), so every
-   font-weight utility works from these two files. */
+/* THE BASE UI FACE — Geist Sans + Geist Mono (OFL, see assets/fonts/LICENSE.txt). Local files: the
+   template must render identically offline and across OSes; a system stack goes mushy on Windows.
+   The weight axis is variable (100–900), so every font-weight utility works from one file per family.
+
+   Only faces EVERY preset uses live here. A preset's DISPLAY face (Fraunces, Instrument Serif…) is
+   declared inside that preset's own file, so an app importing `minimal-mono` never downloads the serif
+   that only `editorial` needs. Adding a face here costs every app the bytes — put it in the preset. */
 
 @font-face {
-	font-family: 'Inter Variable';
+	font-family: 'Geist Variable';
 	font-style: normal;
 	font-weight: 100 900;
 	font-display: swap;
-	src: url('./assets/fonts/inter-var-latin.woff2') format('woff2-variations');
+	src: url('./assets/fonts/geist-var-latin.woff2') format('woff2-variations');
 }
 
 @font-face {
-	font-family: 'Fraunces Variable';
+	font-family: 'Geist Mono Variable';
 	font-style: normal;
 	font-weight: 100 900;
 	font-display: swap;
-	src: url('./assets/fonts/fraunces-var-latin.woff2') format('woff2-variations');
+	src: url('./assets/fonts/geist-mono-var-latin.woff2') format('woff2-variations');
 }
