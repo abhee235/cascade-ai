@@ -133,8 +133,11 @@ describe('assertWritable — the shared layers reject writes, but stay readable'
 			assertWritable(cwd, join(cwd, 'src/components/blocks/NavBar.tsx'), frozen)
 			expect.unreachable('should have thrown')
 		} catch (e) {
-			expect((e as Error).message).toContain('READ-ONLY')
-			expect((e as Error).message).toContain('Compose it instead')
+			const m = (e as Error).message
+			expect(m).toContain('READ-ONLY')
+			expect(m).toContain('NOT applied') // the model must not read a refusal as a partial success
+			// A COPY-PASTEABLE import, not a description of one: weak models act on literal code.
+			expect(m).toContain("import { NavBar } from '@/components/blocks/NavBar'")
 		}
 	})
 

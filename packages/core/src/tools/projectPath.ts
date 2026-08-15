@@ -73,12 +73,38 @@ export interface PathScope {
   frozen?: string[]
 }
 
-/** A write aimed at a read-only path. Returned to the model AS a tool error so it self-corrects into its
- *  own component instead of mutating the shared layer (same contract as ProjectPathError). */
+/** `blocks/Hero.tsx` → `Hero`; `ui/alert-dialog.tsx` → `AlertDialog`. The kit ships kebab-case filenames
+ *  with PascalCase exports, so the import line has to be derived, not echoed. */
+function exportNameFor(relPath: string): string {
+  const base = relPath.split('/').pop()!.replace(/\.[jt]sx?$/, '')
+  return base
+    .split(/[-_.]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join('')
+}
+
+/**
+ * A write aimed at a read-only path. Returned to the model AS a tool error so it self-corrects into its
+ * own component instead of mutating the shared layer (same contract as ProjectPathError).
+ *
+ * The message carries a COPY-PASTEABLE import line rather than a description of one. Measured repeatedly
+ * on this project: weak models act on literal code and paraphrase prose, so "import the component and
+ * pass it props" is materially weaker than the two lines it would have written. It also states plainly
+ * that nothing was written — otherwise a model can read a refusal as a partial success and move on.
+ */
 export class FrozenPathError extends Error {
   constructor(public readonly given: string) {
+    const rel = given.replace(/\\/g, '/')
+    const name = exportNameFor(rel)
+    const alias = `@/${rel.replace(/^src\//, '').replace(/\.[jt]sx?$/, '')}`
     super(
-      `"${given}" is READ-ONLY and cannot be edited. Compose it instead: import the component and pass it props from your own file under src/components/. If you need behaviour it does not offer, build a new component NEXT TO yours — never edit or replace a shared one.`,
+      `"${rel}" is READ-ONLY. Your edit was NOT applied and the file is unchanged.\n\n` +
+        `This file is shared by every page, so the app COMPOSES it instead of changing it. From your own file:\n\n` +
+        `    import { ${name} } from '${alias}'\n` +
+        `    <${name} … />   // pass what you need as props\n\n` +
+        `If you need behaviour its props do not offer, create a NEW component beside your own code — e.g. ` +
+        `src/components/My${name}.tsx, which may itself render <${name}/> — and use that. Never edit or replace a shared one.`,
     )
     this.name = 'FrozenPathError'
   }
