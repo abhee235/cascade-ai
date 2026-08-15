@@ -82,6 +82,53 @@ describe('TemplateAudit — style pre-flights', () => {
 		expect(out).toContain('no @/components/blocks imports')
 	})
 
+	it('flags a hand-written photo() that shadows the house helper', async () => {
+		// Measured (qwen3.5:9b, builder-landing 2026-08-15): the model wrote its own `function photo(name:
+		// string)` returning `/photos/<name>.webp` and never imported @/lib/photos. Every signal said fine —
+		// its local helper takes `string` so tsc passed, the real module went unused so no photo was bundled —
+		// and the page shipped a broken <img>. src/lib cannot be frozen (it is the model's own space), so the
+		// shadow is caught by name.
+		const shadowed = await audit({
+			'src/components/Home.tsx': ['function photo(name: string): string {', "\treturn `/photos/${name}.webp`", '}', 'export const Home = () => <img src={photo("hero")} />'].join('\n'),
+		})
+		expect(shadowed).toContain('re-defines `photo()`')
+
+		// Importing the real one is the correct shape and must stay silent.
+		const correct = await audit({
+			'src/components/Home.tsx': ["import { photo } from '@/lib/photos'", 'export const Home = () => <img src={photo("workspace-code")} />'].join('\n'),
+		})
+		expect(correct).not.toContain('re-defines')
+
+		// And the module that legitimately DEFINES them is never flagged for doing its job — this fired
+		// against the real project before it was excluded.
+		const lib = await audit({ 'src/lib/photos.ts': 'export function photo(name: string) { return name }\nexport function photoFor(seed: string) { return seed }' })
+		expect(lib).not.toContain('re-defines')
+	})
+
+	it('flags a <Hero> with no media — but never asks a page without one for a picture', async () => {
+		// Measured (qwen3.5:9b, builder-landing 2026-08-15): nine blocks composed into a real landing page,
+		// `media` passed to none of them — a page with no image anywhere, and the run's only remaining failure.
+		const noMedia = await audit({
+			'src/components/Landing.tsx': ["import { Hero } from '@/components/blocks/Hero'", 'export const Landing = () => <Hero headline="Ship faster" subcopy="Really." />'].join('\n'),
+		})
+		expect(noMedia).toContain('no `media`')
+
+		const withMedia = await audit({
+			'src/components/Landing.tsx': [
+				"import { Hero } from '@/components/blocks/Hero'",
+				"import { photo } from '@/lib/photos'",
+				'export const Landing = () => <Hero headline="Ship faster" media={<img src={photo("workspace-code")} alt="app" />} />',
+			].join('\n'),
+		})
+		expect(withMedia).not.toContain('no `media`')
+
+		// A dashboard mounts no Hero, so it is never asked for a photograph it has no use for.
+		const dashboard = await audit({
+			'src/components/Overview.tsx': ["import { StatCard } from '@/components/blocks/StatCard'", 'export const Overview = () => <StatCard label="Runs" value="12" />'].join('\n'),
+		})
+		expect(dashboard).not.toContain('no `media`')
+	})
+
 	it('flags an EDITED shared block as HARD residue', async () => {
 		// Measured (qwen3.5:9b 2026-08-13): two of three builds rewrote src/components/blocks — NavBar,
 		// Hero, LogoStrip — while the build stayed green. The session's frozenPaths guard is the primary

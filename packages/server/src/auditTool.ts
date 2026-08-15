@@ -178,6 +178,49 @@ function styleSoftHits(projectDir: string): Hit[] {
 				where: `${rel}:${rawLines[0]}`,
 			})
 		}
+		// A REIMPLEMENTED HOUSE HELPER. Measured (qwen3.5:9b, builder-landing 2026-08-15): the model wrote its
+		// OWN `function photo(name: string)` returning `/photos/<name>.webp` — paths that do not exist — and
+		// never imported @/lib/photos. Every downstream signal said fine: its local helper takes `string`, so
+		// tsc passed; the real module went unused, so no photo was bundled; the page shipped a broken <img>.
+		//
+		// This is the blocks failure in a directory that CANNOT be frozen — src/lib is the model's own space,
+		// and it must stay writable. So it is caught by name: a local definition that shadows a helper the
+		// template already provides is always a mistake, because the real one resolves bundled assets that a
+		// hand-written string never will.
+		// …except in the module that legitimately DEFINES them. (Caught by running this against the real
+		// failing project: it flagged src/lib/photos.ts three times for doing its job.)
+		for (const helper of rel === 'src/lib/photos.ts' ? [] : ['photo', 'photoFor', 'webPhoto']) {
+			const at = lines.findIndex((l) => new RegExp(`^\\s*(?:export\\s+)?(?:async\\s+)?function\\s+${helper}\\s*\\(|^\\s*(?:export\\s+)?const\\s+${helper}\\s*(?::[^=]+)?=\\s*(?:\\(|async)`).test(l))
+			if (at >= 0) {
+				hits.push({
+					finding: {
+						kind: 'string',
+						why: `re-defines \`${helper}()\`, which the template already provides — a hand-written image path resolves to nothing, so the page ships a broken image while the build stays green`,
+						fix: `Delete this function and \`import { ${helper} } from '@/lib/photos'\`. Its argument is a FIXED set of bundled photo names (see the design skill's IMAGERY section) — an invented name returns an empty src.`,
+					},
+					where: `${rel}:${at + 1}`,
+				})
+			}
+		}
+		// A HERO WITH NO PICTURE. Measured (qwen3.5:9b, builder-landing 2026-08-15): the model composed nine
+		// blocks into a real landing page and passed `media` to none of them, shipping a page with no image
+		// anywhere — the flat-page failure the design skill names, and the only thing its run still failed on.
+		//
+		// Keyed off the BLOCK the file actually renders, not the kind of app: a dashboard never mounts a Hero,
+		// so it is never asked for a photograph it has no use for. (The same reason eval's designLint made
+		// imagery opt-out rather than universal — a check that fails correct work teaches models to bolt on
+		// decoration.) `media` is Hero's own prop name, so this cannot fire on a hero that HAS one.
+		const heroAt = lines.findIndex((l) => /<Hero[\s/>]/.test(l))
+		if (heroAt >= 0 && !/\bmedia=/.test(text)) {
+			hits.push({
+				finding: {
+					kind: 'string',
+					why: 'a <Hero> with no `media` — the page has no image at all, which is what makes a landing page read as unfinished',
+					fix: 'Pass media: `<Hero media={<img src={photo("workspace-code")} alt="…" />} …/>` for a bundled photo, or `<Photo web="<subject>" seed="hero" />` for a real subject-specific one (design skill: IMAGERY).',
+				},
+				where: `${rel}:${heroAt + 1}`,
+			})
+		}
 		// photoFor inside a .map() render — the "all my products look like the same watch" bug: flag a
 		// photoFor call on the same line as .map( or within the 6 lines after one (the callback body).
 		const photoForInMap = lines.findIndex((l, i) => /photoFor\(/.test(l) && lines.slice(Math.max(0, i - 6), i + 1).some((p) => /\.map\(/.test(p)))
