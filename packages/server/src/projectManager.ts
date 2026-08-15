@@ -296,6 +296,12 @@ export class ProjectManager {
       ((dir, sandbox, extraInstructions) =>
         createSession({
           cwd: dir,
+          // THE SHARED LAYERS ARE READ-ONLY, AND NOW ACTUALLY ARE. Both directories carried a READ-ONLY
+          // comment and nothing else; measured (qwen3.5:9b 2026-08-13) two of three builds rewrote blocks
+          // anyway — NavBar/Hero/LogoStrip edited, a DangerZone block invented. Every property that makes
+          // a generated app remixable and lintable ("pages COMPOSE frozen blocks") dies silently there,
+          // with the build still green. Reads stay open: composing a block requires reading it first.
+          frozenPaths: ['src/components/blocks', 'src/components/ui'],
           provider: this.makeProvider({ provider: this.active.provider, model: this.active.model, baseUrl: this.active.baseUrl, apiKey: this.active.apiKey, api: this.active.api }),
           model: this.active.model,
           // Hosted providers have no live window probe — honor an explicit override so the compactor sizes

@@ -211,6 +211,9 @@ for (const id of wanted) {
 	// same declared check — so forensics on a bench trace transfer 1:1 to the real product experience.
 	const session = createSession({
 		cwd: work,
+		// FIDELITY: the product freezes the shared layers (projectManager.ts) — the bench must too, or a
+		// bench run can pass by rewriting a block the real product would have refused.
+		frozenPaths: ['src/components/blocks', 'src/components/ui'],
 		provider,
 		model: args.model!,
 		mode: 'bypass',

@@ -3,7 +3,7 @@
 // EVERY raw-color line in a file (one-at-a-time reporting cost that run three whack-a-mole turns),
 // and it must keep flagging photoFor-in-a-map, the "all six products are the same watch" bug.
 
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -80,6 +80,32 @@ describe('TemplateAudit — style pre-flights', () => {
 	it('flags a page with zero block imports as hand-rolled', async () => {
 		const out = await audit({ 'src/App.tsx': 'export const App = () => <div className="p-4">hi</div>' })
 		expect(out).toContain('no @/components/blocks imports')
+	})
+
+	it('flags an EDITED shared block as HARD residue', async () => {
+		// Measured (qwen3.5:9b 2026-08-13): two of three builds rewrote src/components/blocks — NavBar,
+		// Hero, LogoStrip — while the build stayed green. The session's frozenPaths guard is the primary
+		// defence; this is the backstop for projects it cannot reach (resumed builds, hand-edits).
+		const out = await audit({
+			'src/components/blocks/Hero.tsx': 'export function Hero() { return <div>my own version</div> }',
+			'src/App.tsx': "import { Hero } from '@/components/blocks/Hero'\nexport const App = () => <Hero />",
+		})
+		expect(out).toContain('src/components/blocks/Hero.tsx')
+		expect(out).toMatch(/EDITED/)
+		expect(out).toContain('HARD') // blocks the done-ladder; not a suggestion
+	})
+
+	it('flags an INVENTED block — a new file in the shared layer breaks the same contract', async () => {
+		const out = await audit({ 'src/components/blocks/DangerZone.tsx': 'export const DangerZone = () => null' })
+		expect(out).toContain('DangerZone.tsx')
+		expect(out).toMatch(/NEW file/)
+	})
+
+	it('says nothing about a block the project left alone', async () => {
+		// The pristine template copy is ground truth; an untouched block must never be flagged.
+		const pristine = readFileSync(join(import.meta.dirname, '..', 'templates', 'react', 'src', 'components', 'blocks', 'Hero.tsx'), 'utf8')
+		const out = await audit({ 'src/components/blocks/Hero.tsx': pristine, 'src/App.tsx': 'export const App = () => null' })
+		expect(out).not.toContain('blocks/Hero.tsx')
 	})
 
 	it('directs the model to CALL the tool again, never to run it as a command', async () => {

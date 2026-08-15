@@ -14,7 +14,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { z } from 'zod'
 import type { Tool } from '@cascade/core'
-import { readResidueContract, type ResidueFinding } from './templates.js'
+import { readResidueContract, templateFilePath, type ResidueFinding } from './templates.js'
 
 const inputSchema = z.object({})
 
@@ -96,6 +96,53 @@ function scan(projectDir: string, findings: ResidueFinding[]): Hit[] {
  *  without turning a wholesale-untokenized file into a wall of numbers. */
 const RAW_COLOR_LINES_SHOWN = 8
 
+/** The shared layers a generated app COMPOSES but never owns. Mirrors the session's frozenPaths. */
+const FROZEN_DIRS = ['src/components/blocks', 'src/components/ui']
+
+/**
+ * HARD findings for a shared layer that has been edited or extended. The session's frozenPaths guard is
+ * the primary defence — this is the BACKSTOP, because the guard only exists for sessions that declare it
+ * and cannot repair a project already damaged (a resumed build, a hand-edit, an older Cascade).
+ *
+ * Compared against the template's pristine copy, which lives outside the model's Read jail. A file the
+ * template never shipped is a finding too: inventing `blocks/DangerZone.tsx` breaks the same contract as
+ * editing `blocks/Hero.tsx` — both make the layer project-specific, and the whole point is that it is not.
+ */
+function frozenLayerHits(projectDir: string, templateId: string): Hit[] {
+	const hits: Hit[] = []
+	for (const dir of FROZEN_DIRS) {
+		const abs = join(projectDir, dir)
+		if (!existsSync(abs)) continue
+		for (const f of walk(abs, abs)) {
+			if (!/\.tsx?$/.test(f)) continue
+			const rel = relative(projectDir, f).replaceAll('\\', '/')
+			const pristine = templateFilePath(templateId, rel)
+			let why: string
+			if (!existsSync(pristine)) {
+				why = 'a NEW file in a read-only shared layer — the template never shipped it'
+			} else {
+				try {
+					const a = readFileSync(pristine, 'utf8').replace(/\r\n/g, '\n')
+					const b = readFileSync(f, 'utf8').replace(/\r\n/g, '\n')
+					if (a === b) continue
+					why = 'EDITED — this file is shared and read-only; the app must compose it, not change it'
+				} catch {
+					continue
+				}
+			}
+			hits.push({
+				finding: {
+					kind: 'string',
+					why,
+					fix: `Restore it and move your change into your OWN component under src/components/. Blocks and the kit are frozen so every page stays composable (that is what makes a restyle or a preset swap work); a project-specific edit here silently breaks that for the whole app.`,
+				},
+				where: rel,
+			})
+		}
+	}
+	return hits
+}
+
 function styleSoftHits(projectDir: string): Hit[] {
 	const hits: Hit[] = []
 	const src = join(projectDir, 'src')
@@ -169,7 +216,7 @@ export function createTemplateAuditTool(deps: AuditToolDeps): Tool | undefined {
 
 		async call() {
 			try {
-				const hard = scan(deps.projectDir, contract.hard)
+				const hard = [...scan(deps.projectDir, contract.hard), ...frozenLayerHits(deps.projectDir, deps.templateId)]
 				const soft = [...scan(deps.projectDir, contract.soft), ...styleSoftHits(deps.projectDir)]
 				if (hard.length === 0 && soft.length === 0) {
 					return { content: 'TemplateAudit clean — no template residue. The scaffold has been fully replaced by the app.' }

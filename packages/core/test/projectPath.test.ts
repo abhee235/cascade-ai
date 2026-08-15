@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { assertPatternInProject, isInsideProject, ProjectPathError, resolveInProject } from '../src/tools/projectPath'
+import { assertPatternInProject, assertWritable, FrozenPathError, isInsideProject, ProjectPathError, resolveInProject } from '../src/tools/projectPath'
 import { ignoresFor as globIgnores } from '../src/tools/builtins/Glob'
 import { ignoresFor as grepIgnores } from '../src/tools/builtins/Grep'
 
@@ -109,5 +109,45 @@ describe('ignoresFor — node_modules is hidden by default, searchable on reques
 	})
 	it('still hides dist/.git either way', () => {
 		expect(globIgnores('node_modules/x/**', undefined)).toContain('**/dist/**')
+	})
+})
+
+// ── FROZEN PATHS (2026-08-13) ─────────────────────────────────────────────────────────────────────────
+// The template declared src/components/blocks READ-ONLY in a comment and nothing enforced it. Measured on
+// qwen3.5:9b, two of three builds rewrote it anyway: NavBar (54 lines changed), Hero (22), LogoStrip (44),
+// plus an invented DangerZone block. "Pages COMPOSE frozen blocks" is what makes a generated app lintable
+// and remixable, and a model editing Hero.tsx destroys that while the build stays green.
+describe('assertWritable — the shared layers reject writes, but stay readable', () => {
+	const cwd = resolve('/proj')
+	const frozen = { frozen: ['src/components/blocks', 'src/components/ui'] }
+
+	it('refuses a write INTO a frozen prefix', () => {
+		expect(() => assertWritable(cwd, join(cwd, 'src/components/blocks/Hero.tsx'), frozen)).toThrow(FrozenPathError)
+		// …including a NEW file in there: inventing a block is the same contract break as editing one.
+		expect(() => assertWritable(cwd, join(cwd, 'src/components/blocks/DangerZone.tsx'), frozen)).toThrow(FrozenPathError)
+		expect(() => assertWritable(cwd, join(cwd, 'src/components/ui/button.tsx'), frozen)).toThrow(FrozenPathError)
+	})
+
+	it('tells the model what to do INSTEAD — the error is the instruction', () => {
+		try {
+			assertWritable(cwd, join(cwd, 'src/components/blocks/NavBar.tsx'), frozen)
+			expect.unreachable('should have thrown')
+		} catch (e) {
+			expect((e as Error).message).toContain('READ-ONLY')
+			expect((e as Error).message).toContain('Compose it instead')
+		}
+	})
+
+	it('allows the model OWN components — the freeze is a prefix, not the whole tree', () => {
+		expect(() => assertWritable(cwd, join(cwd, 'src/components/CatalogView.tsx'), frozen)).not.toThrow()
+		expect(() => assertWritable(cwd, join(cwd, 'src/App.tsx'), frozen)).not.toThrow()
+		expect(() => assertWritable(cwd, join(cwd, 'src/lib/data.ts'), frozen)).not.toThrow()
+		// A path that merely STARTS with the prefix string is not inside it.
+		expect(() => assertWritable(cwd, join(cwd, 'src/components/blocksmith.ts'), frozen)).not.toThrow()
+	})
+
+	it('is inert when nothing is declared — every existing frontend is unchanged', () => {
+		expect(() => assertWritable(cwd, join(cwd, 'src/components/blocks/Hero.tsx'), undefined)).not.toThrow()
+		expect(() => assertWritable(cwd, join(cwd, 'src/components/blocks/Hero.tsx'), { frozen: [] })).not.toThrow()
 	})
 })

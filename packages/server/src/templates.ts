@@ -78,6 +78,13 @@ export function readResidueContract(templateId: string): ResidueContract | undef
  * in the template dir, which is a reasonable thing to do) crashed the shared-deps junction outright. One
  * filter, one scaffold: the bench cannot drift from what users actually get.
  */
+/** Absolute path to a file inside a template's pristine source — the ground truth a generated project's
+ *  copy is compared against (see the audit's frozen-layer check). Read from TEMPLATES_DIR, which is
+ *  outside the model's Read jail, so a project can never doctor its own reference copy. */
+export function templateFilePath(templateId: string, relPath: string): string {
+  return join(TEMPLATES_DIR, templateId, relPath)
+}
+
 export function templateCopyFilter(p: string): boolean {
   return !/[\\/](node_modules|\.git|dist|packs|demo|residue\.json|[^\\/]+\.tsbuildinfo)([\\/]|$)/.test(p)
 }

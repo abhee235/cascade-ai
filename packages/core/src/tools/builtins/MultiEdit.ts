@@ -15,7 +15,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import type { Tool } from '../Tool'
 import { lineDiff } from '../../utils/diff'
 import { normalizeText } from '../fileState'
-import { displayPath, ProjectPathError, resolveInProject } from '../projectPath'
+import { assertWritable, displayPath, FrozenPathError, ProjectPathError, resolveInProject } from '../projectPath'
 import { findEditTarget, readFreshnessError, refreshReadState } from '../editCore'
 
 const editSchema = z.object({
@@ -44,8 +44,9 @@ export const MultiEditTool: Tool<z.infer<typeof inputSchema>> = {
     let path: string
     try {
       path = resolveInProject(ctx.cwd, input.file_path, ctx.sandbox?.root, ctx.pathScope) // ADR-033: jail to the project root
+      assertWritable(ctx.cwd, path, ctx.pathScope) // frozen prefixes (shared blocks/kit) reject writes
     } catch (e) {
-      if (e instanceof ProjectPathError) return { content: e.message, isError: true }
+      if (e instanceof ProjectPathError || e instanceof FrozenPathError) return { content: e.message, isError: true }
       throw e
     }
     try {
