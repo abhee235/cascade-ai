@@ -271,7 +271,7 @@ describe('run-before-done gate (design-overhaul P1, generalized) — the contrac
 			[textDelta('Done.'), done('end_turn')],
 		])
 		const messages: Message[] = [{ role: 'user', content: 'build' }]
-		await drain(runAgentLoop(messages, deps(provider, { registry: withAudit() })))
+		await drain(runAgentLoop(messages, deps(provider, { registry: withAudit(), maxTurns: turns + 6 })))
 		const text = historyText(messages)
 		expect(text).toContain(`editing for ${STALLED_AUDIT_TURNS} turns without calling TemplateAudit`)
 		// It must name the failure the model cannot see: a green build is not a rendering app.
@@ -294,7 +294,7 @@ describe('run-before-done gate (design-overhaul P1, generalized) — the contrac
 			[textDelta('Done.'), done('end_turn')],
 		])
 		const messages: Message[] = [{ role: 'user', content: 'build' }]
-		await drain(runAgentLoop(messages, deps(provider, { registry: withAudit() })))
+		await drain(runAgentLoop(messages, deps(provider, { registry: withAudit(), maxTurns: STALLED_AUDIT_TURNS + 8 })))
 		expect(historyText(messages)).not.toContain('turns without calling')
 	})
 

@@ -147,7 +147,12 @@ export const STALLED_VERIFY_TURNS = 5
 // So the declared before-done tool is ALSO nudged mid-flight, on the same "N consecutive editing turns"
 // trigger. It is deliberately LATER than the verify nudge: a build error blocks everything and should be
 // heard first, while "your work is not wired up yet" is only worth saying once real work exists.
-export const STALLED_AUDIT_TURNS = 8
+// THRESHOLD, tuned by measurement (2026-08-15). At 8 it fired on 4 of 4 capable 35B runs, at turns 10-15,
+// while those models were going to audit on their own at turns 12-18 — so it was not detecting a stall, it
+// was detecting 'a build is happening'. A reminder that always fires is the kind a model learns to skip.
+// 20 sits ABOVE what a capable model needs (silent on all four) and well BELOW where a stuck one lives: the
+// 9B runs it was written for went 38-60 turns with ZERO audit calls.
+export const STALLED_AUDIT_TURNS = 20
 
 /** The mid-flight audit reminder — appended to the trailing tool_results message (ADR-034 channel). */
 export function buildStalledAuditNudge(pending: string[]): string {
