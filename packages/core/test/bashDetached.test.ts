@@ -96,6 +96,15 @@ describe('Bash — refuses broad process killing', () => {
 			'kill $(lsof -t -i:5173)',
 			'kill $(pgrep -f vite)',
 			'rm -rf .vite; killall -9 node',
+			// WINDOWS SPELLINGS. Measured (qwen36-agentic-iq4, builder-dashboard 2026-08-15): the model started
+			// a dev server, then "cleaned up" with taskkill /F /IM node.exe — killing every node process on the
+			// machine INCLUDING the harness running the build, which ended the bench run mid-scenario. The
+			// guard knew only POSIX spellings, exactly the hole a prose ban had before it.
+			'taskkill //F //IM node.exe',
+			'taskkill /F /IM node.exe 2>nul',
+			'cd "C:\proj" && taskkill //F //IM node.exe 2>nul || true',
+			'Stop-Process -Name node -Force',
+			'wmic process where name="node.exe" delete',
 		]) {
 			const r = await run(cmd)
 			expect(r.isError, cmd).toBe(true)
@@ -107,5 +116,14 @@ describe('Bash — refuses broad process killing', () => {
 		const ok = await run('echo skipping-kill')
 		expect(ok.isError).toBeFalsy()
 		expect(ok.content).toContain('skipping-kill')
+	})
+
+	it('still allows killing ONE process the model can point at', async () => {
+		// /PID names a specific process; /IM names every process with that image name. Only the second is
+		// catastrophic, and this tool uses the /PID form itself to reap its own trees.
+		for (const cmd of ['echo taskkill //PID 1234 //T //F', 'echo kill 1234']) {
+			const r = await run(cmd)
+			expect(r.isError, cmd).toBeFalsy()
+		}
 	})
 })
