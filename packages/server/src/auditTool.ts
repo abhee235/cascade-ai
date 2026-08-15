@@ -14,7 +14,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { z } from 'zod'
 import type { Tool } from '@cascade/core'
-import { readResidueContract, templateFilePath, type ResidueFinding } from './templates.js'
+import { readResidueContract, shippedVariantPaths, type ResidueFinding } from './templates.js'
 
 const inputSchema = z.object({})
 
@@ -122,16 +122,19 @@ function frozenLayerHits(projectDir: string, templateId: string): Hit[] {
 		for (const f of walk(abs, abs)) {
 			if (!/\.tsx?$/.test(f)) continue
 			const rel = relative(projectDir, f).replaceAll('\\', '/')
-			const pristine = templateFilePath(templateId, rel)
+			// ANY shipped variant counts as pristine — the template base OR a skin's copy (design-overhaul
+			// P5): the Restyle tool legitimately swaps skin implementations into blocks/, and a swap the
+			// audit then flagged as "EDITED" would teach the model to undo the user's restyle. Only content
+			// matching NO shipped variant is a hand-edit.
+			const variants = shippedVariantPaths(templateId, rel).filter((p) => existsSync(p))
 			let why: string
-			if (!existsSync(pristine)) {
+			if (variants.length === 0) {
 				why = 'a NEW file in a read-only shared layer — the template never shipped it'
 			} else {
 				try {
-					const a = readFileSync(pristine, 'utf8').replace(/\r\n/g, '\n')
 					const b = readFileSync(f, 'utf8').replace(/\r\n/g, '\n')
-					if (a === b) continue
-					why = 'EDITED — this file is shared and read-only; the app must compose it, not change it'
+					if (variants.some((p) => readFileSync(p, 'utf8').replace(/\r\n/g, '\n') === b)) continue
+					why = 'EDITED — this file is shared and read-only; the app must compose it, not change it (to change the LOOK, use the Restyle tool)'
 				} catch {
 					continue
 				}

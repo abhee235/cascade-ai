@@ -18,6 +18,7 @@ import { createPlannerSession, needsPlanStage } from './planStage.js'
 import { browserHostFor, createBrowserTool } from './browserTool.js'
 import { createPackTool } from './packTool.js'
 import { createTemplateAuditTool } from './auditTool.js'
+import { createRestyleTool } from './restyleTool.js'
 import { createImageSearchTool } from './imageSearchTool.js'
 import { hasVision } from './modelCaps.js'
 import type { ProjectRuntime } from './projectRuntime.js'
@@ -396,6 +397,9 @@ export class ProjectManager {
               createPackTool({ projectDir: dir, templateId: 'react' }),
               // P1: the residue audit — self-gates to undefined when the template ships no contract.
               createTemplateAuditTool({ projectDir: dir, templateId: 'react' }),
+              // P5: mechanical restyle (preset/skin swap) — self-gates when the project has no themes.
+              // The complement of frozenPaths above: blocks can't be hand-edited, only swapped whole.
+              createRestyleTool({ projectDir: dir, templateId: 'react' }),
             ].filter(Boolean) as import('@cascade/core').Tool[]),
           ],
         }))

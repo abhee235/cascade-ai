@@ -25,8 +25,15 @@ Installed presets = the files in `src/themes/`. Pick by matching the USER'S adje
 | `playful` | Fun, friendly, bright, colorful, consumer, food, kids, social |
 | `aurora-glass` | Modern SaaS, AI startup, gradient, glassy, futuristic, "like Linear/Vercel" |
 
-To apply a different preset: edit the ONE `@import './themes/….css'` line in `src/index.css`. That is
-the entire operation — colors, fonts, radius, and shadows all follow.
+To apply a preset — at scaffold time or when the user asks for a different look later — call
+`Restyle {op: "preset", preset: "<name>"}`. It rewrites the one `@import` line in `src/index.css` for
+you; colors, fonts, radius, shadows and density all follow, and nothing else changes.
+
+Restyle has a second, independent axis: `Restyle {op: "skin", skin: "sharp"}` swaps the block
+STRUCTURE (card/nav/hero markup) for certified alternates with identical props — your pages and imports
+keep working untouched. `skin: "base"` restores the stock look; `components: ["MediaCard"]` swaps just
+one surface. Any preset composes with any skin. Never hand-edit `src/themes/`, the `@import` line, or
+`src/components/blocks/` to change a look — Restyle is the mechanism, and the blocks refuse edits anyway.
 
 ## 3. Blocks — pages are BLOCK COMPOSITIONS
 
