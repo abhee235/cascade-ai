@@ -410,6 +410,9 @@ const CATEGORY_PAGES: { category: string; blurb: string; files: string[] }[] = [
 	{ category: 'dashboard', blurb: 'The signed-in overview — AppShell chrome, a KPI row, charts, and a filtered data table.', files: ['DashboardHome.tsx'] },
 	{ category: 'landing', blurb: 'Four landing archetypes. They differ in STRUCTURE, not just copy: pick the one whose shape matches the ask.', files: ['LandingSaaS.tsx', 'LandingLaunch.tsx', 'LandingPortfolio.tsx', 'LandingWaitlist.tsx'] },
 	{ category: 'app-shell', blurb: 'The screens every app needs — sign-in, account/settings, notifications, search, and the four data states.', files: ['AppShellPages.tsx'] },
+	{ category: 'social', blurb: 'The feed set — one posts array driving feed, post detail with replies, and profile; a composer that clears on submit.', files: ['SocialFeed.tsx'] },
+	// `category` doubles as the SKILL DIRECTORY name — the game pages belong to the game-dev skill.
+	{ category: 'game-dev', blurb: 'The four screens around any game — menu, layout-stable HUD, game-over with the run\'s numbers, persistent top-5 leaderboard.', files: ['GameArcade.tsx'] },
 ]
 
 function pagesReference(category: string, blurb: string, files: string[]): string {

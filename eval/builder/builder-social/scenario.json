@@ -1,0 +1,6 @@
+{
+	"id": "builder-social",
+	"template": "react",
+	"prompt": "Build a small social feed app called 'Murmur'. Requirements: (1) A hardcoded seed of at least 5 posts by at least 4 different authors, each with an author name, a handle, a relative time, body text, and a like count; at least one post has an image (via the project's imagery helpers — never an emoji) and at least one post is a reply to another. (2) A feed view: a single reading column with a composer at the top (posting prepends the new post and clears the box; empty posts can't be submitted) and the posts below it; replies do not appear in the main feed. (3) A like button on every post that toggles: clicking it increments the shown count and clicking again decrements it. (4) Clicking a post opens a detail view showing that post and its replies (with an empty state when there are none) and a way back. (5) Clicking an author's name opens their profile: avatar, name, handle, a short bio, post/follower counts, and only that author's posts. Use client-side state and view switching only (no router, no new dependencies), style with Tailwind token utilities, and keep `npm run build` passing.",
+	"budgets": { "maxTurns": 60, "timeoutMs": 1800000 }
+}

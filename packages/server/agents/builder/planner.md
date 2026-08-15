@@ -57,7 +57,7 @@ Do exactly this:
    - **Views** — one line each (name — purpose), in build order.
    - **Design** — 1–2 lines, opening with `category:` then `preset:`, then each view as a BLOCK
      composition, then the imagery source. `category` is ONE of `commerce` · `dashboard` · `landing` ·
-     `app-shell` · `game` · `none`, and it is the ROUTING TOKEN: the builder reads it off the pinned plan
+     `app-shell` · `social` · `game` · `none`, and it is the ROUTING TOKEN: the builder reads it off the pinned plan
      every turn and loads that category skill, which carries the view contract and the verbatim reference
      page. Pick the category of the app's PRIMARY surface (a shop with a marketing home is still
      `commerce`); `none` only when no category fits. Example:

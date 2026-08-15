@@ -17,6 +17,8 @@ import { LandingPortfolio } from './pages/LandingPortfolio'
 import { LandingWaitlist } from './pages/LandingWaitlist'
 import { GalleryLanding } from './GalleryLanding'
 import { GallerySkins } from './GallerySkins'
+import { SocialFeed } from './pages/SocialFeed'
+import { GameArcade } from './pages/GameArcade'
 import '@/index.css'
 
 // PRESET SWITCHER — demo-only (this file never ships): ?preset=<name> loads that theme AFTER index.css,
@@ -35,7 +37,7 @@ const activePreset = new URLSearchParams(location.search).get('preset') ?? 'prem
 	}
 }
 
-type View = 'landing' | 'kit' | 'saas' | 'launch' | 'portfolio' | 'waitlist' | 'dashboard' | 'shop' | 'shell' | 'skins'
+type View = 'landing' | 'kit' | 'saas' | 'launch' | 'portfolio' | 'waitlist' | 'dashboard' | 'shop' | 'shell' | 'skins' | 'social' | 'game'
 
 function DemoApp() {
 	const [view, setView] = useHistoryView<View>('landing')
@@ -76,6 +78,8 @@ function DemoApp() {
 						{link('shop', 'Shop')}
 						{link('shell', 'App shell')}
 						{link('skins', 'Skins')}
+						{link('social', 'Social')}
+						{link('game', 'Game')}
 					</>
 				}
 				actions={
@@ -120,6 +124,10 @@ function DemoApp() {
 				<AppShellPages />
 			) : view === 'skins' ? (
 				<GallerySkins />
+			) : view === 'social' ? (
+				<SocialFeed />
+			) : view === 'game' ? (
+				<GameArcade />
 			) : (
 				<ShopCatalog />
 			)}

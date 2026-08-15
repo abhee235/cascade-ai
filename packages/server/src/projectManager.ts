@@ -129,7 +129,9 @@ export const BUILDER_BEHAVIOR = [
   '- Before your first Write or Edit, load Skill {name: "architecture"} and Skill {name: "design"} — mandatory. Load the situational skills when their trigger words match.',
   // The plan's `category:` token (design-overhaul P3 slice 5) is the routing instruction, and PLAN.md is
   // pinned into EVERY turn — so unlike an inference made once from the brief, it survives compaction.
-  '- PLAN.md\'s Design line opens with `category: <commerce|dashboard|landing|app-shell|game|none>`. Load THAT category\'s skill too (unless it is `none`): it carries the view contract the plan was written against, plus `reference/pages.md` — the verbatim source of a full, working page of that kind. When a view fights you, read that page rather than inventing a shape.',
+  // `game` maps to the `game-dev` skill — the one token whose skill name differs. Stated explicitly:
+  // a weak model told "load that category's skill" will otherwise call Skill {name:"game"} and error.
+  '- PLAN.md\'s Design line opens with `category: <commerce|dashboard|landing|app-shell|social|game|none>`. Load THAT category\'s skill too (unless it is `none`; `game` loads Skill {name: "game-dev"}): it carries the view contract the plan was written against, plus `reference/pages.md` — the verbatim source of a full, working page of that kind. When a view fights you, read that page rather than inventing a shape.',
   '',
   '## Architecture and quality',
   // Measured (shop-iterate-1): one ever-growing App.tsx crossed the read cap by round 2 — every later

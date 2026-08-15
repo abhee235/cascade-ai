@@ -171,10 +171,10 @@ export function planQualityIssues(text: string): string[] {
   // single inference made from the brief on turn one and then compacted away. Missing ⇒ the builder
   // falls back to guessing from the prompt, which is exactly how a shop gets built without the commerce
   // view contract. Accepted values mirror the mounted category skills.
-  const declared = text.match(/\bcategory:\s*(commerce|dashboard|landing|app-shell|game|none)\b/i)
+  const declared = text.match(/\bcategory:\s*(commerce|dashboard|landing|app-shell|social|game|none)\b/i)
   if (!declared) {
     issues.push(
-      'its Design line has no `category:` token. Start that line with `category: <commerce|dashboard|landing|app-shell|game|none>` — the builder reads it off the plan every turn to load the matching skill, which carries that category\'s view contract and reference page.',
+      'its Design line has no `category:` token. Start that line with `category: <commerce|dashboard|landing|app-shell|social|game|none>` — the builder reads it off the plan every turn to load the matching skill, which carries that category\'s view contract and reference page.',
     )
   } else if (declared[1].toLowerCase() === 'none') {
     // `none` is legitimate (a todo app, a calculator) but it is also the escape hatch a model takes to
@@ -186,6 +186,7 @@ export function planQualityIssues(text: string): string[] {
       ['commerce', [/\bcart\b/i, /\bcheckout\b/i, /\bCartRow\b/, /\bCheckoutPanel\b/, /add to cart/i]],
       ['dashboard', [/\bKPI\b/i, /\bStatCard\b/, /\bDataTable\b/, /\bChartCard\b/, /\bAppShell\b/]],
       ['landing', [/\bPricingTable\b/, /\bTestimonial\b/, /\bFAQ\b/, /\bCTASection\b/, /pricing tier/i]],
+      ['social', [/\bFeedPost\b/, /\bComposer\b/, /\bProfileHeader\b/, /\breplies\b/i, /\bfeed\b/i]],
     ]
     for (const [name, patterns] of SIGNALS) {
       const hits = patterns.filter((p) => p.test(text))

@@ -293,7 +293,7 @@ describe('planQualityIssues — the pinned contract must be usable (35B forensic
 		// PLAN.md is re-read every builder turn, so `category:` re-states which skill to load on EVERY turn
 		// — durable in a way a turn-one inference from the brief is not (compaction eats that).
 		const withCat = (c: string) => ['# P', `**Design:** category: ${c}; preset: premium; imagery: \`<Photo web>\` per item`].join('\n')
-		for (const c of ['commerce', 'dashboard', 'landing', 'app-shell', 'game', 'none']) {
+		for (const c of ['commerce', 'dashboard', 'landing', 'app-shell', 'social', 'game', 'none']) {
 			expect(planQualityIssues(withCat(c)), `${c} should be accepted`).toEqual([])
 		}
 		const missing = ['# P', '**Design:** preset: premium; imagery: `<Photo web>` per item'].join('\n')

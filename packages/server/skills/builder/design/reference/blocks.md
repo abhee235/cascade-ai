@@ -10,11 +10,13 @@
 - CartRow
 - ChartCard
 - CheckoutPanel
+- Composer
 - DataTable
 - EmptyState
 - ErrorState
 - FAQ
 - FeatureGrid
+- FeedPost
 - FilterBar
 - Footer
 - Hero
@@ -24,6 +26,7 @@
 - PageHeader
 - Photo
 - PricingTable
+- ProfileHeader
 - Section
 - SettingRow
 - SkeletonList
@@ -171,6 +174,14 @@ Props: `lines: OrderLine[]` · `total: ReactNode` · `totalLabel?: ReactNode` ·
 </CheckoutPanel>
 ```
 
+## Composer
+
+Import: `import { Composer } from '@/components/blocks/Composer'`
+
+Exports: Composer
+
+Props: `avatar?: ReactNode` · `value: string` · `onValueChange: (value: string) => void` · `onSubmit: () => void` · `placeholder?: string` · `maxLength?: number` · `submitLabel?: ReactNode` · `className?: string`
+
 ## DataTable
 
 Import: `import { DataTable } from '@/components/blocks/DataTable'`
@@ -238,6 +249,14 @@ Props: `features: Feature[]` · `columns?: 2 | 3` · `className?: string`
 ```tsx
 <FeatureGrid features={[{ icon: Truck, title: 'Free shipping', description: 'Over $50, everywhere.' }, …]} />
 ```
+
+## FeedPost
+
+Import: `import { FeedPost } from '@/components/blocks/FeedPost'`
+
+Exports: FeedPost
+
+Props: `avatar: ReactNode` · `author: ReactNode` · `meta?: ReactNode` · `children: ReactNode` · `media?: ReactNode` · `actions?: ReactNode` · `onClick?: () => void` · `className?: string`
 
 ## FilterBar
 
@@ -386,6 +405,14 @@ Props: `tiers: PricingTier[]` · `className?: string`
   { name: 'Company', price: 'Custom', features: ['SSO', 'Residency'], action: <Button variant="outline">Talk to us</Button> },
 ]} />
 ```
+
+## ProfileHeader
+
+Import: `import { ProfileHeader } from '@/components/blocks/ProfileHeader'`
+
+Exports: ProfileHeader
+
+Props: `cover?: ReactNode` · `avatar: ReactNode` · `name: ReactNode` · `handle?: ReactNode` · `bio?: ReactNode` · `stats?: ProfileStat[]` · `action?: ReactNode` · `className?: string`
 
 ## Section
 
