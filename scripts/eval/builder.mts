@@ -101,6 +101,39 @@ function makeWorkdir(id: string): string {
 	return work
 }
 
+/**
+ * Free the dev port between scenarios.
+ *
+ * Models verify their work by starting a dev server, and they background it: `nohup npm run dev &`. That
+ * server OUTLIVES the scenario — session.dispose() ends the agent, not a process the agent detached. Two
+ * consecutive matrix runs (2026-08-15) died on this: an orphan from one scenario kept :5173, and the bench
+ * went silent right after the turn that spawned it, taking the queued scenarios with it.
+ *
+ * Killing by PORT is the targeted move — the one thing the model itself is refused, because `taskkill /IM
+ * node.exe` (measured, same day) takes down the harness and the user's editor along with the server. Here
+ * we know exactly which listener to end.
+ */
+function reapDevServer(port = 5173): void {
+	try {
+		if (process.platform === 'win32') {
+			const out = spawnSync('netstat', ['-ano'], { encoding: 'utf8' }).stdout ?? ''
+			const pids = new Set(
+				out
+					.split('\n')
+					.filter((l) => l.includes(`:${port}`) && l.includes('LISTENING'))
+					.map((l) => l.trim().split(/\s+/).pop()!)
+					.filter((p) => /^\d+$/.test(p) && p !== '0'),
+			)
+			for (const pid of pids) spawnSync('taskkill', ['/PID', pid, '/T', '/F'], { stdio: 'ignore' })
+		} else {
+			const out = spawnSync('lsof', ['-t', `-i:${port}`], { encoding: 'utf8' }).stdout ?? ''
+			for (const pid of out.split('\n').filter(Boolean)) spawnSync('kill', ['-9', pid.trim()], { stdio: 'ignore' })
+		}
+	} catch {
+		/* best effort — a surviving dev server is a slow next scenario, not a broken one */
+	}
+}
+
 function runCheck(id: string, work: string): { ok: boolean; output: string } {
 	const res = spawnSync(process.execPath, [join(SCENARIOS_DIR, id, 'check.mjs')], { cwd: work, encoding: 'utf8', timeout: 180_000 })
 	return { ok: res.status === 0, output: `${res.stdout ?? ''}${res.stderr ?? ''}` }
@@ -312,6 +345,7 @@ for (const id of wanted) {
 	} finally {
 		clearTimeout(timer)
 		await session.dispose().catch(() => {})
+		reapDevServer() // …and anything the model left listening (see below)
 		await otel?.shutdown().catch(() => {}) // flush spans before the next scenario / exit
 	}
 	const wallMs = Date.now() - t0
