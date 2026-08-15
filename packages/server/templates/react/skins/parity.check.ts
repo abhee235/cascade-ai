@@ -22,6 +22,10 @@ import { Hero as SharpHero } from './sharp/blocks/Hero'
 import { MediaCard as SharpMediaCard } from './sharp/blocks/MediaCard'
 import { NavBar as SharpNavBar } from './sharp/blocks/NavBar'
 import { StatCard as SharpStatCard } from './sharp/blocks/StatCard'
+import { Hero as SoftHero } from './soft/blocks/Hero'
+import { MediaCard as SoftMediaCard } from './soft/blocks/MediaCard'
+import { NavBar as SoftNavBar } from './soft/blocks/NavBar'
+import { StatCard as SoftStatCard } from './soft/blocks/StatCard'
 
 export const parity = {
 	sharp: [
@@ -29,5 +33,11 @@ export const parity = {
 		[SharpMediaCard satisfies typeof BaseMediaCard, BaseMediaCard satisfies typeof SharpMediaCard],
 		[SharpNavBar satisfies typeof BaseNavBar, BaseNavBar satisfies typeof SharpNavBar],
 		[SharpStatCard satisfies typeof BaseStatCard, BaseStatCard satisfies typeof SharpStatCard],
+	],
+	soft: [
+		[SoftHero satisfies typeof BaseHero, BaseHero satisfies typeof SoftHero],
+		[SoftMediaCard satisfies typeof BaseMediaCard, BaseMediaCard satisfies typeof SoftMediaCard],
+		[SoftNavBar satisfies typeof BaseNavBar, BaseNavBar satisfies typeof SoftNavBar],
+		[SoftStatCard satisfies typeof BaseStatCard, BaseStatCard satisfies typeof SoftStatCard],
 	],
 }

@@ -16,6 +16,7 @@ import { LandingLaunch } from './pages/LandingLaunch'
 import { LandingPortfolio } from './pages/LandingPortfolio'
 import { LandingWaitlist } from './pages/LandingWaitlist'
 import { GalleryLanding } from './GalleryLanding'
+import { GallerySkins } from './GallerySkins'
 import '@/index.css'
 
 // PRESET SWITCHER — demo-only (this file never ships): ?preset=<name> loads that theme AFTER index.css,
@@ -34,7 +35,7 @@ const activePreset = new URLSearchParams(location.search).get('preset') ?? 'prem
 	}
 }
 
-type View = 'landing' | 'kit' | 'saas' | 'launch' | 'portfolio' | 'waitlist' | 'dashboard' | 'shop' | 'shell'
+type View = 'landing' | 'kit' | 'saas' | 'launch' | 'portfolio' | 'waitlist' | 'dashboard' | 'shop' | 'shell' | 'skins'
 
 function DemoApp() {
 	const [view, setView] = useHistoryView<View>('landing')
@@ -74,6 +75,7 @@ function DemoApp() {
 						{link('dashboard', 'Dashboard')}
 						{link('shop', 'Shop')}
 						{link('shell', 'App shell')}
+						{link('skins', 'Skins')}
 					</>
 				}
 				actions={
@@ -116,6 +118,8 @@ function DemoApp() {
 				<DashboardHome />
 			) : view === 'shell' ? (
 				<AppShellPages />
+			) : view === 'skins' ? (
+				<GallerySkins />
 			) : (
 				<ShopCatalog />
 			)}

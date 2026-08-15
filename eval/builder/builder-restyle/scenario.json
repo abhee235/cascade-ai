@@ -1,0 +1,9 @@
+{
+	"id": "builder-restyle",
+	"template": "react",
+	"prompts": [
+		"Build a small product gallery called 'Halide Supply' for a photography shop. Requirements: (1) A hardcoded catalog of 4 products (film stocks and cameras), each with a name, a price, a one-line description, and an image via the project's photo/imagery helpers — never an emoji. (2) A header with the shop name. (3) A responsive grid of product cards showing image, name, price, and description. Keep it to this one view — no cart, no routing, no new dependencies. Style with Tailwind token utilities and keep `npm run build` passing.",
+		"Now change the look of the whole app: I want the dark, luxurious, premium feel — and make the cards and the header flatter and sharper: hard edges, no rounded corners. Don't change what the app does, only how it looks."
+	],
+	"budgets": { "maxTurns": 60, "timeoutMs": 1800000 }
+}
