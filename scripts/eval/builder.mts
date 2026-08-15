@@ -135,6 +135,55 @@ function reapDevServer(port = 5173): void {
 	}
 }
 
+/**
+ * Post-run screenshot (design-overhaul P4 tail): every run leaves a picture for human judgment, pass OR
+ * fail — assertions catch structure, but "does it LOOK designed" is still a human call. BEST-EFFORT by
+ * contract: any failure logs one line and never touches the verdict. Serves the dist/ the check already
+ * built via `vite preview`, shoots light and dark (the design pass reviews both), reaps the preview by
+ * PID. Uses playwright-core over the system browser channel — zero new dependencies (browserTool's own
+ * pattern; a fresh checkout without Edge/Chrome simply skips).
+ */
+async function captureScreenshots(work: string, outDir: string, id: string): Promise<void> {
+	const port = 4173
+	let preview: import('node:child_process').ChildProcess | undefined
+	try {
+		if (!existsSync(join(work, 'dist', 'index.html'))) return // check never built — nothing to shoot
+		mkdirSync(outDir, { recursive: true })
+		preview = spawn(process.execPath, [join('node_modules', 'vite', 'bin', 'vite.js'), 'preview', '--port', String(port), '--strictPort'], { cwd: work, stdio: 'ignore' })
+		await new Promise((r) => setTimeout(r, 2500))
+		const { chromium } = await import('playwright-core')
+		let browser: import('playwright-core').Browser | undefined
+		for (const channel of ['msedge', 'chrome'] as const) {
+			try {
+				browser = await chromium.launch({ channel, headless: true })
+				break
+			} catch {
+				/* channel not installed — try the next */
+			}
+		}
+		if (!browser) return
+		try {
+			const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+			await page.goto(`http://localhost:${port}/`, { waitUntil: 'networkidle', timeout: 15_000 })
+			await page.screenshot({ path: join(outDir, `${id}-light.png`) })
+			await page.evaluate("document.documentElement.classList.add('dark')")
+			await page.waitForTimeout(300)
+			await page.screenshot({ path: join(outDir, `${id}-dark.png`) })
+			console.log(`   📷 ${join(outDir, `${id}-{light,dark}.png`)}`)
+		} finally {
+			await browser.close().catch(() => {})
+		}
+	} catch (e) {
+		console.log(`   (screenshot skipped: ${e instanceof Error ? e.message.split('\n')[0] : e})`)
+	} finally {
+		if (preview?.pid) {
+			if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(preview.pid), '/T', '/F'], { stdio: 'ignore' })
+			else preview.kill('SIGKILL')
+		}
+		reapDevServer(port) // belt over braces — --strictPort means anything left listening is ours
+	}
+}
+
 function runCheck(id: string, work: string): { ok: boolean; output: string } {
 	const res = spawnSync(process.execPath, [join(SCENARIOS_DIR, id, 'check.mjs')], { cwd: work, encoding: 'utf8', timeout: 180_000 })
 	return { ok: res.status === 0, output: `${res.stdout ?? ''}${res.stderr ?? ''}` }
@@ -351,6 +400,7 @@ for (const id of wanted) {
 	}
 	const wallMs = Date.now() - t0
 	const check = runCheck(id, work)
+	await captureScreenshots(work, join(runDir, 'shots'), id) // best-effort, pass or fail — never the verdict
 	if (args.keep) console.log(`\n   workdir kept for replay → ${work}`)
 	else cleanup(work)
 
