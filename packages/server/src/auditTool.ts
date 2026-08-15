@@ -65,7 +65,13 @@ function scan(projectDir: string, findings: ResidueFinding[]): Hit[] {
 		return filesOf.get(scope)!
 	}
 
+	/** Corroboration for an ordinary-English needle: does the project carry HARDER demo evidence? A path
+	 *  that exists, or an import prefix that appears anywhere in src. See ResidueFinding.requires. */
+	const corroborated = (requires: string[]): boolean =>
+		requires.some((r) => (r.startsWith('@/') ? loadScope('src').some((f) => f.lines.some((l) => l.includes(r))) : existsSync(join(projectDir, r))))
+
 	for (const finding of findings) {
+		if (finding.requires?.length && !corroborated(finding.requires)) continue
 		if (finding.kind === 'path' && finding.path) {
 			if (existsSync(join(projectDir, finding.path))) hits.push({ finding, where: finding.path })
 		} else if (finding.kind === 'string' && finding.needle) {

@@ -36,7 +36,18 @@ export function noResidue(projectDir) {
 		console.error(`residue: ${msg}`)
 		failures++
 	}
+	// `requires`: corroboration for a needle that is ordinary English (see ResidueFinding.requires). The
+	// tool honours it, so the bench must too — this file exists to guarantee they agree about what residue
+	// IS, and a needle that fires here but not there is exactly the disagreement it was written to prevent.
+	const corroborated = (requires) =>
+		requires.some((r) => {
+			if (!r.startsWith('@/')) return existsSync(join(projectDir, r))
+			for (const file of walk(join(projectDir, 'src'))) if (readFileSync(file, 'utf8').includes(r)) return true
+			return false
+		})
+
 	for (const f of contract.hard) {
+		if (f.requires?.length && !corroborated(f.requires)) continue
 		if (f.kind === 'path' && f.path) {
 			if (existsSync(join(projectDir, f.path))) fail(`${f.path} still exists — ${f.why}`)
 		} else if (f.kind === 'string' && f.needle) {

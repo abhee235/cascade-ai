@@ -41,6 +41,20 @@ export interface ResidueFinding {
   scope?: string
   /** kind 'file': the literal content that must not appear in `path`. */
   mustNotContain?: string
+  /**
+   * Only report this finding when the project ALSO shows one of these (project-relative paths or `@/…`
+   * import prefixes). For needles that are ordinary English.
+   *
+   * Measured (qwen36-agentic-iq4, builder-shop 2026-08-15): a shop named one of its products "Meridian
+   * Watch" — a plausible name for a watch — and the audit reported it twice as "the demo brand (legacy
+   * scaffold), replace with the app's own brand name". The model fixed everything else and left this,
+   * because the instruction does not parse: the app's brand was "Cascade Shop"; Meridian was a product.
+   *
+   * Since the demo stopped being copied into projects (design-overhaul P1), a FRESH project cannot inherit
+   * that word at all — it can only invent it, so there the needle is a false positive by construction. It
+   * still matters for LEGACY projects carrying the old demo, and those always have harder evidence too.
+   */
+  requires?: string[]
   why: string
   fix: string
 }

@@ -82,6 +82,23 @@ describe('TemplateAudit — style pre-flights', () => {
 		expect(out).toContain('no @/components/blocks imports')
 	})
 
+	it('does not call an ordinary word residue without corroborating demo evidence', async () => {
+		// Measured (qwen36-agentic-iq4, builder-shop 2026-08-15): a shop named a product "Meridian Watch" —
+		// a plausible name for a watch — and the audit reported it twice as "the demo brand … replace with
+		// the app's own brand name". The model fixed everything else and left this, because the instruction
+		// does not parse: its brand WAS "Cascade Shop"; Meridian was a product. And since the demo stopped
+		// being copied into projects, a fresh project cannot inherit that word at all.
+		const invented = await audit({ 'src/lib/data.ts': "export const PRODUCTS = [{ id: 'p1', name: 'Meridian Watch', price: 189 }]" })
+		expect(invented).not.toContain('Meridian')
+
+		// …but a project that really did carry the demo still gets told: the import is the corroboration.
+		const legacy = await audit({
+			'src/lib/data.ts': "export const PRODUCTS = [{ id: 'p1', name: 'Meridian Watch', price: 189 }]",
+			'src/App.tsx': "import { Gallery } from '@/demo/Gallery'\nexport const App = () => <Gallery />",
+		})
+		expect(legacy).toContain('Meridian')
+	})
+
 	it('flags a hand-written photo() that shadows the house helper', async () => {
 		// Measured (qwen3.5:9b, builder-landing 2026-08-15): the model wrote its own `function photo(name:
 		// string)` returning `/photos/<name>.webp` and never imported @/lib/photos. Every signal said fine —
