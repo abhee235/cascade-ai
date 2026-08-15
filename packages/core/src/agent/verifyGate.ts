@@ -136,6 +136,32 @@ export function buildRunBeforeDoneNudge(pending: string[]): Message {
 /** Consecutive turns of unverified-edit state before the mid-flight nudge fires (once per submit). */
 export const STALLED_VERIFY_TURNS = 5
 
+// ── The mid-flight AUDIT nudge (2026-08-15) ───────────────────────────────────────────────────────────
+// Same shape, different blind spot. The run-before-done gate also only fires when the model STOPS, and a
+// weak model does not stop — it runs out of budget. Measured (qwen3.5:9b, three of four category builds):
+// the model wrote its components and NEVER rewired src/App.tsx, so the app it "built" rendered the starter
+// scaffold; TemplateAudit was called ZERO times in every one of those runs, and the audit is exactly what
+// would have said so (an untouched entry still carries the scaffold's placeholder markers, a HARD finding).
+// A gate the model reaches only by finishing cannot help a model that never finishes.
+//
+// So the declared before-done tool is ALSO nudged mid-flight, on the same "N consecutive editing turns"
+// trigger. It is deliberately LATER than the verify nudge: a build error blocks everything and should be
+// heard first, while "your work is not wired up yet" is only worth saying once real work exists.
+export const STALLED_AUDIT_TURNS = 8
+
+/** The mid-flight audit reminder — appended to the trailing tool_results message (ADR-034 channel). */
+export function buildStalledAuditNudge(pending: string[]): string {
+	const names = pending.join(' and ')
+	return (
+		`<system-reminder>You have been editing for ${STALLED_AUDIT_TURNS} turns without calling ${names}. ` +
+		`Call ${names} NOW — ${pending.length > 1 ? 'they are TOOLS' : 'it is a TOOL'} in this session, not a shell command. ` +
+		'It reports what still stands between this project and done, INCLUDING work that exists but is not reachable yet ' +
+		'(components nothing imports, an entry point still showing the starter scaffold) — a green build does not prove ' +
+		'your app renders. This is a background note, NOT a new request: do not reply to it — call the tool, fix what it ' +
+		'names, then continue the ORIGINAL task.</system-reminder>'
+	)
+}
+
 /** The mid-flight reminder — appended to the trailing tool_results message (ADR-034 channel). */
 export function buildStalledVerifyNudge(check?: CheckCommand): string {
 	const directive = check

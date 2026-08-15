@@ -21,7 +21,7 @@ import { streamWithRecovery, type RecoveryOptions } from '../llm/resilience'
 import type { ToolUse } from '../tools/runTool'
 import { scheduleTools } from '../tools/scheduler'
 import { buildTodoReminder, shouldRemindTodos, type TodoReminderConfig } from './todoReminder'
-import { buildRunBeforeDoneNudge, buildStalledVerifyNudge, buildVerifyNudge, foldRunBeforeDone, foldVerifyState, isFilteredVerify, isVerifyCommand, STALLED_VERIFY_TURNS } from './verifyGate'
+import { buildRunBeforeDoneNudge, buildStalledAuditNudge, buildStalledVerifyNudge, buildVerifyNudge, foldRunBeforeDone, foldVerifyState, isFilteredVerify, isVerifyCommand, STALLED_AUDIT_TURNS, STALLED_VERIFY_TURNS } from './verifyGate'
 import { buildDelegateNudgeText, foldReadPressure, READ_PRESSURE_FRACTION, sawSubagent } from './delegateNudge'
 import { buildReadLoopNudge, foldReadLoop } from './readLoopGate'
 import { buildReEditNudge, foldReEdit, reEditCount } from './reEditGate'
@@ -299,6 +299,10 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   // ADR-058 mid-flight check nudge: consecutive turns spent in unverified-edit state; one reminder per submit.
   let stalledVerifyTurns = 0
   let stalledVerifyNudged = false
+  // …and the same for the declared before-done tool: a weak model never STOPS, so it never reaches the
+  // terminal gate that would have told it the entry point is still the starter scaffold.
+  let stalledAuditTurns = 0
+  let stalledAuditNudged = false
   // REPEAT-NARRATION BREAKER (measured 2026-07-25): a session spent turns 100-103 re-emitting the SAME opening
   // — "The snapshot is completely empty … Let me systematically debug:" — each time calling one read. The
   // read-loop and re-edit breakers both missed it: the files differed, so no single counter crossed. The tell
@@ -781,6 +785,22 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
       tracer.event({ t: 'stalled_verify', turn })
       appendReminder(messages, buildStalledVerifyNudge(deps.check))
       yield { type: 'status', text: 'Edits unverified for several turns — asking the agent to run the check…' }
+    }
+
+    // MID-FLIGHT AUDIT NUDGE: same blind spot as above, one rung further out. `pendingBeforeDone` is
+    // non-empty exactly while edits are outstanding against a declared before-done tool, so counting turns
+    // in that state needs no new bookkeeping. Fires after the verify nudge (a broken build is heard first).
+    stalledAuditTurns = pendingBeforeDone.size > 0 ? stalledAuditTurns + 1 : 0
+    if (
+      deps.verifyGate !== false &&
+      !stalledAuditNudged &&
+      depth === 0 &&
+      stalledAuditTurns >= STALLED_AUDIT_TURNS
+    ) {
+      stalledAuditNudged = true
+      tracer.event({ t: 'stalled_audit', turn, tools: [...pendingBeforeDone] })
+      appendReminder(messages, buildStalledAuditNudge([...pendingBeforeDone]))
+      yield { type: 'status', text: 'Edits unaudited for several turns — asking the agent to check what is left…' }
     }
 
     // ADR-050 rung 2: harness-detected delegation reminder. Recognition ("I should delegate") is

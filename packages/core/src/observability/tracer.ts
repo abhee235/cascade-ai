@@ -38,6 +38,7 @@ export type TraceEvent =
   | { t: 'tool_cap'; turn: number; calls: number } // per-submit tool-call budget crossed — converge-or-report reminder injected (once per submit)
   | { t: 'recall'; turn: number; count: number } // ADR-074: dynamic archival recall surfaced `count` fresh durable facts at the tail (cache-safe append)
   | { t: 'stalled_verify'; turn: number } // ADR-058: edits pending unverified for N consecutive turns mid-flight — run-the-check reminder injected
+  | { t: 'stalled_audit'; turn: number; tools: string[] } // edits pending un-audited for N turns mid-flight — call-the-audit reminder injected
   | { t: 'post_edit_check'; turn: number; files: number } // ADR-059: harness type check after a mutating turn found errors — pushed to the model
   | { t: 'slow_prefill'; turn: number; waitedMs: number } // ADR-061: pre-first-token silence with a LIVE backend — a big cold prefill, waited out instead of killed
   | { t: 'max_tokens_cut'; turn: number }

@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { runAgentLoop, type LoopDeps } from '../src/agent/agentLoop'
 import { z } from 'zod'
 import { createRegistry, registryOf } from '../src/tools/toolRegistry'
-import { foldVerifyState, isFilteredVerify, isVerifyCommand, resolveCheckCommand } from '../src/agent/verifyGate'
+import { STALLED_AUDIT_TURNS, foldVerifyState, isFilteredVerify, isVerifyCommand, resolveCheckCommand } from '../src/agent/verifyGate'
 import type { Message } from '../src/protocol'
 import { createFakeProvider, textDelta, toolUse, done, type FakeProvider } from './fakeProvider'
 
@@ -255,6 +255,47 @@ describe('run-before-done gate (design-overhaul P1, generalized) — the contrac
 		await drain(runAgentLoop(messages, deps(provider, { registry: withAudit() })))
 		expect(provider.calls.length).toBe(4)
 		expect(historyText(messages)).toContain('never called the TemplateAudit tool')
+	})
+
+	it('MID-FLIGHT: edits for N turns without the declared tool ⇒ nudged BEFORE the terminal', async () => {
+		// Measured (qwen3.5:9b, 2026-08-15): three of four category builds wrote their components and never
+		// rewired src/App.tsx, so the "finished" app rendered the starter scaffold — and TemplateAudit was
+		// called ZERO times in every one, because the run died on budget instead of stopping. A gate you only
+		// reach by finishing cannot help a model that never finishes.
+		const turns = STALLED_AUDIT_TURNS + 2
+		const provider = createFakeProvider([
+			[toolUse('w0', 'Write', { file_path: 'a.tsx', content: 'x' }), done('tool_use')],
+			[toolUse('b0', 'Bash', { command: 'node --test' }), done('tool_use')], // verify gate satisfied — isolates THIS nudge
+			...Array.from({ length: turns }, (_, i) => [toolUse(`w${i + 1}`, 'Write', { file_path: `c${i}.tsx`, content: 'x' }), done('tool_use')] as const),
+			[textDelta('Done.'), done('end_turn')],
+			[textDelta('Done.'), done('end_turn')],
+		])
+		const messages: Message[] = [{ role: 'user', content: 'build' }]
+		await drain(runAgentLoop(messages, deps(provider, { registry: withAudit() })))
+		const text = historyText(messages)
+		expect(text).toContain(`editing for ${STALLED_AUDIT_TURNS} turns without calling TemplateAudit`)
+		// It must name the failure the model cannot see: a green build is not a rendering app.
+		expect(text).toContain('not reachable yet')
+		// ONCE per submit — a reminder repeated every turn becomes noise the model learns to skip.
+		expect(text.split('editing for').length - 1).toBe(1)
+	})
+
+	it('MID-FLIGHT: calling the tool keeps it quiet — the nudge answers a real state, not a turn count', async () => {
+		const provider = createFakeProvider([
+			[toolUse('w0', 'Write', { file_path: 'a.tsx', content: 'x' }), done('tool_use')],
+			[toolUse('b0', 'Bash', { command: 'node --test' }), done('tool_use')],
+			// Audits as it goes, so the pending set keeps clearing and the counter never reaches the threshold.
+			...Array.from({ length: STALLED_AUDIT_TURNS + 2 }, (_, i) =>
+				i % 2 === 0
+					? ([toolUse(`w${i + 1}`, 'Write', { file_path: `c${i}.tsx`, content: 'x' }), done('tool_use')] as const)
+					: ([toolUse(`a${i + 1}`, 'TemplateAudit', {}), done('tool_use')] as const),
+			),
+			[textDelta('Done.'), done('end_turn')],
+			[textDelta('Done.'), done('end_turn')],
+		])
+		const messages: Message[] = [{ role: 'user', content: 'build' }]
+		await drain(runAgentLoop(messages, deps(provider, { registry: withAudit() })))
+		expect(historyText(messages)).not.toContain('turns without calling')
 	})
 
 	it('through the loop: running the declared tool before the terminal ⇒ no nudge', async () => {
