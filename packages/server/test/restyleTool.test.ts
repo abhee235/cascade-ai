@@ -53,8 +53,9 @@ describe('skins — certified structure swaps', () => {
 		for (const b of sharp.blocks) {
 			expect(readFileSync(join(dir, 'src', 'components', 'blocks', `${b}.tsx`), 'utf8')).toContain('SKIN: sharp')
 		}
-		// A block the skin does not cover is byte-identical to base.
-		expect(readFileSync(join(dir, 'src', 'components', 'blocks', 'Section.tsx'), 'utf8')).toBe(readFileSync(templateFilePath('react', 'src/components/blocks/Section.tsx'), 'utf8'))
+		// A block the skin does not cover is byte-identical to base. (Was Section until the skins grew to
+		// cover it — CartRow has no skin variant in either pack.)
+		expect(readFileSync(join(dir, 'src', 'components', 'blocks', 'CartRow.tsx'), 'utf8')).toBe(readFileSync(templateFilePath('react', 'src/components/blocks/CartRow.tsx'), 'utf8'))
 	})
 
 	it('components narrows the swap; base restores the stock look', () => {
@@ -68,7 +69,7 @@ describe('skins — certified structure swaps', () => {
 
 	it('asking a skin for a block it does not ship names its coverage instead of guessing', () => {
 		const dir = project()
-		expect(() => applySkin(dir, 'react', 'sharp', ['Footer'])).toThrow(/covers: Hero, MediaCard, NavBar, StatCard/)
+		expect(() => applySkin(dir, 'react', 'sharp', ['FAQ'])).toThrow(/covers: ArtImage, Footer, Hero, MediaCard, NavBar, Section, StatCard/)
 	})
 })
 

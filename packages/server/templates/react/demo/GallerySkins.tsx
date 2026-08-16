@@ -7,25 +7,33 @@
 import { Camera, Route } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { ArtImage } from '@/components/blocks/ArtImage'
+import { ArtImage as BaseArtImage } from '@/components/blocks/ArtImage'
+import { Footer as BaseFooter } from '@/components/blocks/Footer'
+import { Section as BaseSection } from '@/components/blocks/Section'
 import { Hero as BaseHero } from '@/components/blocks/Hero'
 import { MediaCard as BaseMediaCard } from '@/components/blocks/MediaCard'
 import { NavBar as BaseNavBar } from '@/components/blocks/NavBar'
 import { StatCard as BaseStatCard } from '@/components/blocks/StatCard'
+import { ArtImage as SharpArtImage } from '../skins/sharp/blocks/ArtImage'
+import { Footer as SharpFooter } from '../skins/sharp/blocks/Footer'
 import { Hero as SharpHero } from '../skins/sharp/blocks/Hero'
+import { Section as SharpSection } from '../skins/sharp/blocks/Section'
 import { MediaCard as SharpMediaCard } from '../skins/sharp/blocks/MediaCard'
 import { NavBar as SharpNavBar } from '../skins/sharp/blocks/NavBar'
 import { StatCard as SharpStatCard } from '../skins/sharp/blocks/StatCard'
+import { ArtImage as SoftArtImage } from '../skins/soft/blocks/ArtImage'
+import { Footer as SoftFooter } from '../skins/soft/blocks/Footer'
 import { Hero as SoftHero } from '../skins/soft/blocks/Hero'
+import { Section as SoftSection } from '../skins/soft/blocks/Section'
 import { MediaCard as SoftMediaCard } from '../skins/soft/blocks/MediaCard'
 import { NavBar as SoftNavBar } from '../skins/soft/blocks/NavBar'
 import { StatCard as SoftStatCard } from '../skins/soft/blocks/StatCard'
 import { photo } from '@/lib/photos'
 
 const SKINS = [
-	{ name: 'base', Hero: BaseHero, MediaCard: BaseMediaCard, NavBar: BaseNavBar, StatCard: BaseStatCard },
-	{ name: 'sharp', Hero: SharpHero, MediaCard: SharpMediaCard, NavBar: SharpNavBar, StatCard: SharpStatCard },
-	{ name: 'soft', Hero: SoftHero, MediaCard: SoftMediaCard, NavBar: SoftNavBar, StatCard: SoftStatCard },
+	{ name: 'base', Hero: BaseHero, MediaCard: BaseMediaCard, NavBar: BaseNavBar, StatCard: BaseStatCard, Art: BaseArtImage, Foot: BaseFooter, Sect: BaseSection },
+	{ name: 'sharp', Hero: SharpHero, MediaCard: SharpMediaCard, NavBar: SharpNavBar, StatCard: SharpStatCard, Art: SharpArtImage, Foot: SharpFooter, Sect: SharpSection },
+	{ name: 'soft', Hero: SoftHero, MediaCard: SoftMediaCard, NavBar: SoftNavBar, StatCard: SoftStatCard, Art: SoftArtImage, Foot: SoftFooter, Sect: SoftSection },
 ] as const
 
 function Row({ title, children }: { title: string; children: React.ReactNode }) {
@@ -93,6 +101,47 @@ export function GallerySkins() {
 				</div>
 			</Row>
 
+			<Row title="ArtImage — same seed, three generative languages">
+				<div className="grid gap-6 lg:grid-cols-3">
+					{SKINS.map(({ name, Art }) => (
+						<div key={name} className="flex flex-col gap-1.5">
+							<span className="text-xs text-muted-foreground">{name}</span>
+							<div className="overflow-hidden rounded-lg border [&_svg]:aspect-[4/3]">
+								<Art seed="Alpine Field Watch" kind="product" />
+							</div>
+						</div>
+					))}
+				</div>
+			</Row>
+
+			<Row title="Section — wash tone, three skins">
+				<div className="flex flex-col gap-6">
+					{SKINS.map(({ name, Sect }) => (
+						<div key={name} className="flex flex-col gap-1.5">
+							<span className="text-xs text-muted-foreground">{name}</span>
+							<div className="overflow-hidden rounded-lg border">
+								<Sect tone="wash" eyebrow="Why teams switch" heading="Atmosphere, three ways" description="The same band, washed by each skin's own weather.">
+									<div className="h-10" />
+								</Sect>
+							</div>
+						</div>
+					))}
+				</div>
+			</Row>
+
+			<Row title="Footer — three skins">
+				<div className="flex flex-col gap-6">
+					{SKINS.map(({ name, Foot }) => (
+						<div key={name} className="flex flex-col gap-1.5">
+							<span className="text-xs text-muted-foreground">{name}</span>
+							<div className="overflow-hidden rounded-lg border">
+								<Foot brand={<><Camera className="size-4 text-primary" /> Halide Supply</>} tagline="Film and serviced bodies, checked by hand." columns={[{ heading: 'Shop', links: ['Film', 'Cameras'] }, { heading: 'Help', links: ['Shipping', 'Returns'] }]} fineprint="© 2026 Halide Supply." />
+							</div>
+						</div>
+					))}
+				</div>
+			</Row>
+
 			<Row title="Hero — collage layout, three skins">
 				<div className="flex flex-col gap-10">
 					{SKINS.map(({ name, Hero }) => (
@@ -114,7 +163,7 @@ export function GallerySkins() {
 											<Button variant="outline">Our story</Button>
 										</>
 									}
-									media={<ArtImage seed="skin-review" kind="product" />}
+									media={<BaseArtImage seed="skin-review" kind="product" />}
 								/>
 							</div>
 						</div>
