@@ -37,7 +37,12 @@ if (!/[1-5]\s*\/\s*5|round\s*[:=]/i.test(bundle)) {
 	process.exit(1)
 }
 
-if (runDesignLint(bundle, { blocks: ['navbar', 'empty-state'], preset: '*', quality: process.env.EVAL_BAR === 'quality', imagery: false }) > 0) process.exit(1)
+// `navbar` was required here and REMOVED (2026-08-16, n=2): one correct run composed a NavBar, the next
+// built the same complete game full-screen without site chrome — which the brief never asks for, and
+// which is a defensible (arguably better) choice for an arcade game. A check that fails correct work
+// over taste teaches models to bolt on chrome — the onePrimaryCta/usesImagery/Meridian lesson again.
+// `empty-state` stays: the brief explicitly requires the leaderboard's empty state.
+if (runDesignLint(bundle, { blocks: ['empty-state'], preset: '*', quality: process.env.EVAL_BAR === 'quality', imagery: false }) > 0) process.exit(1)
 
 if (noResidue(process.cwd()) > 0) process.exit(1)
 console.log('builder-game check passed')
