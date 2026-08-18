@@ -167,6 +167,25 @@ describe('hosted wire format', () => {
 // ── OpenAI Responses API (/v1/responses) — the reasoning+tools path ──────────────────────────────────────
 
 describe('toResponsesInput (the Responses bridge)', () => {
+	it("array-content message items carry an explicit type: 'message' (llama-server rejects the inferred form)", () => {
+		// Measured (llama-server b10488, 2026-08-19): OpenAI infers the item type from `role`, but llama.cpp's
+		// /v1/responses parser only infers it for STRING content — {role:'assistant', content:[…]} without
+		// type:'message' is HTTP 400 "Cannot determine type of 'item'". The first assistant TEXT message a
+		// session replays is the COMPACTION SUMMARY, so every builder run died at its first compaction.
+		const { input } = toResponsesInput([
+			{ role: 'user', content: [{ type: 'text', text: 'look' }, { type: 'image', url: 'data:image/png;base64,x' }] },
+			{ role: 'assistant', content: 'summary of the run so far' },
+			{ role: 'user', content: 'continue' },
+		])
+		for (const item of input) {
+			if ('role' in item && Array.isArray((item as { content?: unknown }).content)) {
+				expect((item as { type?: string }).type, JSON.stringify(item).slice(0, 80)).toBe('message')
+			}
+		}
+		// …and the assistant text itself is one of those array-content items.
+		expect(input.some((i) => (i as { type?: string }).type === 'message' && (i as { role?: string }).role === 'assistant')).toBe(true)
+	})
+
   it('system → instructions; a plain user turn → a string-content input item', () => {
     const { instructions, input } = toResponsesInput([{ role: 'user', content: 'hi' }], 'SYS')
     expect(instructions).toBe('SYS')
@@ -178,7 +197,7 @@ describe('toResponsesInput (the Responses bridge)', () => {
       { role: 'assistant', content: [{ type: 'text', text: 'ok' }, { type: 'tool_use', id: 'c1', name: 'Read', input: { file_path: 'a' } }] },
     ]
     const { input } = toResponsesInput(msgs)
-    expect(input[0]).toEqual({ role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] })
+    expect(input[0]).toEqual({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] })
     expect(input[1]).toEqual({ type: 'function_call', call_id: 'c1', name: 'Read', arguments: JSON.stringify({ file_path: 'a' }) })
   })
 
@@ -205,7 +224,7 @@ describe('toResponsesInput (the Responses bridge)', () => {
 
   it('a user image turn → input_text + input_image parts', () => {
     const msgs: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'look' }, { type: 'image', url: 'data:image/png;base64,AAA' }] }]
-    expect(toResponsesInput(msgs).input[0]).toEqual({ role: 'user', content: [{ type: 'input_text', text: 'look' }, { type: 'input_image', image_url: 'data:image/png;base64,AAA' }] })
+    expect(toResponsesInput(msgs).input[0]).toEqual({ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'look' }, { type: 'input_image', image_url: 'data:image/png;base64,AAA' }] })
   })
 })
 
