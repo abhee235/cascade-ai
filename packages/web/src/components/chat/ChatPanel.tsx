@@ -57,7 +57,7 @@ function useTick(active: boolean) {
 }
 
 export function ChatPanel() {
-  const { items, streaming, status, recovering, busy, stepStartedAt, sawTokens, lastTokenAt, thinkStartedAt, connected, activeId, submit, stop, composerDraft, setComposerDraft } = useStore()
+  const { items, streaming, status, recovering, busy, stepStartedAt, sawTokens, lastTokenAt, thinkStartedAt, pendingTool, connected, activeId, submit, stop, composerDraft, setComposerDraft } = useStore()
   useTick(busy) // re-render ~1×/s while a turn runs so the elapsed timer ticks even with no tokens
   const elapsed = stepStartedAt ? Math.max(0, Math.floor((Date.now() - stepStartedAt) / 1000)) : 0
   // The live thinking timer counts from the FIRST THINKING TOKEN, not from step start — step start includes
@@ -67,10 +67,10 @@ export function ChatPanel() {
   // Thinking went QUIET: no delta for a while but the step is still running ⇒ the model is silently generating
   // tool-call arguments (that phase streams NOTHING — a 118-line Write is ~20s of dead air). Labelling it
   // "Thinking…" made healthy turns look stuck (measured: users hit Stop on a working build). useTick's 1s
-  // re-render keeps this fresh without extra state churn.
+  // re-render keeps this fresh without extra state churn. This is the LABEL-ONLY fallback for wires that
+  // don't emit toolPending (ollama native delivers tool calls whole); it never commits anything — since
+  // 2026-08-19 the thought card settles only on real events (toolPending / message), never on a clock.
   const thinkingQuiet = busy && sawTokens && lastTokenAt !== null && Date.now() - lastTokenAt > 2500
-  // (The early thought-commit itself lives in the STORE as a quiet-debounced timer on the event clock —
-  // a render-clock useEffect here raced the event stream and could chop a resumed burst mid-stream.)
   // The working-indicator message must reflect the ACTUAL current phase, not one catch-all fallback.
   // (1) While a tool runs, the tool CARD is the activity indicator (its own spinner + "Writing X" /
   //     streaming output) — the generic row is suppressed so it can't contradict it with a stale message
@@ -85,13 +85,15 @@ export function ChatPanel() {
   const toolRunning = lastItem?.kind === 'tool' && lastItem.status === 'running'
   const lastUserIdx = items.map((i) => i.kind).lastIndexOf('user')
   const workedSinceSubmit = lastUserIdx >= 0 && items.slice(lastUserIdx + 1).some((i) => i.kind === 'tool' || i.kind === 'assistant')
-  const workingMessage = sawTokens
-    ? thinkingQuiet
-      ? 'Preparing changes…' // post-thinking silent phase: the model is generating tool args (nothing streams)
-      : status || 'Working — running the next step…'
-    : workedSinceSubmit
-      ? 'Reading the conversation so far…'
-      : 'Reading your message and the project context…'
+  const workingMessage = pendingTool
+    ? `Preparing ${pendingTool}…` // real boundary event (toolPending): the model is generating this tool's arguments
+    : sawTokens
+      ? thinkingQuiet
+        ? 'Preparing changes…' // quiet-inference fallback for wires without toolPending (ollama native)
+        : status || 'Working — running the next step…'
+      : workedSinceSubmit
+        ? 'Reading the conversation so far…'
+        : 'Reading your message and the project context…'
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [dragging, setDragging] = useState(false)
@@ -212,7 +214,7 @@ export function ChatPanel() {
           <div className="my-1.5 flex h-34 flex-col justify-center overflow-hidden">
             <div className="flex shrink-0 items-center gap-1 mb-1 text-[13px] leading-[21px] text-muted-foreground">
               <ChevronRight className="h-3 w-3 rotate-90" />
-              <span className={cn(!streaming.text && 'animate-pulse')}>{thinkingQuiet && !streaming.text ? 'Preparing changes…' : 'Thinking…'}</span>
+              <span className={cn(!streaming.text && 'animate-pulse')}>{pendingTool ? `Preparing ${pendingTool}…` : thinkingQuiet && !streaming.text ? 'Preparing changes…' : 'Thinking…'}</span>
               {thinkElapsed > 0 && <span className="ml-1 tabular-nums text-xs text-muted-foreground/60">{thinkElapsed}s</span>}
             </div>
             <div ref={thinkScrollRef} className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap border-l-2 border-border pl-3 text-[13px] leading-[21px] text-muted-foreground/80">

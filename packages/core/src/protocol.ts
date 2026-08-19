@@ -52,6 +52,11 @@ export type ActivityEvent =
   | { type: 'status'; text: string } // "Thinking…", and tool-step activity in later phases
   | { type: 'thinking_delta'; thinking: string } // a chunk of reasoning, streamed live (ADR-013)
   | { type: 'text_delta'; text: string } // a chunk of the answer, streamed live (ADR-013)
+  // The model has STARTED emitting a tool call (name known, arguments still generating silently). This is
+  // the true boundary the UI's "Preparing changes…" phase used to infer from a 2.5s quiet timer — which
+  // shredded thinking into fragments on slow remote streams. Best-effort: OpenAI-compat wires emit it;
+  // Ollama's native wire delivers tool calls whole, so it may never arrive — never gate on it.
+  | { type: 'toolPending'; name: string }
   | { type: 'toolStart'; id: string; name: string; summary: string } // a tool is about to run (Phase 4)
   | { type: 'permission'; id: string; tool: string; detail: string } // a write needs approval; loop BLOCKS until respondPermission (Phase 7)
   | { type: 'question'; id: string; questions: Question[] } // ADR-043: the agent asks the user; loop BLOCKS until respondQuestion

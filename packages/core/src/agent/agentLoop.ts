@@ -460,6 +460,9 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
         text += ev.text
         if (isDegenerateTail(text)) break
         yield { type: 'text_delta', text: ev.text }
+      } else if (ev.type === 'tool_call_start') {
+        // Forward the args-generation boundary so the UI can settle the thinking card on a REAL event.
+        yield { type: 'toolPending', name: ev.name }
       } else if (ev.type === 'tool_use') {
         toolUses.push({ id: ev.id, name: ev.name, input: ev.input, repaired: ev.repaired })
       } else if (ev.type === 'done') {

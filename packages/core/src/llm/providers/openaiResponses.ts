@@ -124,6 +124,11 @@ export class OpenAIResponsesProvider extends OpenAIChatProvider {
           case 'response.reasoning_summary_text.delta':
             if (ev.delta) yield { type: 'thinking_delta', thinking: ev.delta }
             break
+          case 'response.output_item.added':
+            // The tool-call boundary (see provider.ts tool_call_start): the item announces its name here,
+            // then the arguments stream silently until output_item.done.
+            if (ev.item?.type === 'function_call' && ev.item.name) yield { type: 'tool_call_start', name: ev.item.name }
+            break
           case 'response.output_item.done':
             if (ev.item?.type === 'function_call') {
               toolCount++

@@ -73,6 +73,12 @@ export type StreamEvent =
   | { type: 'text_delta'; text: string } // a chunk of the answer
   | { type: 'thinking_delta'; thinking: string } // a chunk of reasoning (e.g. Ollama delta.reasoning)
   | { type: 'tool_use'; id: string; name: string; input: unknown; repaired?: boolean } // a COMPLETE tool call; repaired = the args needed the item-4a JSON ladder (traced for measurement)
+  // The tool-call BOUNDARY, the moment the model starts emitting one (the name arrives in the first delta,
+  // the arguments stream silently after). Until this existed the UI inferred the args-generation phase from
+  // a 2.5s quiet timer — which shredded one thinking stream into many "Thought for 1s" cards on any slow
+  // remote backend (measured: Hetzner free tier). Ollama's native wire delivers tool calls whole, so this
+  // event never fires there; consumers must treat it as best-effort, not guaranteed.
+  | { type: 'tool_call_start'; name: string }
   | { type: 'retry'; attempt: number; delayMs: number; reason: string } // synthetic: streamWithRecovery is retrying (resets partial output)
   | { type: 'slow_prefill'; waitedMs: number } // synthetic (ADR-061): pre-first-token silence, backend verified alive — a big cold prefill is cooking; keep waiting
   | { type: 'done'; stopReason: 'end_turn' | 'max_tokens' | 'tool_use'; usage?: TokenUsage } // usage: E1/ADR-040

@@ -298,6 +298,7 @@ export class OpenAIChatProvider implements ModelProvider {
     let fullText = '' // ADR-047: accumulated so the prose fallback can rescue text-channel tool calls at end
     // Tool calls stream as fragments of a JSON string, keyed by index — accumulate, parse ONCE at end.
     const toolCalls = new Map<number, { id: string; name: string; args: string }>()
+    const announced = new Set<number>() // indexes whose tool_call_start already fired (once per call)
 
     while (true) {
       const { done, value } = await reader.read()
@@ -335,6 +336,12 @@ export class OpenAIChatProvider implements ModelProvider {
             if (tc.function?.name) cur.name += tc.function.name
             if (tc.function?.arguments) cur.args += tc.function.arguments
             toolCalls.set(idx, cur)
+            // Announce the boundary ONCE per call, as soon as the name is known: everything after this is
+            // silent argument generation, and the UI needs the transition to be an event, not a guess.
+            if (cur.name && !announced.has(idx)) {
+              announced.add(idx)
+              yield { type: 'tool_call_start', name: cur.name }
+            }
           }
         }
         if (choice?.finish_reason === 'length') stopReason = 'max_tokens'
