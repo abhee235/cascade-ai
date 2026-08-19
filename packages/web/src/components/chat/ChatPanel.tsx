@@ -64,12 +64,11 @@ export function ChatPanel() {
   // prefill, which billed "Reading the conversation…" time as thinking ("Thinking… 18s" on 8s of thought,
   // silently corrected when the committed card appeared). Frozen at the last token once the burst goes quiet.
   const thinkElapsed = thinkStartedAt ? Math.max(0, Math.floor(((lastTokenAt && Date.now() - lastTokenAt > 2500 ? lastTokenAt : Date.now()) - thinkStartedAt) / 1000)) : 0
-  // Thinking went QUIET: no delta for a while but the step is still running ⇒ the model is silently generating
-  // tool-call arguments (that phase streams NOTHING — a 118-line Write is ~20s of dead air). Labelling it
-  // "Thinking…" made healthy turns look stuck (measured: users hit Stop on a working build). useTick's 1s
-  // re-render keeps this fresh without extra state churn. This is the LABEL-ONLY fallback for wires that
-  // don't emit toolPending (ollama native delivers tool calls whole); it never commits anything — since
-  // 2026-08-19 the thought card settles only on real events (toolPending / message), never on a clock.
+  // Thinking went QUIET: no delta for a while. This clock is now COSMETIC-ONLY, twice removed from meaning:
+  // it freezes the live thinking timer (above) and picks a working-row label only when NO stream is mounted.
+  // It must never flip a label while thinking is on screen — a slow remote stream has >2.5s gaps INSIDE one
+  // thought (measured: Hetzner free tier), so "quiet" mid-thought means a slow wire, not tool-args generation.
+  // The real args-generation signal is `pendingTool` (the toolPending event); the labels trust only that.
   const thinkingQuiet = busy && sawTokens && lastTokenAt !== null && Date.now() - lastTokenAt > 2500
   // The working-indicator message must reflect the ACTUAL current phase, not one catch-all fallback.
   // (1) While a tool runs, the tool CARD is the activity indicator (its own spinner + "Writing X" /
@@ -89,7 +88,7 @@ export function ChatPanel() {
     ? `Preparing ${pendingTool}…` // real boundary event (toolPending): the model is generating this tool's arguments
     : sawTokens
       ? thinkingQuiet
-        ? 'Preparing changes…' // quiet-inference fallback for wires without toolPending (ollama native)
+        ? 'Preparing changes…' // last-resort quiet fallback — only reachable with NO stream mounted (the live block suppresses this row), i.e. a stream settled without a pendingTool name
         : status || 'Working — running the next step…'
       : workedSinceSubmit
         ? 'Reading the conversation so far…'
@@ -214,7 +213,7 @@ export function ChatPanel() {
           <div className="my-1.5 flex h-34 flex-col justify-center overflow-hidden">
             <div className="flex shrink-0 items-center gap-1 mb-1 text-[13px] leading-[21px] text-muted-foreground">
               <ChevronRight className="h-3 w-3 rotate-90" />
-              <span className={cn(!streaming.text && 'animate-pulse')}>{pendingTool ? `Preparing ${pendingTool}…` : thinkingQuiet && !streaming.text ? 'Preparing changes…' : 'Thinking…'}</span>
+              <span className={cn(!streaming.text && 'animate-pulse')}>{pendingTool ? `Preparing ${pendingTool}…` : 'Thinking…'}</span>
               {thinkElapsed > 0 && <span className="ml-1 tabular-nums text-xs text-muted-foreground/60">{thinkElapsed}s</span>}
             </div>
             <div ref={thinkScrollRef} className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap border-l-2 border-border pl-3 text-[13px] leading-[21px] text-muted-foreground/80">
@@ -245,12 +244,12 @@ export function ChatPanel() {
                 <span className="truncate">{recovering.reason === 'overflow' ? 'Context too large — compacting and retrying…' : "Can't reach the model — reconnecting…"}</span>
                 <span className="shrink-0 opacity-60">attempt {recovering.attempt}</span>
               </div>
-              // Streaming content (thinking OR answer) is its own indicator while it MOVES — the row would
-              // just duplicate it. Once it goes quiet the model is silently generating tool-call arguments (a
-              // 118-line Write is ~20s of NOTHING on the wire); suppressing the row there left a blank panel
-              // that reads as frozen, which is when users hit Stop on a healthy build. So quiet falls through
-              // to the working row and surfaces "Preparing changes…".
-            ) : (streaming?.text || streaming?.thinking) && !thinkingQuiet ? null : !toolRunning ? (
+              // Streaming content (thinking OR answer) is its own indicator while MOUNTED — the row would
+              // just duplicate it (measured: "Preparing changes…" showing twice, in the thought header AND
+              // here, mid-thought on a slow stream). Quiet no longer un-suppresses it: the live thought block
+              // with its frozen timer is not a blank panel, and the real args-generation phase either commits
+              // the stream (toolPending → row shows "Preparing <tool>…") or ends in the step's message.
+            ) : streaming?.text || streaming?.thinking ? null : !toolRunning ? (
               <div className="flex w-full items-center gap-2 text-[13px] text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
                 <span className="truncate">{workingMessage}</span>
