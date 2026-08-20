@@ -1,6 +1,10 @@
 # Task: thinking/reasoning-effort control (capability-gated, per model)
 
-Requested 2026-08-19. Not started — waiting for an idle builder (server/core edits restart tsx watch).
+Requested 2026-08-19. **Implemented 2026-08-20** — `thinking` rides the sampling plumbing end to end
+(registry → setModelParams → projectManager.active → SessionOptions → CompletionRequest), with the
+provider mappings and learned-quirk degrades below, and a capability-gated Thinking dropdown in the
+Model Manager (shown for `capabilities: ['thinking']` models AND custom endpoints, which have no probe).
+Remaining acceptance item: a live A/B builder run on Qwen3.8 at `low` vs default.
 
 ## Why
 - No knob exists anywhere in Cascade: the ollama provider never sends `think`; openaiChat uses

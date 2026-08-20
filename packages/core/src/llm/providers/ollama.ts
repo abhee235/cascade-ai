@@ -90,6 +90,12 @@ function toNativeMessages(messages: Message[], system?: string): Record<string, 
 }
 
 export class OllamaProvider extends OpenAIChatProvider {
+  // TASK-thinking-control learned quirks (same pattern as forceReasoningNone): `think` support varies —
+  // some models take levels ('low'|'medium'|'high'), some only booleans (ollama#12004 class), some none.
+  // Send the richest form first, degrade ONCE on the specific error, remember per model.
+  private readonly thinkBoolOnly = new Set<string>()
+  private readonly noThink = new Set<string>()
+
   async *stream(req: CompletionRequest, signal?: AbortSignal): AsyncIterable<StreamEvent> {
     // ALWAYS the native /api/chat path (2026-07-23; was conditional on pinned-window/options/images).
     // /v1-for-Ollama had no remaining advantage, and it silently made observability a function of session
@@ -173,8 +179,28 @@ export class OllamaProvider extends OpenAIChatProvider {
     // The anti-loop levers (measured: a 4-bit Qwen3 quant at 10× the loop rate of a hosted model).
     if (req.repeatPenalty !== undefined) options.repeat_penalty = req.repeatPenalty
     if (req.presencePenalty !== undefined) options.presence_penalty = req.presencePenalty
-    const body = JSON.stringify({ model: req.model, messages: toNativeMessages(req.messages, req.system), tools: toOpenAITools(req.tools), stream: true, ...(Object.keys(options).length ? { options } : {}) })
-    const res = await fetch(`${this.cfg.baseUrl}/api/chat`, { method: 'POST', headers: this.headers(), body, signal })
+    // TASK-thinking-control: Ollama's `think` — false disables, a level string asks for that effort. Level
+    // support varies per model, so degrade through the learned quirks: level → boolean → omitted.
+    const think = (): boolean | string | undefined => {
+      if (req.thinking === undefined || this.noThink.has(req.model)) return undefined
+      if (req.thinking === 'off') return false
+      return this.thinkBoolOnly.has(req.model) ? true : req.thinking
+    }
+    const makeBody = () => {
+      const t = think()
+      return JSON.stringify({ model: req.model, messages: toNativeMessages(req.messages, req.system), tools: toOpenAITools(req.tools), stream: true, ...(t !== undefined ? { think: t } : {}), ...(Object.keys(options).length ? { options } : {}) })
+    }
+    let res = await fetch(`${this.cfg.baseUrl}/api/chat`, { method: 'POST', headers: this.headers(), body: makeBody(), signal })
+    if (!res.ok && req.thinking !== undefined && !this.noThink.has(req.model)) {
+      // Rejected at validation (no stream bytes yet) ⇒ re-issuing is clean. Two degradations, tried in order:
+      // levels unsupported → boolean; thinking unsupported at all → drop the field.
+      const b = await res.clone().text().catch(() => '')
+      if (res.status === 400 && /think/i.test(b)) {
+        if (!this.thinkBoolOnly.has(req.model) && /level|string|boolean/i.test(b)) this.thinkBoolOnly.add(req.model)
+        else this.noThink.add(req.model)
+        res = await fetch(`${this.cfg.baseUrl}/api/chat`, { method: 'POST', headers: this.headers(), body: makeBody(), signal })
+      }
+    }
     if (!res.ok || !res.body) {
       const b = await res.text().catch(() => '')
       throw new Error(`${this.id} HTTP ${res.status}: ${b.slice(0, 300) || res.statusText}`)

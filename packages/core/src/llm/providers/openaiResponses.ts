@@ -76,7 +76,10 @@ export class OpenAIResponsesProvider extends OpenAIChatProvider {
   // full arguments string — no delta accumulation needed). Usage + truncation land on `response.completed`.
   async *stream(req: CompletionRequest, signal?: AbortSignal): AsyncIterable<StreamEvent> {
     const { instructions, input } = toResponsesInput(req.messages, req.system)
-    const body: Record<string, unknown> = { model: req.model, input, stream: true, store: false, reasoning: { summary: 'auto' } }
+    // TASK-thinking-control: Responses reasoning models can't fully disable reasoning — 'off' maps to
+    // 'minimal' (the floor). Omitted knob ⇒ the model's default effort, as before.
+    const effort = req.thinking === undefined ? undefined : req.thinking === 'off' ? 'minimal' : req.thinking
+    const body: Record<string, unknown> = { model: req.model, input, stream: true, store: false, reasoning: { summary: 'auto', ...(effort ? { effort } : {}) } }
     if (instructions) body.instructions = instructions
     const tools = toResponsesTools(req.tools)
     if (tools) body.tools = tools

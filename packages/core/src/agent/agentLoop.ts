@@ -70,7 +70,7 @@ export interface LoopDeps {
    *  guess). Sent on every model request so the wire window equals the planned window. */
   modelLimits?: { contextWindow?: number; maxOutputTokens?: number }
   /** ADR-067: per-model sampling — passed on every stream request (each provider applies what it supports). */
-  sampling?: { temperature?: number; topP?: number; topK?: number; repeatPenalty?: number; presencePenalty?: number }
+  sampling?: { temperature?: number; topP?: number; topK?: number; repeatPenalty?: number; presencePenalty?: number; thinking?: import('../llm/provider').ThinkingLevel }
   /** ADR-037: window tier sizing the system prompt + tool descriptions. Defaults to the compaction plan's tier
    *  (one source of truth); set explicitly for loops without compaction (e.g. subagents inherit the parent's). */
   tier?: import('../llm/contextWindows').WindowTier

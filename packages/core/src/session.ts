@@ -74,6 +74,8 @@ export interface SessionOptions {
   topK?: number
   repeatPenalty?: number
   presencePenalty?: number
+  /** Reasoning-effort control (TASK-thinking-control): rides the sampling plumbing; capability-gated in the UI. */
+  thinking?: import('./llm/provider').ThinkingLevel
   /** Compaction tuning: `compactRatio` is the proportional trigger `pct` in the ADR-039 ladder (default 0.7);
    *  `keepRecentRatio` is the fraction of the effective window kept verbatim (default 0.25). */
   compactRatio?: number
@@ -426,8 +428,8 @@ export function createSession(opts: SessionOptions): CascadeSession {
           hooks: hooksConfig, // ADR-036
           modelLimits: confidentLimits.contextWindow || confidentLimits.maxOutputTokens ? confidentLimits : undefined, // ADR-038 enforcement
           sampling:
-            opts.temperature !== undefined || opts.topP !== undefined || opts.topK !== undefined || opts.repeatPenalty !== undefined || opts.presencePenalty !== undefined
-              ? { temperature: opts.temperature, topP: opts.topP, topK: opts.topK, repeatPenalty: opts.repeatPenalty, presencePenalty: opts.presencePenalty }
+            opts.temperature !== undefined || opts.topP !== undefined || opts.topK !== undefined || opts.repeatPenalty !== undefined || opts.presencePenalty !== undefined || opts.thinking !== undefined
+              ? { temperature: opts.temperature, topP: opts.topP, topK: opts.topK, repeatPenalty: opts.repeatPenalty, presencePenalty: opts.presencePenalty, thinking: opts.thinking }
               : undefined, // ADR-067
         })
       } catch (err) {

@@ -261,3 +261,147 @@ describe('streamResponses (OpenAI routes here)', () => {
     expect((fetchMock.mock.calls[0] as any)[0]).toBe('https://integrate.api.nvidia.com/v1/chat/completions')
   })
 })
+
+// ── TASK-thinking-control: the reasoning-effort knob on each wire ───────────────────────────────────────
+// Levels map per adapter (chat reasoning_effort/chat_template_kwargs, ollama think, responses reasoning.effort),
+// and backends that reject a field lose the FIELD via the learned-quirk degrade — never the turn.
+
+describe('thinking control (wire mapping + degrade)', () => {
+	const drain = async (it: AsyncIterable<StreamEvent>) => {
+		const evs: StreamEvent[] = []
+		for await (const e of it) evs.push(e)
+		return evs
+	}
+	const chatOk = () => new Response('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
+
+	it('chat, self-hosted id: level → reasoning_effort AND chat_template_kwargs; off → none + enable_thinking:false', async () => {
+		for (const [thinking, effort, kwargs] of [
+			['low', 'low', { reasoning_effort: 'low' }],
+			['off', 'none', { enable_thinking: false }],
+		] as const) {
+			const fetchMock = vi.fn(async () => chatOk())
+			vi.stubGlobal('fetch', fetchMock)
+			const p = new OpenAIChatProvider({ id: 'hetzner', baseUrl: 'http://x' })
+			await drain(p.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm', thinking }))
+			const body = sentBody(fetchMock)
+			expect(body.reasoning_effort).toBe(effort)
+			expect(body.chat_template_kwargs).toEqual(kwargs)
+		}
+	})
+
+	it('chat, hosted id: reasoning_effort only — no chat_template_kwargs (strict gateways 400 unknown params)', async () => {
+		const fetchMock = vi.fn(async () => chatOk())
+		vi.stubGlobal('fetch', fetchMock)
+		const p = new OpenAIChatProvider({ id: 'openai', baseUrl: 'http://x' })
+		await drain(p.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm', thinking: 'high' }))
+		const body = sentBody(fetchMock)
+		expect(body.reasoning_effort).toBe('high')
+		expect(body.chat_template_kwargs).toBeUndefined()
+	})
+
+	it('chat: omitted knob puts NOTHING on the wire (model default preserved)', async () => {
+		const fetchMock = vi.fn(async () => chatOk())
+		vi.stubGlobal('fetch', fetchMock)
+		const p = new OpenAIChatProvider({ id: 'hetzner', baseUrl: 'http://x' })
+		await drain(p.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm' }))
+		const body = sentBody(fetchMock)
+		expect(body.reasoning_effort).toBeUndefined()
+		expect(body.chat_template_kwargs).toBeUndefined()
+	})
+
+	it('chat degrade chain: 400 on kwargs drops kwargs; then 400 on reasoning_effort drops the knob — remembered', async () => {
+		const responses = [
+			new Response('{"error":"Extra inputs are not permitted: chat_template_kwargs"}', { status: 400 }),
+			new Response('{"error":"Unrecognized request argument: reasoning_effort"}', { status: 400 }),
+			chatOk(),
+		]
+		const fetchMock = vi.fn(async () => responses.shift()!)
+		vi.stubGlobal('fetch', fetchMock)
+		const p = new OpenAIChatProvider({ id: 'strict', baseUrl: 'http://x' })
+		await drain(p.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm', thinking: 'medium' }))
+		expect(fetchMock).toHaveBeenCalledTimes(3)
+		const second = JSON.parse((fetchMock.mock.calls[1] as any)[1].body)
+		expect(second.chat_template_kwargs).toBeUndefined()
+		expect(second.reasoning_effort).toBe('medium')
+		const third = JSON.parse((fetchMock.mock.calls[2] as any)[1].body)
+		expect(third.reasoning_effort).toBeUndefined()
+		// remembered: the next call skips the doomed attempts entirely
+		const fetchMock2 = vi.fn(async () => chatOk())
+		vi.stubGlobal('fetch', fetchMock2)
+		await drain(p.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm', thinking: 'medium' }))
+		expect(fetchMock2).toHaveBeenCalledTimes(1)
+		expect(sentBody(fetchMock2).reasoning_effort).toBeUndefined()
+	})
+
+	it('responses: level → reasoning.effort; off → minimal (reasoning models have no true off)', async () => {
+		for (const [thinking, effort] of [
+			['medium', 'medium'],
+			['off', 'minimal'],
+		] as const) {
+			const fetchMock = vi.fn(async () => new Response('data: [DONE]\n\n'))
+			vi.stubGlobal('fetch', fetchMock)
+			const p = new OpenAIResponsesProvider({ id: 'openai', baseUrl: 'http://x' })
+			await drain(p.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm', thinking }))
+			expect(sentBody(fetchMock).reasoning).toEqual({ summary: 'auto', effort })
+		}
+	})
+
+	it('alive(): /v1/models 200 → true, network failure → false (the queued-backend liveness probe)', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => new Response('{}')))
+		const p = new OpenAIChatProvider({ id: 'hetzner', baseUrl: 'http://x' })
+		await expect(p.alive()).resolves.toBe(true)
+		vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED') }))
+		await expect(p.alive()).resolves.toBe(false)
+	})
+})
+
+describe('thinking control — ollama native think', () => {
+	const ndOk = () => new Response('{"done":true,"done_reason":"stop"}\n')
+	const bodyOf = (fetchMock: ReturnType<typeof vi.fn>, i = 0): any => JSON.parse((fetchMock.mock.calls[i] as any)[1].body)
+	const drain = async (it: AsyncIterable<StreamEvent>) => {
+		for await (const _ of it) {
+			/* drain */
+		}
+	}
+
+	it('level rides as think:"low"; off as think:false; omitted knob sends no think field', async () => {
+		const { OllamaProvider } = await import('../src/llm/providers/ollama')
+		for (const [thinking, expected] of [
+			['low', 'low'],
+			['off', false],
+			[undefined, undefined],
+		] as const) {
+			const fetchMock = vi.fn(async () => ndOk())
+			vi.stubGlobal('fetch', fetchMock)
+			const p = new OllamaProvider({ id: 'ollama', baseUrl: 'http://x' })
+			await drain(p.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm', thinking }))
+			expect(bodyOf(fetchMock).think).toEqual(expected)
+		}
+	})
+
+	it('degrades level→boolean on the think-level 400, and remembers', async () => {
+		const { OllamaProvider } = await import('../src/llm/providers/ollama')
+		const responses = [new Response('{"error":"model does not support think level \\"medium\\""}', { status: 400 }), ndOk()]
+		const fetchMock = vi.fn(async () => responses.shift()!)
+		vi.stubGlobal('fetch', fetchMock)
+		const p = new OllamaProvider({ id: 'ollama', baseUrl: 'http://x' })
+		await drain(p.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm', thinking: 'medium' }))
+		expect(fetchMock).toHaveBeenCalledTimes(2)
+		expect(bodyOf(fetchMock, 1).think).toBe(true) // boolean fallback
+		// remembered: next stream sends the boolean immediately
+		const fetchMock2 = vi.fn(async () => ndOk())
+		vi.stubGlobal('fetch', fetchMock2)
+		await drain(p.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm', thinking: 'medium' }))
+		expect(bodyOf(fetchMock2).think).toBe(true)
+	})
+
+	it('drops think entirely for models that do not support thinking at all', async () => {
+		const { OllamaProvider } = await import('../src/llm/providers/ollama')
+		const responses = [new Response('{"error":"registry.ollama.ai/library/m does not support thinking"}', { status: 400 }), ndOk()]
+		const fetchMock = vi.fn(async () => responses.shift()!)
+		vi.stubGlobal('fetch', fetchMock)
+		const p = new OllamaProvider({ id: 'ollama', baseUrl: 'http://x' })
+		await drain(p.stream({ messages: [{ role: 'user', content: 'hi' }], model: 'm', thinking: 'high' }))
+		expect(bodyOf(fetchMock, 1).think).toBeUndefined()
+	})
+})

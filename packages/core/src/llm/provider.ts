@@ -40,7 +40,16 @@ export interface CompletionRequest {
   contextWindow?: number
   /** ADR-038: output-token cap (Ollama num_predict / OpenAI max_tokens). */
   maxOutputTokens?: number
+  /** Reasoning-effort control (TASK-thinking-control). Omit ⇒ the model's default (Qwen3.8: xhigh — measured
+   *  eating 30-45s/turn and most of a small window). Each adapter maps it to its wire: Ollama `think`,
+   *  chat-completions `reasoning_effort` (+ `chat_template_kwargs` on self-hosted), Responses `reasoning.effort`.
+   *  Backends that reject the knob degrade via the learned-quirk pattern — never a hard failure. */
+  thinking?: ThinkingLevel
 }
+
+/** The four user-facing reasoning levels. 'off' maps per-wire (Ollama think:false, chat 'none', Responses
+ *  'minimal' — OpenAI reasoning models can't fully disable). */
+export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high'
 
 /** Token counts reported by the backend for one completion (E1 / ADR-040). Fields are optional because not
  *  every backend reports them (and OpenAI-compat streams only do so via stream_options.include_usage). */

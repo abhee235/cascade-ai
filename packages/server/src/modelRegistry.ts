@@ -20,6 +20,8 @@ export interface EnabledModel {
   topK?: number
   repeatPenalty?: number
   presencePenalty?: number
+  /** TASK-thinking-control: reasoning-effort knob for thinking-capable models. Omit ⇒ model default. */
+  thinking?: 'off' | 'low' | 'medium' | 'high'
   /** ADR-076: custom OpenAI-compatible endpoint (rented vLLM/SGLang/remote Ollama). When set, the switch sends
    *  this baseUrl to createProvider instead of the provider-id default — so a remote GPU is configured entirely
    *  from the Model Manager, no .env edit or restart. */
