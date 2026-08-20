@@ -63,6 +63,55 @@ describe('findEditTarget — the matcher ladder', () => {
 		expect(near.ok).toBe(false)
 		if (!near.ok) expect(near.message).toContain('Line 5')
 	})
+
+	it('near-miss echoes the file snippet so the model can rebuild old_string without a Read', () => {
+		const near = findEditTarget(FILE, 'return a + b\nconsole.log(a)', 'x')
+		expect(near.ok).toBe(false)
+		if (!near.ok) {
+			expect(near.message).toContain('return a + b') // the file's real line, verbatim
+			expect(near.message).toContain('actually reads')
+		}
+	})
+
+	it('rung 3: model DROPPED the blank line the file has — matches, replaced region keeps the file blank', () => {
+		const file = ['function a() {}', '', 'function b() {', '\treturn 1', '}'].join('\n')
+		const t = findEditTarget(file, 'function a() {}\nfunction b() {', 'function a2() {}\nfunction b() {')
+		expect(t.ok).toBe(true)
+		if (t.ok) {
+			expect(t.via).toBe('blanks')
+			expect(t.actual).toBe('function a() {}\n\nfunction b() {') // the FILE's span, its blank included
+		}
+	})
+
+	it('rung 3: model INVENTED a blank line the file lacks — still matches', () => {
+		const file = ['a()', 'b()', 'c()'].join('\n')
+		const t = findEditTarget(file, 'a()\n\nb()', 'a()\nb2()')
+		expect(t.ok).toBe(true)
+		if (t.ok) expect(t.actual).toBe('a()\nb()')
+	})
+
+	it('rung 3 remaps indentation from the paired non-blank file lines', () => {
+		const file = ['\tone()', '', '\ttwo()'].join('\n')
+		const t = findEditTarget(file, '    one()\n    two()', '    one()\n    three()')
+		expect(t.ok).toBe(true)
+		if (t.ok) expect(t.newString).toBe('\tone()\n\tthree()') // file's tabs, not the model's spaces
+	})
+
+	it('rung 3 ambiguity refuses to guess, naming blank-line tolerance', () => {
+		const file = ['x()', '', 'y()', '', 'x()', '', 'y()'].join('\n')
+		const t = findEditTarget(file, 'x()\ny()', 'z()')
+		expect(t.ok).toBe(false)
+		if (!t.ok) {
+			expect(t.reason).toBe('not-unique')
+			expect(t.message).toContain('blank lines')
+		}
+	})
+
+	it('exact ambiguity message teaches the replace_all recovery', () => {
+		const t = findEditTarget('x\nx\n', 'x', 'y')
+		expect(t.ok).toBe(false)
+		if (!t.ok) expect(t.message).toContain('replace_all')
+	})
 })
 
 describe('through the real tools (temp files, freshness-free ctx)', () => {
@@ -94,6 +143,30 @@ describe('through the real tools (temp files, freshness-free ctx)', () => {
 			ctx,
 		)
 		expect(ra.isError).toBe(true) // exact-only for replace_all: 4-space indent does not exist in the file
+	})
+
+	it('Edit: a CRLF file keeps CRLF on disk, and a SECOND edit still passes the freshness guard', async () => {
+		const crlf = FILE.replace(/\n/g, '\r\n')
+		writeFileSync(join(dir, 'c.js'), crlf)
+		const r1 = await EditTool.call({ file_path: 'c.js', old_string: 'return a + b', new_string: 'return a * b' }, ctx)
+		expect(r1.isError).toBeFalsy()
+		const disk1 = readFileSync(join(dir, 'c.js'), 'utf8')
+		expect(disk1).toContain('\r\n') // endings preserved — not flipped wholesale to LF
+		expect(disk1).toContain('return a * b')
+		// Chained edit: the freshness cache (LF-normalized) must agree with the CRLF bytes on disk.
+		const r2 = await EditTool.call({ file_path: 'c.js', old_string: 'return a * b', new_string: 'return a / b' }, ctx)
+		expect(r2.isError).toBeFalsy()
+		expect(readFileSync(join(dir, 'c.js'), 'utf8')).toContain('return a / b\r\n')
+	})
+
+	it('MultiEdit: CRLF preserved through the atomic batch too', async () => {
+		writeFileSync(join(dir, 'd.js'), FILE.replace(/\n/g, '\r\n'))
+		const r = await MultiEditTool.call(
+			{ file_path: 'd.js', edits: [{ old_string: 'return b', new_string: 'return b + 1' }] },
+			ctx,
+		)
+		expect(r.isError).toBeFalsy()
+		expect(readFileSync(join(dir, 'd.js'), 'utf8')).toContain('\treturn b + 1\r\n')
 	})
 
 	it('cleanup', () => rmSync(dir, { recursive: true, force: true }))

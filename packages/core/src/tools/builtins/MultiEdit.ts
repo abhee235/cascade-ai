@@ -16,7 +16,7 @@ import type { Tool } from '../Tool'
 import { lineDiff } from '../../utils/diff'
 import { normalizeText } from '../fileState'
 import { assertWritable, displayPath, FrozenPathError, ProjectPathError, resolveInProject } from '../projectPath'
-import { findEditTarget, readFreshnessError, refreshReadState } from '../editCore'
+import { findEditTarget, readFreshnessError, refreshReadState, restoreLineEndings } from '../editCore'
 
 const editSchema = z.object({
   old_string: z.string().min(1).describe('Exact text to replace — must match the file EXACTLY at this point in the sequence.'),
@@ -50,7 +50,8 @@ export const MultiEditTool: Tool<z.infer<typeof inputSchema>> = {
       throw e
     }
     try {
-      const original = normalizeText(await readFile(path, 'utf8')) // CRLF→LF so the model's \n old_strings match
+      const raw = await readFile(path, 'utf8')
+      const original = normalizeText(raw) // CRLF→LF so the model's \n old_strings match
       const fs = ctx.readFileState
       const stale = await readFreshnessError(fs, path, input.file_path, original)
       if (stale) return { content: stale, isError: true }
@@ -90,8 +91,8 @@ export const MultiEditTool: Tool<z.infer<typeof inputSchema>> = {
 
       if (working === original) return { content: `No change: the edits left ${input.file_path} identical.`, isError: true }
 
-      await writeFile(path, working, 'utf8')
-      await refreshReadState(fs, path, working)
+      await writeFile(path, restoreLineEndings(raw, working), 'utf8') // disk keeps its own CRLF/LF style
+      await refreshReadState(fs, path, working) // cache stays LF-normalized (what matching compares against)
       return {
         content: `Applied ${input.edits.length} edit(s) to ${input.file_path}.`,
         display: { kind: 'fileEdit', path: displayPath(ctx.cwd, path), op: 'edit', diff: lineDiff(original, working) },
