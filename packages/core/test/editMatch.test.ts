@@ -107,10 +107,13 @@ describe('findEditTarget — the matcher ladder', () => {
 		}
 	})
 
-	it('exact ambiguity message teaches the replace_all recovery', () => {
-		const t = findEditTarget('x\nx\n', 'x', 'y')
+	it('exact ambiguity message teaches the replace_all recovery AND names the occurrence lines', () => {
+		const t = findEditTarget('x\ny\nx\n', 'x', 'z')
 		expect(t.ok).toBe(false)
-		if (!t.ok) expect(t.message).toContain('replace_all')
+		if (!t.ok) {
+			expect(t.message).toContain('replace_all')
+			expect(t.message).toContain('lines 1, 3') // DeepSeek Harness detail: say WHERE, so the model can aim its context
+		}
 	})
 })
 

@@ -100,10 +100,16 @@ export function findEditTarget(content: string, oldString: string, newString: st
 	const exactCount = content.split(oldString).length - 1
 	if (exactCount === 1) return { ok: true, actual: oldString, newString, via: 'exact' }
 	if (exactCount > 1) {
+		// Name WHERE each occurrence lives (DeepSeek Harness's str_replace_editor detail): "appears 3×"
+		// alone makes the model guess which neighborhood to add context from; line numbers let it aim.
+		const lines: number[] = []
+		for (let idx = content.indexOf(oldString); idx !== -1 && lines.length < 8; idx = content.indexOf(oldString, idx + 1)) {
+			lines.push(content.slice(0, idx).split('\n').length)
+		}
 		return {
 			ok: false,
 			reason: 'not-unique',
-			message: `old_string appears ${exactCount}× in the file; it must be unique. Include more surrounding context to pin ONE occurrence — or, to change every occurrence, use MultiEdit with replace_all.`,
+			message: `old_string appears ${exactCount}× in the file (lines ${lines.join(', ')}); it must be unique. Include more surrounding context to pin ONE occurrence — or, to change every occurrence, use MultiEdit with replace_all.`,
 		}
 	}
 
@@ -132,7 +138,7 @@ export function findEditTarget(content: string, oldString: string, newString: st
 		return {
 			ok: false,
 			reason: 'not-unique',
-			message: `old_string matches ${starts.length} places when ignoring indentation; it must be unique. Include surrounding context.`,
+			message: `old_string matches ${starts.length} places when ignoring indentation (lines ${starts.slice(0, 8).map((s) => s + 1).join(', ')}); it must be unique. Include surrounding context.`,
 		}
 	}
 
@@ -162,7 +168,7 @@ export function findEditTarget(content: string, oldString: string, newString: st
 		return {
 			ok: false,
 			reason: 'not-unique',
-			message: `old_string matches ${bStarts.length} places when ignoring indentation and blank lines; it must be unique. Include surrounding context.`,
+			message: `old_string matches ${bStarts.length} places when ignoring indentation and blank lines (lines ${bStarts.slice(0, 8).map((k) => nbIdx[k]! + 1).join(', ')}); it must be unique. Include surrounding context.`,
 		}
 	}
 
