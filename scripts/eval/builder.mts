@@ -50,6 +50,10 @@ const { values: args } = parseArgs({
 		// Ops override of the scenario's timeout — a longer leash for a slow-but-honest config (measured:
 		// Q4_K_M at the 16k envelope needs ~3h for 6 rounds) without rewriting the fixture.
 		'timeout-ms': { type: 'string' },
+		// Run every scenario N times (pass-rate cells). Measured need (wave1 vs wave1-v2, 2026-08-23): the
+		// same scenario flipped verdict on consecutive days at BOTH tiers — a single run is a coin flip, so
+		// a matrix cell is only signal as a rate over ≥3 attempts.
+		repeats: { type: 'string', default: '1' },
 		// Survive the launching session closing. Measured TWICE: a background run whose owning shell died
 		// orphaned mid-flight — the runner wedged writing progress dots to the dead stdout pipe BEFORE the
 		// first trace event, while keep-awake held the box up for ~24h. --detach re-spawns the runner as its
@@ -82,6 +86,18 @@ interface Scenario {
 	/** Pin the window (like Tier-1 fixtures): a scenario can FORCE repeated context fills so compaction is
 	 *  exercised many times over a long iterative session (user requirement: 5–6+ fills, every layer seen). */
 	session?: { contextWindow?: number; maxOutputTokens?: number }
+	/** Long-ladder instrumentation: run check.mjs after EVERY round with EVAL_ROUND=<n> (the check asserts
+	 *  only rounds ≤ n) and record a per-round verdict in results.jsonl. This is what turns a multi-day
+	 *  incremental scenario into a DEGRADATION CURVE — where the build broke, not just whether it survived.
+	 *  The check must be round-MONOTONIC: round n's assertions all still hold at n+1 (verify enforces it
+	 *  by running the solution against every round's bar). */
+	checkEachRound?: boolean
+	/** CLOSED-LOOP variant (measured need, fullstack-iq3-32k-v2 2026-08-22: a missing line-items editor
+	 *  stayed ✗ for EIGHT rounds because checkpoint verdicts are runner-side — the model never learns a
+	 *  round failed, so a stuck defect stays stuck). With this flag, a failed checkpoint's tail is appended
+	 *  to the NEXT round's prompt as a system-reminder, mirroring the product's verify/audit feedback gates.
+	 *  Off = pure measurement (what the model does unaided); on = measures SELF-CORRECTION instead. */
+	checkFeedback?: boolean
 }
 
 const allIds = readdirSync(SCENARIOS_DIR).filter((d) => existsSync(join(SCENARIOS_DIR, d, 'scenario.json')))
@@ -103,37 +119,50 @@ function makeWorkdir(id: string): string {
 }
 
 /**
- * Free the dev port between scenarios.
+ * Free the dev port between scenarios — and, for iterative scenarios, the whole VITE RANGE between rounds.
  *
  * Models verify their work by starting a dev server, and they background it: `nohup npm run dev &`. That
  * server OUTLIVES the scenario — session.dispose() ends the agent, not a process the agent detached. Two
  * consecutive matrix runs (2026-08-15) died on this: an orphan from one scenario kept :5173, and the bench
  * went silent right after the turn that spawned it, taking the queued scenarios with it.
  *
+ * The ROUND-scale variant of the same leak (measured 2026-08-22, fullstack ladder): a 12-round session
+ * re-spawns `npm run dev` nearly every round, each new vite finds 5173 taken and auto-increments — 26
+ * pollers were listening on 5173–5198 by round 5, burning CPU against ollama's prefill and teaching the
+ * model port-confusion. So a checkEachRound scenario reaps 5173..5200 at every checkpoint. The app's API
+ * server (:8787) is deliberately NOT reaped between rounds — the model treats it as long-lived state; it
+ * dies with the scenario-end reap.
+ *
  * Killing by PORT is the targeted move — the one thing the model itself is refused, because `taskkill /IM
  * node.exe` (measured, same day) takes down the harness and the user's editor along with the server. Here
  * we know exactly which listener to end.
  */
-function reapDevServer(port = 5173): void {
+function reapDevServer(ports: number | number[] = 5173): void {
+	const wanted = new Set(Array.isArray(ports) ? ports : [ports])
 	try {
 		if (process.platform === 'win32') {
+			// ONE netstat scan for however many ports — a 28-port range at every checkpoint must not mean
+			// 28 process spawns.
 			const out = spawnSync('netstat', ['-ano'], { encoding: 'utf8' }).stdout ?? ''
 			const pids = new Set(
 				out
 					.split('\n')
-					.filter((l) => l.includes(`:${port}`) && l.includes('LISTENING'))
+					.filter((l) => l.includes('LISTENING') && [...wanted].some((p) => l.includes(`:${p} `)))
 					.map((l) => l.trim().split(/\s+/).pop()!)
 					.filter((p) => /^\d+$/.test(p) && p !== '0'),
 			)
 			for (const pid of pids) spawnSync('taskkill', ['/PID', pid, '/T', '/F'], { stdio: 'ignore' })
 		} else {
-			const out = spawnSync('lsof', ['-t', `-i:${port}`], { encoding: 'utf8' }).stdout ?? ''
+			const out = spawnSync('lsof', ['-t', ...[...wanted].map((p) => `-i:${p}`)], { encoding: 'utf8' }).stdout ?? ''
 			for (const pid of out.split('\n').filter(Boolean)) spawnSync('kill', ['-9', pid.trim()], { stdio: 'ignore' })
 		}
 	} catch {
 		/* best effort — a surviving dev server is a slow next scenario, not a broken one */
 	}
 }
+
+/** The vite auto-increment range a long session can sprawl across (5173 + one per orphaned re-spawn). */
+const VITE_RANGE = Array.from({ length: 28 }, (_, i) => 5173 + i)
 
 /**
  * Post-run screenshot (design-overhaul P4 tail): every run leaves a picture for human judgment, pass OR
@@ -184,8 +213,12 @@ async function captureScreenshots(work: string, outDir: string, id: string): Pro
 	}
 }
 
-function runCheck(id: string, work: string): { ok: boolean; output: string } {
-	const res = spawnSync(process.execPath, [join(SCENARIOS_DIR, id, 'check.mjs')], { cwd: work, encoding: 'utf8', timeout: 180_000 })
+function runCheck(id: string, work: string, round?: number, collect = false): { ok: boolean; output: string } {
+	// EVAL_ROUND gates a checkEachRound scenario's assertions to "everything asked so far"; unset = full bar.
+	// EVAL_COLLECT asks the check for ALL failing assertions (the feedback loop needs the full findings
+	// list — single-error feedback measurably induced whack-a-mole, fullstack-v3 2026-08-23).
+	const env = { ...process.env, ...(round === undefined ? {} : { EVAL_ROUND: String(round) }), ...(collect ? { EVAL_COLLECT: '1' } : {}) }
+	const res = spawnSync(process.execPath, [join(SCENARIOS_DIR, id, 'check.mjs')], { cwd: work, encoding: 'utf8', timeout: 300_000, env })
 	return { ok: res.status === 0, output: `${res.stdout ?? ''}${res.stderr ?? ''}` }
 }
 
@@ -207,13 +240,28 @@ if (args.verify) {
 		const solWork = makeWorkdir(id)
 		cpSync(join(SCENARIOS_DIR, id, 'solution'), solWork, { recursive: true })
 		const sol = runCheck(id, solWork)
+		// checkEachRound scenarios: the solution must pass EVERY round's bar, not just the final one —
+		// this is what pins round-MONOTONICITY (a round-n assertion that the finished app violates would
+		// mark healthy late rounds ✗ in a live run and corrupt the degradation curve).
+		const scen: Scenario = JSON.parse(readFileSync(join(SCENARIOS_DIR, id, 'scenario.json'), 'utf8'))
+		let roundBad: { n: number; output: string } | undefined
+		if (sol.ok && scen.checkEachRound && scen.prompts) {
+			for (let n = 1; n <= scen.prompts.length; n++) {
+				const r = runCheck(id, solWork, n)
+				if (!r.ok) {
+					roundBad = { n, output: r.output }
+					break
+				}
+			}
+		}
 		cleanup(solWork)
-		const ok = !seed.ok && sol.ok
+		const ok = !seed.ok && sol.ok && !roundBad
 		if (!ok) {
 			bad++
-			console.error(`--- ${id}: ${seed.ok ? 'seed unexpectedly PASSED' : 'solution FAILED'} ---\n${(seed.ok ? seed.output : sol.output).slice(-1200)}`)
+			const why = seed.ok ? 'seed unexpectedly PASSED' : roundBad ? `solution FAILS at round ${roundBad.n} bar` : 'solution FAILED'
+			console.error(`--- ${id}: ${why} ---\n${(seed.ok ? seed.output : (roundBad?.output ?? sol.output)).slice(-1200)}`)
 		}
-		console.log(`${id}: seed-fails ${!seed.ok ? '✅' : '❌'} · solution-passes ${sol.ok ? '✅' : '❌'}`)
+		console.log(`${id}: seed-fails ${!seed.ok ? '✅' : '❌'} · solution-passes ${sol.ok ? '✅' : '❌'}${scen.checkEachRound && scen.prompts ? ` · all-round-bars ${!sol.ok ? '(skipped)' : roundBad ? `❌ (r${roundBad.n})` : '✅'}` : ''}`)
 	}
 	console.log(bad === 0 ? `All ${wanted.length} scenarios sound.` : `${bad}/${wanted.length} VIOLATE the invariant.`)
 	process.exit(bad === 0 ? 0 : 1)
@@ -263,11 +311,16 @@ console.log(`builder bench "${label}" — model=${args.model} scenarios=${wanted
 // keepAwake self-reaps on process exit; release() is called explicitly after the run loop below.
 const awake = keepAwake()
 
+const repeats = Math.max(1, Number(args.repeats) || 1)
 for (const id of wanted) {
+for (let attempt = 1; attempt <= repeats; attempt++) {
+	// Attempt-scoped identity: with repeats>1 every artifact (trace, planner trace, screenshots, row)
+	// carries `-aN`, so attempts never overwrite each other.
+	const runId = repeats > 1 ? `${id}-a${attempt}` : id
 	const scenario: Scenario = JSON.parse(readFileSync(join(SCENARIOS_DIR, id, 'scenario.json'), 'utf8'))
 	const work = makeWorkdir(id)
-	const tracePath = join(runDir, 'traces', `${id}.jsonl`)
-	process.stdout.write(`▶ ${id} `)
+	const tracePath = join(runDir, 'traces', `${runId}.jsonl`)
+	process.stdout.write(`▶ ${runId} `)
 
 	const nativeOptions = {
 		...(args['ollama-options'] ? JSON.parse(args['ollama-options']) : {}),
@@ -323,6 +376,7 @@ for (const id of wanted) {
 	})
 	const t0 = Date.now()
 	let timedOut = false
+	const rounds: { n: number; ok: boolean; ms: number; note?: string }[] = []
 	let stage: CascadeSession | undefined
 	const timer = setTimeout(() => {
 		timedOut = true
@@ -343,7 +397,7 @@ for (const id of wanted) {
 				provider,
 				model: args.model!,
 				skillDirs,
-				tracer: otel ? fanout(new JsonlTracer(join(runDir, 'traces', `${id}-planner.jsonl`)), otel) : new JsonlTracer(join(runDir, 'traces', `${id}-planner.jsonl`)),
+				tracer: otel ? fanout(new JsonlTracer(join(runDir, 'traces', `${runId}-planner.jsonl`)), otel) : new JsonlTracer(join(runDir, 'traces', `${runId}-planner.jsonl`)),
 				contextWindow: args['context-window'] ? Number(args['context-window']) : scenario.session?.contextWindow,
 				maxOutputTokens: scenario.session?.maxOutputTokens,
 			})
@@ -381,13 +435,41 @@ for (const id of wanted) {
 				await planner.dispose().catch(() => {})
 			}
 		}
+		let pendingFeedback: string | undefined
 		for (let i = 0; i < prompts.length; i++) {
 			if (timedOut) break
 			if (i > 0) process.stdout.write('|') // stage separator: one bar per follow-up prompt
-			for await (const ev of session.submit(prompts[i]!)) {
+			const roundStart = Date.now()
+			// checkFeedback: a failed checkpoint rides into the next round as a reminder (see the flag doc).
+			const roundPrompt =
+				pendingFeedback && scenario.checkFeedback
+					? `${prompts[i]!}\n\n<system-reminder>The automated checkpoint after your PREVIOUS round FAILED:\n${pendingFeedback}\nFix that first — it stays broken until you do — then complete this round's work. The checkpoint re-runs after every round.</system-reminder>`
+					: prompts[i]!
+			for await (const ev of session.submit(roundPrompt)) {
 				if (ev.type === 'toolStart') process.stdout.write('.')
 				else if (ev.type === 'question') session.respondQuestion(ev.id, Object.fromEntries(ev.questions.map((q) => [q.question, q.options[0]?.label ?? 'Other'])))
 				else if (ev.type === 'permission') session.respondPermission(ev.id, 'allow')
+			}
+			if (scenario.checkEachRound && !timedOut) {
+				// Reap the round's vite orphans BEFORE the checkpoint (see reapDevServer's round-scale note).
+				reapDevServer(VITE_RANGE)
+				// Checkpoint: the round's bar, recorded even when later rounds will fail — the whole point of
+				// a multi-day ladder is knowing WHICH increment broke (and whether an earlier one regressed).
+				const rc = runCheck(id, work, i + 1, scenario.checkFeedback)
+				rounds.push({ n: i + 1, ok: rc.ok, ms: Date.now() - roundStart, ...(rc.ok ? {} : { note: rc.output.split('\n').filter(Boolean).slice(-2).join(' | ').slice(0, 200) }) })
+				if (!rc.ok) {
+					// The 200-char note is for the results row; the FULL output is forensic evidence — a check
+					// that crashes must never be undiagnosable because its stack was truncated to a footer
+					// (measured: v4's r3–r11 notes were all "| Node.js v24.14.1" and nothing else survived).
+					mkdirSync(join(runDir, 'checks'), { recursive: true })
+					writeFileSync(join(runDir, 'checks', `${runId}-r${i + 1}.log`), rc.output)
+				}
+				// Feedback = the check's CUMULATIVE findings block, minus instrument-crash lines (a crashed
+				// check is our fault, never presented to the model as its defect).
+				const block = rc.output.match(/FAILING \(\d+\):[\s\S]*$/)?.[0] ?? rc.output.split('\n').filter(Boolean).slice(-3).join('\n')
+				const findings = block.split('\n').filter((l) => !/instrument crashed/i.test(l))
+				pendingFeedback = rc.ok || findings.filter((l) => l.startsWith('- ')).length === 0 ? undefined : findings.join('\n').slice(0, 900)
+				process.stdout.write(rc.ok ? '✓' : '✗')
 			}
 		}
 	} catch {
@@ -395,18 +477,19 @@ for (const id of wanted) {
 	} finally {
 		clearTimeout(timer)
 		await session.dispose().catch(() => {})
-		reapDevServer() // …and anything the model left listening (see below)
+		reapDevServer([...VITE_RANGE, 8787]) // …and anything the model left listening — incl. the app's API server (scenario-lifetime state; it ends here)
 		await otel?.shutdown().catch(() => {}) // flush spans before the next scenario / exit
 	}
 	const wallMs = Date.now() - t0
 	const check = runCheck(id, work)
-	await captureScreenshots(work, join(runDir, 'shots'), id) // best-effort, pass or fail — never the verdict
+	await captureScreenshots(work, join(runDir, 'shots'), runId) // best-effort, pass or fail — never the verdict
 	if (args.keep) console.log(`\n   workdir kept for replay → ${work}`)
 	else cleanup(work)
 
-	const row = { ts: new Date().toISOString(), label, model: args.model, scenario: id, solved: check.ok, timedOut, wallMs, traceFile: `${id}.jsonl`, ...(args.keep ? { workdir: work } : {}) }
+	const row = { ts: new Date().toISOString(), label, model: args.model, scenario: id, ...(repeats > 1 ? { attempt } : {}), solved: check.ok, timedOut, wallMs, traceFile: `${runId}.jsonl`, ...(rounds.length ? { rounds } : {}), ...(args.keep ? { workdir: work } : {}) }
 	appendFileSync(join(runDir, 'results.jsonl'), `${JSON.stringify(row)}\n`)
 	console.log(` ${check.ok ? '✅' : timedOut ? '⏱ timeout' : '❌'}  ${Math.round(wallMs / 1000)}s${check.ok ? '' : `\n   ${check.output.split('\n').filter(Boolean).slice(-2).join(' | ').slice(0, 200)}`}`)
+}
 }
 awake.release() // let the machine sleep again
 console.log(`\nresults → ${runDir}`)
