@@ -18,6 +18,7 @@ cascade-workspace/
 
 # Eval run outputs (PLAN-eval): per-run results + traces; fixtures under eval/tasks ARE committed
 eval/runs/
+eval/design-review/
 
 # Tier-2 external benchmarks (PLAN-eval): cloned suites + generated tasks + shared deps — never committed
 eval/external/
