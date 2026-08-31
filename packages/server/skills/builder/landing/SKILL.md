@@ -22,10 +22,14 @@ and it also breaks restyling, because only blocks follow the preset.
 <Footer>                                   brand · 3 link columns · fineprint
 ```
 
-The **two-tone headline** is the current idiom — put the second clause in muted:
+The **two-tone headline** is the current idiom — put the second clause in muted — and the hero ALWAYS
+carries real imagery (`media` below): a text-only hero fails the design lint, every time:
 
 ```tsx
-headline={<>Ship your pipeline, <span className="text-muted-foreground">not your weekend.</span></>}
+<Hero
+  headline={<>Ship your pipeline, <span className="text-muted-foreground">not your weekend.</span></>}
+  media={<ArtImage kind="banner" seed="hero" />}   // or photo('workspace') — never omit, never an emoji
+/>
 ```
 
 All FOUR variants exist as working pages — `Skill {name: "landing", file: "reference/pages.md"}` is
@@ -63,6 +67,8 @@ zero assets). Any grid of distinct subjects: `<Photo web="…" seed={item.id}>` 
 - [ ] Bands present in order: NavBar → Hero → (LogoStrip) → BentoGrid or FeatureGrid → PricingTable (if
       priced) → Testimonial → FAQ → CTASection → Footer. **≥5** bands total on a full landing page.
 - [ ] Headline ≤ 8 words and two-tone; subcopy is ONE sentence.
+- [ ] The hero carries REAL imagery — `<ArtImage>` or `photo()`/`photoFor()` — and any grid of distinct
+      subjects uses `<Photo web="…" seed={item.id}>`. A page with zero imagery fails the design lint.
 - [ ] Exactly ONE primary `<Button>` above the fold (everything else `variant="outline"`/`"ghost"`).
 - [ ] Pricing: 2–4 tiers, exactly one `highlighted`, each with its own action.
 - [ ] Zero lorem, zero placeholder names, zero dead buttons.
