@@ -6,7 +6,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { runAgentLoop, type LoopDeps } from '../src/agent/agentLoop'
-import { foldVerifyState, isFilteredVerify, isVerifyCommand, resolveCheckCommand } from '../src/agent/verifyGate'
+import { z } from 'zod'
+import { createRegistry, registryOf } from '../src/tools/toolRegistry'
+import { STALLED_AUDIT_TURNS, foldVerifyState, isFilteredVerify, isVerifyCommand, resolveCheckCommand } from '../src/agent/verifyGate'
 import type { Message } from '../src/protocol'
 import { createFakeProvider, textDelta, toolUse, done, type FakeProvider } from './fakeProvider'
 
@@ -210,5 +212,136 @@ describe('verify gate — pure helpers', () => {
 		writeFileSync(join(placeholder, 'package.json'), JSON.stringify({ scripts: { test: 'echo "Error: no test specified" && exit 1' } }))
 		expect(resolveCheckCommand(placeholder)).toBeUndefined()
 		expect(resolveCheckCommand(mkdtempSync(join(tmpdir(), 'vres-')))).toBeUndefined() // no package.json
+	})
+})
+
+describe('run-before-done gate (design-overhaul P1, generalized) — the contract rides the TOOL', () => {
+	// A minimal registry tool that declares mustRunBeforeDone — how a frontend gates ANY tool with zero
+	// core edits and zero session options (the reviewed per-tool name-knob alternative did not scale).
+	const auditFake = {
+		name: 'TemplateAudit',
+		description: 'fake audit',
+		inputSchema: z.object({}),
+		activitySummary: () => 'auditing',
+		isReadOnly: () => true,
+		isConcurrencySafe: () => true,
+		mustRunBeforeDone: true,
+		call: async () => ({ content: 'HARD residue (1) — fix it', isError: true }),
+	} as unknown as import('../src/tools/Tool').Tool
+	const withAudit = () => registryOf(() => [...createRegistry().list(), auditFake])
+
+	it('foldRunBeforeDone: no declarers ⇒ always clean; edits re-arm ALL declarers; any call clears its name (even a red one)', async () => {
+		const { foldRunBeforeDone } = await import('../src/agent/verifyGate')
+		const write = { id: 'w', name: 'Write', input: {} }
+		const ok = [{ type: 'tool_result' as const, tool_use_id: 'w', content: 'ok' }]
+		expect(foldRunBeforeDone(new Set(), [], [write], ok).size).toBe(0) // nothing declared ⇒ inert
+		const armed = foldRunBeforeDone(new Set(), ['TemplateAudit'], [write], ok)
+		expect([...armed]).toEqual(['TemplateAudit'])
+		const failedWrite = [{ type: 'tool_result' as const, tool_use_id: 'w', content: 'no', isError: true }]
+		expect(foldRunBeforeDone(new Set(), ['TemplateAudit'], [write], failedWrite).size).toBe(0) // failed edit ⇒ nothing to audit
+		const audit = { id: 'a', name: 'TemplateAudit', input: {} }
+		const red = [{ type: 'tool_result' as const, tool_use_id: 'a', content: 'HARD residue', isError: true }]
+		expect(foldRunBeforeDone(armed, ['TemplateAudit'], [audit], red).size).toBe(0) // a RED audit still counts — its report drives the next edit
+	})
+
+	it('through the loop: unaudited terminal → ONE nudge naming the tool, then accepted', async () => {
+		const provider = createFakeProvider([
+			[toolUse('w1', 'Write', { file_path: 'out.txt', content: 'hi' }), done('tool_use')],
+			[toolUse('b1', 'Bash', { command: 'node --test' }), done('tool_use')], // verify gate satisfied — isolates this gate
+			[textDelta('Done!'), done('end_turn')], // terminal: audit pending → nudge
+			[textDelta('Still done.'), done('end_turn')], // second terminal accepted (one-nudge budget)
+		])
+		const messages: Message[] = [{ role: 'user', content: 'build' }]
+		await drain(runAgentLoop(messages, deps(provider, { registry: withAudit() })))
+		expect(provider.calls.length).toBe(4)
+		expect(historyText(messages)).toContain('never called the TemplateAudit tool')
+	})
+
+	it('MID-FLIGHT: edits for N turns without the declared tool ⇒ nudged BEFORE the terminal', async () => {
+		// Measured (qwen3.5:9b, 2026-08-15): three of four category builds wrote their components and never
+		// rewired src/App.tsx, so the "finished" app rendered the starter scaffold — and TemplateAudit was
+		// called ZERO times in every one, because the run died on budget instead of stopping. A gate you only
+		// reach by finishing cannot help a model that never finishes.
+		const turns = STALLED_AUDIT_TURNS + 2
+		const provider = createFakeProvider([
+			[toolUse('w0', 'Write', { file_path: 'a.tsx', content: 'x' }), done('tool_use')],
+			[toolUse('b0', 'Bash', { command: 'node --test' }), done('tool_use')], // verify gate satisfied — isolates THIS nudge
+			...Array.from({ length: turns }, (_, i) => [toolUse(`w${i + 1}`, 'Write', { file_path: `c${i}.tsx`, content: 'x' }), done('tool_use')] as const),
+			[textDelta('Done.'), done('end_turn')],
+			[textDelta('Done.'), done('end_turn')],
+		])
+		const messages: Message[] = [{ role: 'user', content: 'build' }]
+		await drain(runAgentLoop(messages, deps(provider, { registry: withAudit(), maxTurns: turns + 6 })))
+		const text = historyText(messages)
+		expect(text).toContain(`editing for ${STALLED_AUDIT_TURNS} turns without calling TemplateAudit`)
+		// It must name the failure the model cannot see: a green build is not a rendering app.
+		expect(text).toContain('not reachable yet')
+		// ONCE per submit — a reminder repeated every turn becomes noise the model learns to skip.
+		expect(text.split('editing for').length - 1).toBe(1)
+	})
+
+	it('MID-FLIGHT: calling the tool keeps it quiet — the nudge answers a real state, not a turn count', async () => {
+		const provider = createFakeProvider([
+			[toolUse('w0', 'Write', { file_path: 'a.tsx', content: 'x' }), done('tool_use')],
+			[toolUse('b0', 'Bash', { command: 'node --test' }), done('tool_use')],
+			// Audits as it goes, so the pending set keeps clearing and the counter never reaches the threshold.
+			...Array.from({ length: STALLED_AUDIT_TURNS + 2 }, (_, i) =>
+				i % 2 === 0
+					? ([toolUse(`w${i + 1}`, 'Write', { file_path: `c${i}.tsx`, content: 'x' }), done('tool_use')] as const)
+					: ([toolUse(`a${i + 1}`, 'TemplateAudit', {}), done('tool_use')] as const),
+			),
+			[textDelta('Done.'), done('end_turn')],
+			[textDelta('Done.'), done('end_turn')],
+		])
+		const messages: Message[] = [{ role: 'user', content: 'build' }]
+		await drain(runAgentLoop(messages, deps(provider, { registry: withAudit(), maxTurns: STALLED_AUDIT_TURNS + 8 })))
+		expect(historyText(messages)).not.toContain('turns without calling')
+	})
+
+	it('through the loop: running the declared tool before the terminal ⇒ no nudge', async () => {
+		const provider = createFakeProvider([
+			[toolUse('w1', 'Write', { file_path: 'out.txt', content: 'hi' }), done('tool_use')],
+			[toolUse('b1', 'Bash', { command: 'node --test' }), done('tool_use')],
+			[toolUse('a1', 'TemplateAudit', {}), done('tool_use')], // the audit runs (red — still counts)
+			[textDelta('Done!'), done('end_turn')],
+		])
+		const messages: Message[] = [{ role: 'user', content: 'build' }]
+		await drain(runAgentLoop(messages, deps(provider, { registry: withAudit() })))
+		expect(provider.calls.length).toBe(4)
+		expect(historyText(messages)).not.toContain('never called the TemplateAudit tool')
+	})
+
+	it('no declarer in the registry ⇒ byte-identical behavior (no nudge ever)', async () => {
+		const provider = createFakeProvider([
+			[toolUse('w1', 'Write', { file_path: 'out.txt', content: 'hi' }), done('tool_use')],
+			[toolUse('b1', 'Bash', { command: 'node --test' }), done('tool_use')],
+			[textDelta('Done!'), done('end_turn')],
+		])
+		const messages: Message[] = [{ role: 'user', content: 'build' }]
+		await drain(runAgentLoop(messages, deps(provider)))
+		expect(provider.calls.length).toBe(3)
+		expect(historyText(messages)).not.toContain('never called the')
+	})
+})
+
+describe('Stop hook (ADR-036 extension) — the user\'s own terminal policy, no core flag required', () => {
+	it('a hook exiting 2 blocks ONE terminal with its stderr as the reason; the next terminal is accepted', async () => {
+		const provider = createFakeProvider([
+			[textDelta('Done.'), done('end_turn')], // terminal 1: hook blocks
+			[textDelta('Addressed; done.'), done('end_turn')], // terminal 2: accepted (one evaluation per submit)
+		])
+		const hooks = { Stop: [{ hooks: [{ type: 'command' as const, command: `node -e "console.error('finish the CHANGELOG first'); process.exit(2)"` }] }] }
+		const messages: Message[] = [{ role: 'user', content: 'wrap up' }]
+		await drain(runAgentLoop(messages, deps(provider, { hooks: hooks as never })))
+		expect(provider.calls.length).toBe(2)
+		expect(historyText(messages)).toContain('finish the CHANGELOG first')
+	})
+
+	it('a hook exiting 0 does not block, and is not re-asked', async () => {
+		const provider = createFakeProvider([[textDelta('Done.'), done('end_turn')]])
+		const hooks = { Stop: [{ hooks: [{ type: 'command' as const, command: 'node -e "process.exit(0)"' }] }] }
+		const messages: Message[] = [{ role: 'user', content: 'wrap up' }]
+		await drain(runAgentLoop(messages, deps(provider, { hooks: hooks as never })))
+		expect(provider.calls.length).toBe(1)
 	})
 })

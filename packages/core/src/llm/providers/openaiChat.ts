@@ -124,6 +124,11 @@ export class OpenAIChatProvider implements ModelProvider {
   // history to one call at the wire (toOpenAIMessages) AND emit only the first tool_use per turn (below).
   private readonly forceSingleTool = new Set<string>()
   private static readonly SINGLE_TOOL_500 = /only supports single tool-calls/i
+  // TASK-thinking-control learned quirks: strict validators reject the knob fields as unknown params.
+  // Degrade once on the specific 400 and remember — kwargs first (rarer support), then the knob entirely.
+  private readonly noTemplateKwargs = new Set<string>()
+  private readonly noThinkingParam = new Set<string>()
+  private static readonly UNKNOWN_PARAM_400 = /unrecognized|unknown|unexpected|extra (field|inputs|forbidden)|not (a )?permitted|invalid parameter/i
 
   // `cfg` and `headers()` are protected so the subclass adapters (Ollama native, OpenAI Responses) can
   // build their own requests against the same base URL + auth.
@@ -200,6 +205,17 @@ export class OpenAIChatProvider implements ModelProvider {
       if (this.cfg.id === 'openai') body.max_completion_tokens = cap
       else body.max_tokens = cap
     }
+    // TASK-thinking-control: the user's reasoning-effort knob. `reasoning_effort` is the closest thing the
+    // chat wire has to a standard (OpenAI, vLLM — Hetzner honors it, measured 2026-08-19 — OpenRouter);
+    // self-hosted template-driven backends (llama-server, vLLM) additionally take chat_template_kwargs,
+    // which the Qwen3.8 template reads (enable_thinking / reasoning_effort — it aliases level names). Both
+    // ride the learned-quirk degrade in postChat: a backend that 400s the knob loses it, never the turn.
+    if (req.thinking !== undefined && !this.noThinkingParam.has(req.model)) {
+      body.reasoning_effort = req.thinking === 'off' ? 'none' : req.thinking
+      if (!HOSTED_PROVIDER_IDS.has(this.cfg.id) && !this.noTemplateKwargs.has(req.model)) {
+        body.chat_template_kwargs = req.thinking === 'off' ? { enable_thinking: false } : { reasoning_effort: req.thinking }
+      }
+    }
     // Learned (see forceReasoningNone): this model needs reasoning OFF to accept tools on this endpoint.
     if (this.forceReasoningNone.has(req.model)) body.reasoning_effort = 'none'
     const tools = toOpenAITools(req.tools)
@@ -220,7 +236,21 @@ export class OpenAIChatProvider implements ModelProvider {
   private async postChat(req: CompletionRequest, stream: boolean, signal?: AbortSignal): Promise<Response> {
     const url = `${this.cfg.baseUrl}/v1/chat/completions`
     const send = () => fetch(url, { method: 'POST', headers: this.headers(), body: this.body(req, stream), signal })
-    const res = await send()
+    let res = await send()
+    // TASK-thinking-control degrade — checked FIRST and allowed to chain into the retries below, because a
+    // strict validator reports one unknown field per response: drop chat_template_kwargs, then the knob.
+    if (res.status === 400 && req.thinking !== undefined && !this.noThinkingParam.has(req.model)) {
+      let b = await res.clone().text().catch(() => '')
+      if (/chat_template_kwargs/i.test(b)) {
+        this.noTemplateKwargs.add(req.model)
+        res = await send()
+        if (res.status === 400) b = await res.clone().text().catch(() => '') // the retry may name the NEXT unknown field
+      }
+      if (res.status === 400 && /reasoning_effort/i.test(b) && OpenAIChatProvider.UNKNOWN_PARAM_400.test(b)) {
+        this.noThinkingParam.add(req.model)
+        res = await send()
+      }
+    }
     if (!res.ok && req.tools?.length) {
       const b = await res.clone().text().catch(() => '') // clone so the caller's error path can still read it
       if (res.status === 400 && !this.forceReasoningNone.has(req.model) && OpenAIChatProvider.REASONING_TOOLS_400.test(b)) {
@@ -233,6 +263,21 @@ export class OpenAIChatProvider implements ModelProvider {
       }
     }
     return res
+  }
+
+  /** ADR-061 liveness for HOSTED/OpenAI-compat endpoints (was Ollama-only): "is the backend up while the
+   *  chat stream is silent?" — measured against Hetzner's free tier, where /v1/models answers in 0.5s while
+   *  a chat request queues for minutes. With this, the pre-first-token watchdog waits out a deep queue
+   *  (up to firstEventMaxMs) instead of aborting at stallTimeoutMs and re-queueing at the BACK — each such
+   *  retry also burned rate-limit budget. Mid-stream stalls are unaffected (never extended). */
+  async alive(signal?: AbortSignal): Promise<boolean> {
+    try {
+      const timeout = AbortSignal.timeout(10_000)
+      const res = await fetch(`${this.cfg.baseUrl}/v1/models`, { headers: this.headers(), signal: signal ? AbortSignal.any([signal, timeout]) : timeout })
+      return res.ok
+    } catch {
+      return false
+    }
   }
 
   async complete(req: CompletionRequest, signal?: AbortSignal): Promise<CompletionResult> {
@@ -298,6 +343,7 @@ export class OpenAIChatProvider implements ModelProvider {
     let fullText = '' // ADR-047: accumulated so the prose fallback can rescue text-channel tool calls at end
     // Tool calls stream as fragments of a JSON string, keyed by index — accumulate, parse ONCE at end.
     const toolCalls = new Map<number, { id: string; name: string; args: string }>()
+    const announced = new Set<number>() // indexes whose tool_call_start already fired (once per call)
 
     while (true) {
       const { done, value } = await reader.read()
@@ -335,6 +381,12 @@ export class OpenAIChatProvider implements ModelProvider {
             if (tc.function?.name) cur.name += tc.function.name
             if (tc.function?.arguments) cur.args += tc.function.arguments
             toolCalls.set(idx, cur)
+            // Announce the boundary ONCE per call, as soon as the name is known: everything after this is
+            // silent argument generation, and the UI needs the transition to be an event, not a guess.
+            if (cur.name && !announced.has(idx)) {
+              announced.add(idx)
+              yield { type: 'tool_call_start', name: cur.name }
+            }
           }
         }
         if (choice?.finish_reason === 'length') stopReason = 'max_tokens'

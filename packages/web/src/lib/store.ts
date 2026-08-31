@@ -19,7 +19,7 @@ const TRACE_PAGE = 50
 /** Ceiling on the poll's refresh window, so paging deep doesn't turn a 3s poll into a full table scan. */
 const TRACE_MAX = 500
 
-const TURN_EVENTS = new Set(['step', 'status', 'recovering', 'thinking_delta', 'text_delta', 'toolStart', 'toolProgress', 'toolResult', 'message', 'memory', 'question', 'compacted', 'context', 'turnDone', 'error'])
+const TURN_EVENTS = new Set(['step', 'status', 'recovering', 'thinking_delta', 'text_delta', 'toolPending', 'toolStart', 'toolProgress', 'toolResult', 'message', 'memory', 'question', 'compacted', 'context', 'turnDone', 'error'])
 
 // Label for the `compacted` event's layer kind (ADR-039). Mirrors core's compactionKindLabel; inlined so the
 // browser bundle doesn't pull in the node-side @cascade/core runtime just for a string.
@@ -105,6 +105,9 @@ interface UiState {
    *  stepStartedAt folded the whole prefill into it ("Thinking… 18s" on 8s of actual thought, corrected only
    *  when the committed card rendered). */
   thinkStartedAt: number | null
+  /** Tool name the model is currently generating arguments for (toolPending → cleared on toolStart/message).
+   *  Lets the working row say "Preparing Write…" from a real event instead of inferring from silence. */
+  pendingTool: string | null
   // multiple chats per project (M11), server-persisted; the list + which is active
   chats: ChatMeta[]
   activeChatId: string | null
@@ -261,19 +264,10 @@ export const useStore = create<UiState>((set, get) => {
   let thinkLast: number | null = null
 
   // Commit whatever is still in the live streaming buffer as a real transcript item. Used when a turn ends
-  // WITHOUT a final `message` (user hit Stop, server abort): previously this content was silently discarded
+  // WITHOUT a final `message` (user hit Stop, server abort), and at the toolPending boundary (the model
+  // started a tool call → the thought is over). Previously this content was silently discarded
   // (`streaming: null`), so an interrupted thinking block just vanished from the transcript.
-  // Quiet-debounce for the early thought-commit: armed on every thinking token, so it can only ever fire
-  // 2.5s after the TRULY last one — on the same task queue as the event handlers. (The first version lived in
-  // a ChatPanel useEffect: render-clock timing raced the event clock and could chop a resumed burst mid-stream,
-  // landing the thought card in the wrong place. Single writer, single clock — the store.)
-  let quietTimer: ReturnType<typeof setTimeout> | null = null
-  const clearQuiet = (): void => {
-    if (quietTimer !== null) { clearTimeout(quietTimer); quietTimer = null }
-  }
-
   const commitStreaming = (): void => {
-    clearQuiet()
     flushStream()
     const st = get().streaming
     if (!st || (!st.text && !st.thinking)) return
@@ -394,6 +388,7 @@ export const useStore = create<UiState>((set, get) => {
     sawTokens: false,
     lastTokenAt: null,
     thinkStartedAt: null,
+    pendingTool: null,
     chats: [],
     activeChatId: null,
     fileTree: [],
@@ -448,22 +443,21 @@ export const useStore = create<UiState>((set, get) => {
           set({
             turnActivity: e.phase ? { projectId: e.projectId, chatId: e.chatId, phase: e.phase } : null,
             busy: !!e.phase, // block-until-free: any active turn locks the composer everywhere
-            ...(e.phase ? {} : { streaming: null, status: null, stepStartedAt: null, sawTokens: false }),
+            ...(e.phase ? {} : { streaming: null, status: null, stepStartedAt: null, sawTokens: false, pendingTool: null }),
           })
           break
         case 'step':
           // Core's explicit step-start (the dead-air contract): prefill begins NOW — restart the
           // per-step timer and drop back to "reading input" until the first delta. NEVER touches
           // `busy`: only turnDone may declare the work finished.
-          clearQuiet()
-          set({ stepStartedAt: Date.now(), sawTokens: false, recovering: null, thinkStartedAt: null })
+          set({ stepStartedAt: Date.now(), sawTokens: false, recovering: null, thinkStartedAt: null, pendingTool: null })
           break
         case 'status':
           set({ status: e.text, recovering: null })
           break
         case 'recovering':
           flushStream()
-          set({ streaming: null, status: null, recovering: { attempt: e.attempt, reason: e.reason } })
+          set({ streaming: null, status: null, pendingTool: null, recovering: { attempt: e.attempt, reason: e.reason } })
           break
         case 'thinking_delta': {
           const firstOfBurst = thinkStart === null
@@ -472,18 +466,26 @@ export const useStore = create<UiState>((set, get) => {
           // first token → past prompt eval, now generating; the burst start feeds the live timer (NOT stepStartedAt — that includes prefill)
           set({ recovering: null, sawTokens: true, lastTokenAt: thinkLast, ...(firstOfBurst ? { thinkStartedAt: thinkStart } : {}) })
           thinkOpt.push(e.thinking)
-          // Re-armed on EVERY token: fires only 2.5s after the last one → commit the thought block right when
-          // thinking ends (not 10-20s later when `message` finally arrives after silent tool-args generation).
-          clearQuiet()
-          quietTimer = setTimeout(() => {
-            quietTimer = null
-            const st = get().streaming
-            if (st?.thinking && !st.text) commitStreaming()
-          }, 2500)
+          // NO quiet-commit here (removed 2026-08-19). The 2.5s timer existed to end the thought card when
+          // silent tool-args generation began — but on slow remote streams (measured: Hetzner free tier,
+          // >2.5s gaps INSIDE one thought) it shredded a single reasoning stream into a stack of
+          // "Thought for 1s" cards. The boundary is now a real event (`toolPending`, below): segment by
+          // structure, never by clock. Ollama's native wire (no such event) settles
+          // the card on toolStart/message instead — a beat later, never fragmented.
+          break
+        }
+        case 'toolPending': {
+          // The model started emitting a tool call: thinking is OVER, arguments are generating silently.
+          // Settle the thought card now and let the status row say what is being prepared, by name.
+          flushStream() // the optimizer may still hold the tail of the thought — flush so the guard sees it
+          const st = get().streaming
+          // Only when the step is thinking-only: with answer text mid-stream, an early commit would make the
+          // step's `message` event append the same text a second time (its dedup covers thinking, not text).
+          if (st?.thinking && !st.text) commitStreaming()
+          set({ pendingTool: e.name })
           break
         }
         case 'text_delta':
-          clearQuiet() // prose answer streaming — the step will end with `message`; never early-commit mid-answer
           set({ recovering: null, sawTokens: true, lastTokenAt: Date.now() })
           textOpt.push(e.text)
           break
@@ -492,6 +494,7 @@ export const useStore = create<UiState>((set, get) => {
           set((s) => ({
             streaming: null,
             recovering: null,
+            pendingTool: null,
             items: [...s.items, { kind: 'tool', id: e.id, name: e.name, summary: e.summary, status: 'running' }],
           }))
           break
@@ -520,14 +523,14 @@ export const useStore = create<UiState>((set, get) => {
           thinkStart = null
           thinkLast = null
           // (thinkStartedAt cleared in the set()s below via streaming reset paths; explicit here for safety)
-          set({ thinkStartedAt: null })
+          set({ thinkStartedAt: null, pendingTool: null })
           set((s) => {
             // Merge consecutive assistant steps (no tool/user turn between) into one flowing block, so a
             // multi-step turn reads as a single response — like v0. A tool card between steps breaks the run.
             const last = s.items[s.items.length - 1]
             if (last && last.kind === 'assistant') {
-              // Early-commit dedup: if this message's thinking was already committed verbatim when the stream
-              // went quiet (commitStreamingEarly), keep the committed copy — don't append it a second time.
+              // Early-commit dedup: if this message's thinking was already committed verbatim at the
+              // toolPending boundary, keep the committed copy — don't append it a second time.
               const dupThinking = !!last.thinking && !!thinking && last.thinking.trim() === thinking.trim()
               const merged: Item = {
                 kind: 'assistant',
@@ -563,7 +566,7 @@ export const useStore = create<UiState>((set, get) => {
           // Nothing can still be running once the turn is over. Without this a tool whose result never
           // arrived spins forever and the turn looks stuck while it is actually finished — measured with
           // `start /b cmd /c "npm run dev"`, where the detached child kept the pipe open so no result came.
-          set((s) => ({ status: null, recovering: null, busy: false, stepStartedAt: null, sawTokens: false, thinkStartedAt: null, items: closeOpenTools(s.items) }))
+          set((s) => ({ status: null, recovering: null, busy: false, stepStartedAt: null, sawTokens: false, thinkStartedAt: null, pendingTool: null, items: closeOpenTools(s.items) }))
           break
         // ── app/builder events (BuilderEvent) ──
         case 'serverInfo':

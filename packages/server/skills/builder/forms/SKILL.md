@@ -12,7 +12,7 @@ const [form, setForm] = useState({ name: '', email: '' })
 const [errors, setErrors] = useState<Record<string, string>>({})
 const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({ ...f, [k]: e.target.value }))
 
-<form onSubmit={submit} className="flex flex-col gap-4">
+<form onSubmit={submit} noValidate className="flex flex-col gap-4">
   <div className="grid gap-1.5">
     <Label htmlFor="email">Email</Label>
     <Input id="email" type="email" value={form.email} onChange={set('email')} aria-invalid={!!errors.email} />
@@ -21,6 +21,13 @@ const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setForm(f
   <Button type="submit">Save</Button>
 </form>
 ```
+
+## `noValidate` is not optional
+
+The `<form>` above carries `noValidate` for a reason: with `type="email"` and WITHOUT it, the browser
+runs its OWN check first, shows a grey native bubble ("Please include an '@'…"), and your `onSubmit`
+never fires — so every message below is dead code and the user hears the browser's voice instead of
+your app's. Keep `type="email"` (it still selects the right mobile keyboard) and own the message.
 
 ## Validation on submit (not on every keystroke)
 

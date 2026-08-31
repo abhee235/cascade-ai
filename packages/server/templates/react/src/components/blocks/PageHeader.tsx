@@ -15,7 +15,7 @@ export function PageHeader({ title, description, actions, className }: PageHeade
 	return (
 		<div data-block="page-header" className={cn('mx-auto flex max-w-6xl flex-wrap items-end justify-between gap-4 px-6 pb-8 pt-10', className)}>
 			<div className="flex max-w-xl flex-col gap-1.5">
-				<h1 className="font-serif text-3xl font-semibold tracking-tight">{title}</h1>
+				<h1 className="font-serif text-3xl font-semibold tracking-display">{title}</h1>
 				{description ? <p className="text-muted-foreground">{description}</p> : null}
 			</div>
 			{actions ? <div className="flex items-center gap-2">{actions}</div> : null}

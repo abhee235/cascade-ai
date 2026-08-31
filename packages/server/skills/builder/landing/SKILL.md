@@ -1,44 +1,80 @@
 ---
 name: landing
-description: Landing-page structure with real copy: hero, feature grid, social proof, pricing cards, CTA rhythm — and a render checklist.
-whenToUse: Load when the task mentions ANY of: landing page, home page, marketing site, hero, pricing page, features section, waitlist, coming soon.
+description: Landing pages that read as 2026, not 2021 — the band order, the four variants (SaaS, launch, portfolio, waitlist), the modern hero/bento/pricing/FAQ vocabulary, and real copy rules.
+whenToUse: Load BEFORE building any landing page, home page, marketing site, product page, hero section, pricing page, about page, portfolio, waitlist, or "coming soon" page.
 ---
-# Landing pages — structure sells; assemble the blocks, keep the rhythm
+# Landing pages — structure sells, and the structure is a stack of blocks
 
-## Section order (top to bottom — these are BLOCKS from src/components/blocks/, don't hand-roll them)
+Every band is a BLOCK with props. Hand-rolled marketing markup is how a page ends up looking generic —
+and it also breaks restyling, because only blocks follow the preset.
 
-1. **`<NavBar>`**: brand left, 2–4 links, one primary `<Button>` in `actions`.
-2. **`<Hero>`**: one bold claim (max ~8 words) in `headline`, one supporting line in `subcopy`,
-   primary + secondary buttons in `actions`, a photo or `<ArtImage kind="banner">` in `media`
-   (`layout="split"` default; `"bleed"` for full-image drama).
-3. **`<Section tone="muted">` + `<FeatureGrid>`**: 3 or 6 features — lucide icon, short title,
-   two-line description. Never walls of text.
-4. **Social proof**: `<Section>` + `<StatStrip>` (big numbers) or a quote `<Card>`.
-5. **Pricing** (if asked): `<Section>` + 2–3 `<Card>`s side by side; highlight ONE with
-   `border-primary` and a `<Badge>Popular</Badge>`; check-icon feature lists; one `<Button>` each.
-6. **Final CTA**: `<Section tone="muted">` — repeat the hero claim shorter + one button.
-7. **`<Footer>`**: brand + tagline + link columns + fineprint.
-
-Exact block props + the canonical assembly: `Skill {name: "design", file: "reference/blocks.md"}`.
-
-## Build order — copy this checklist and tick each section only when it RENDERS correctly
+## The band order — the spine every variant bends
 
 ```
-Landing progress:
-- [ ] Nav renders (name + links + one primary button)
-- [ ] Hero renders (claim + support line + two buttons)
-- [ ] Feature grid renders (3 or 6 cards, real copy)
-- [ ] Social proof renders
-- [ ] Pricing renders (if requested; one tier highlighted)
-- [ ] Final CTA + footer render
-- [ ] `npm run build` passes
+<NavBar>                                  brand · 2–4 links · ONE primary Button
+<Hero layout="collage">                   badge · TWO-TONE headline · subcopy · 2 actions · media
+<Section><LogoStrip>                      trust, immediately under the hero
+<Section tone="muted"><BentoGrid>          the "why" — MIXED tiles, not a row of clones
+<Section><PricingTable>                    2–4 tiers, exactly ONE highlighted
+<Section tone="wash"><Testimonial>         one strong quote (variant="feature") or three cards
+<Section><FAQ>                             the objections that block a purchase
+<CTASection>                               the closing ask
+<Footer>                                   brand · 3 link columns · fineprint
 ```
 
-## Rules
+The **two-tone headline** is the current idiom — put the second clause in muted — and the hero ALWAYS
+carries real imagery (`media` below): a text-only hero fails the design lint, every time:
 
-- Center content with `mx-auto max-w-5xl px-6`; alternate section backgrounds (`bg-background` /
-  `bg-muted`) for rhythm — never colored bands of invented colors.
-- ONE primary action per screenful; everything else `variant="secondary"` or `variant="ghost"`.
-- All copy concrete ("Ship your store in minutes"), no lorem ipsum — write real, product-specific text.
-- Buttons must DO something in the demo (scroll to a section, open a Dialog with a mock signup form —
-  see forms.md).
+```tsx
+<Hero
+  headline={<>Ship your pipeline, <span className="text-muted-foreground">not your weekend.</span></>}
+  media={<ArtImage kind="banner" seed="hero" />}   // or photo('workspace') — never omit, never an emoji
+/>
+```
+
+All FOUR variants exist as working pages — `Skill {name: "landing", file: "reference/pages.md"}` is
+their verbatim source. They differ in STRUCTURE, not just copy, so read the one whose shape matches the
+ask before you compose bands from scratch.
+
+## The four variants — same spine, different emphasis
+
+| variant | preset that suits it | keep | drop | hero |
+|---|---|---|---|---|
+| **saas** | `aurora-glass`, `minimal-mono` | bento, pricing, FAQ, logos | — | `collage`, product shot |
+| **launch** | `luxe-dark`, `playful` | bento, testimonial, CTA | pricing (one product) | `bleed`, big imagery |
+| **portfolio** | `editorial` | work grid (`MediaCard`), about, contact | pricing, logos | `centered`, quiet |
+| **waitlist** | any | ONE screen: hero + email form + proof | pricing, FAQ, long bands | `centered` |
+
+A waitlist page that scrolls is a waitlist page nobody signs up to.
+
+## Copy — the part models get wrong
+
+- Headline ≤ ~8 words, a CLAIM not a category ("Ship your pipeline, not your weekend", never "Our Platform").
+- Subcopy: ONE sentence naming who it is for and what changes.
+- Features say the outcome ("Send it back any year — we fix it"), not the mechanism ("Repair API").
+- Testimonials carry a real name AND role. "John D., CEO" reads as fake because it is.
+- FAQ answers what BLOCKS a purchase: price, cancellation, data ownership, support. Never puffery.
+- NEVER lorem ipsum, and never a button that does nothing — every CTA changes the view or opens a form.
+
+## Imagery
+
+Hero: one `photo()` / `photoFor()` / `<ArtImage kind="banner">`. Logo strip: TEXT wordmarks (credible with
+zero assets). Any grid of distinct subjects: `<Photo web="…" seed={item.id}>` — never `photoFor()` in a
+`.map()`, which repeats the same two pictures.
+
+## Acceptance — check each before you call it done
+
+- [ ] Bands present in order: NavBar → Hero → (LogoStrip) → BentoGrid or FeatureGrid → PricingTable (if
+      priced) → Testimonial → FAQ → CTASection → Footer. **≥5** bands total on a full landing page.
+- [ ] Headline ≤ 8 words and two-tone; subcopy is ONE sentence.
+- [ ] The hero carries REAL imagery — `<ArtImage>` or `photo()`/`photoFor()` — and any grid of distinct
+      subjects uses `<Photo web="…" seed={item.id}>`. A page with zero imagery fails the design lint.
+- [ ] Exactly ONE primary `<Button>` above the fold (everything else `variant="outline"`/`"ghost"`).
+- [ ] Pricing: 2–4 tiers, exactly one `highlighted`, each with its own action.
+- [ ] Zero lorem, zero placeholder names, zero dead buttons.
+- [ ] `npm run build` green → `TemplateAudit` clean → `Browser {op:"open"}` → `Browser {op:"audit"}` clean
+      (audit catches sections stuck invisible — a scroll-reveal that never fires leaves a blank page).
+
+## Out of scope unless asked
+
+Blog engines, CMS, i18n, analytics, cookie banners, real payment links.

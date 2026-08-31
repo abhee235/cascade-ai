@@ -58,6 +58,7 @@ const MARK_LABELS: Record<string, (e: Record<string, unknown>) => string> = {
   tool_cap: (e) => `cap: ${e.calls} tool calls — converge or report`,
   recall: (e) => `recall: ${e.count} memories surfaced`,
   stalled_verify: () => 'nudge: stalled verify',
+  audit_gate: () => 'nudge: run the template audit',
   post_edit_check: (e) => `post-edit check: errors in ${e.files} file${e.files === 1 ? '' : 's'}`,
   degraded_retry: () => 'degraded response — retried',
   degenerate_cut: (e) => `cut: degenerate output loop (${e.chars} chars)`,

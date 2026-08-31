@@ -114,6 +114,15 @@ const MIN_PLAN_CHARS = 200
  * silently fell through to the builder, which assumed everything. The nudge names the violation and the
  * tool; the caller runs ONE extra submit with it before the ensurePlanPersisted fallback.
  */
+/** The revise nudge for a plan that EXISTS but is unusable (see planQualityIssues). */
+export function planReviseNudge(issues: string[]): string {
+  return (
+    '<system-reminder>Your PLAN.md needs one revision before the build can use it:\n' +
+    issues.map((i) => `- ${i}`).join('\n') +
+    '\nRewrite PLAN.md now with those fixed, keeping every section it already has. Load Skill {name: "design"} first if you have not — it defines the presets, the blocks, and the imagery routing. Do not reply to this note.</system-reminder>'
+  )
+}
+
 export function planSalvageNudge(session: CascadeSession): string {
   const spokeQuestions = /\?/.test(lastAssistantText(session.getHistory()))
   return (
@@ -123,6 +132,81 @@ export function planSalvageNudge(session: CascadeSession): string {
       : 'Produce the plan NOW: terse markdown starting with a # heading (or Write PLAN.md). If one critical detail truly blocks planning, ask it first with the AskUserQuestion tool.') +
     ' Do not reply to this note.</system-reminder>'
   )
+}
+
+/** The pin cap in core's systemPrompt (PIN_CAP_CHARS). A plan longer than this is silently TRUNCATED in
+ *  the builder's context — it reads a contract that stops mid-sentence and never learns it was cut. */
+const PLAN_PIN_CAP = 2_500
+
+/**
+ * What is WRONG with a persisted plan, as fixable instructions. Empty ⇒ the plan is usable.
+ *
+ * Measured (qwen36-agentic-iq4, builder-shop, 2026-08-11): a 35B planner wrote a 4,797-char plan (2.7x
+ * its stated cap, so the pinned copy truncated), SKIPPED the Design section entirely, and — having never
+ * loaded the design skill — planned "emoji-only product images", which the design system bans outright
+ * and design-lint fails on. PLAN.md is pinned as THE contract on every turn, so a malformed plan poisons
+ * every build turn that follows: the same failure shape as the context-file contamination, except from a
+ * document this harness produced itself. Prompt text alone did not hold a 35B here, so the stage checks.
+ */
+export function planQualityIssues(text: string): string[] {
+  const issues: string[] = []
+  if (text.length > PLAN_PIN_CAP) {
+    issues.push(
+      `it is ${text.length} characters — the builder only ever sees the first ${PLAN_PIN_CAP}, so everything past that is INVISIBLE to it. Cut it under ${PLAN_PIN_CAP} by tightening lines, not by dropping sections.`,
+    )
+  }
+  if (!/^\s*(?:#{1,3}\s*|\*\*)Design\b/im.test(text)) {
+    issues.push(
+      'it has no **Design** section. Add one naming the preset (a file in src/themes/), the BLOCK composition per view, and the imagery source — without it the builder invents styling, and the usual result is emoji-as-images, which the design system bans.',
+    )
+  }
+  const emoji = text.match(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/gu) ?? []
+  if (emoji.length >= 3 || /\bemoji\b/i.test(text)) {
+    issues.push(
+      'it plans EMOJI as imagery. An emoji is never an image here: name `<Photo web="<subject>" seed={id}>` for a grid of distinct items, `photoFor()` for a single hero, `<ArtImage>` for abstract art.',
+    )
+  }
+  // The ROUTING token (design-overhaul P3 slice 5). PLAN.md is re-read every builder turn, so a
+  // `category:` in it re-states which category skill to load on EVERY turn — far more durable than a
+  // single inference made from the brief on turn one and then compacted away. Missing ⇒ the builder
+  // falls back to guessing from the prompt, which is exactly how a shop gets built without the commerce
+  // view contract. Accepted values mirror the mounted category skills.
+  const declared = text.match(/\bcategory:\s*(commerce|dashboard|landing|app-shell|social|game|none)\b/i)
+  if (!declared) {
+    issues.push(
+      'its Design line has no `category:` token. Start that line with `category: <commerce|dashboard|landing|app-shell|social|game|none>` — the builder reads it off the plan every turn to load the matching skill, which carries that category\'s view contract and reference page.',
+    )
+  } else if (declared[1].toLowerCase() === 'none') {
+    // `none` is legitimate (a todo app, a calculator) but it is also the escape hatch a model takes to
+    // avoid deciding — measured 2026-08-11: a planner declared `category: none` for a SaaS MARKETING
+    // LANDING PAGE, then self-corrected on a second write. Self-correction is luck, and `none` silently
+    // defeats the whole routing rung. So `none` is only accepted when the plan does NOT read like a
+    // category. Two independent signals are required before contradicting it, to stay off correct plans.
+    const SIGNALS: [string, RegExp[]][] = [
+      ['commerce', [/\bcart\b/i, /\bcheckout\b/i, /\bCartRow\b/, /\bCheckoutPanel\b/, /add to cart/i]],
+      ['dashboard', [/\bKPI\b/i, /\bStatCard\b/, /\bDataTable\b/, /\bChartCard\b/, /\bAppShell\b/]],
+      ['landing', [/\bPricingTable\b/, /\bTestimonial\b/, /\bFAQ\b/, /\bCTASection\b/, /pricing tier/i]],
+      ['social', [/\bFeedPost\b/, /\bComposer\b/, /\bProfileHeader\b/, /\breplies\b/i, /\bfeed\b/i]],
+    ]
+    for (const [name, patterns] of SIGNALS) {
+      const hits = patterns.filter((p) => p.test(text))
+      if (hits.length >= 2) {
+        issues.push(
+          `it declares \`category: none\`, but the plan itself reads like **${name}** (it names ${hits.length} ${name} surfaces). Set \`category: ${name}\` so the builder loads that skill — \`none\` is only for apps no category fits, and it silently skips the view contract and the reference page.`,
+        )
+        break
+      }
+    }
+  }
+  // Line-scan rather than one multiline regex: `photoFor` is CORRECT for a single hero, and only
+  // becomes the repeat bug when the plan applies it per item.
+  const perItem = /per (product|item|card)|each (product|item|card)|grid/i
+  if (text.split(/\r?\n/).some((line) => /photoFor/i.test(line) && perItem.test(line))) {
+    issues.push(
+      'it plans `photoFor()` for a GRID. The bundled pack holds ~2 photos per category, so every card would show the same picture — use `<Photo web="<subject>" seed={id}>` per item; keep `photoFor()` for a single hero.',
+    )
+  }
+  return issues
 }
 
 export function ensurePlanPersisted(dir: string, session: CascadeSession): boolean {

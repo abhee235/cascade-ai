@@ -27,8 +27,8 @@ export interface NavBarProps extends VariantProps<typeof navBarVariants> {
 export function NavBar({ brand, links, actions, variant, className }: NavBarProps) {
 	return (
 		<header data-block="navbar" className={cn(navBarVariants({ variant }), className)}>
-			<nav className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-6 px-6">
-				<div className="flex items-center gap-2.5 font-serif text-lg font-semibold tracking-tight">{brand}</div>
+			<nav className="mx-auto flex h-nav max-w-6xl items-center justify-between gap-6 px-6">
+				<div className="flex items-center gap-2.5 font-serif text-lg font-semibold tracking-display">{brand}</div>
 				{links ? <div className="hidden items-center gap-6 md:flex">{links}</div> : null}
 				<div className="flex items-center gap-2">{actions}</div>
 			</nav>

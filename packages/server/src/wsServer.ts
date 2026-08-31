@@ -10,14 +10,14 @@
 
 import './loadDotEnv.js' // FIRST import: .env → process.env before the CASCADE_* consts below read it
 import { dirname, extname, join, resolve, sep } from 'node:path'
-import { appendFileSync, createReadStream, existsSync, mkdirSync, statSync } from 'node:fs'
+import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomBytes } from 'node:crypto'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { CascadeSession, InboundMessage } from '@cascade/core'
 import type { BuilderCommand } from '@cascade/app-protocol'
 import { beginTurn, flushTracers, ProjectManager, setTraceSession, type SessionTracerFactory } from './projectManager.js'
-import { ensurePlanPersisted, planSalvageNudge } from './planStage.js'
+import { ensurePlanPersisted, planQualityIssues, planReviseNudge, planSalvageNudge } from './planStage.js'
 import { DockerSandbox, dockerAvailable, sweepSandboxContainers } from './dockerSandbox.js'
 import { HostSandbox, sweepHostDevServers } from './hostSandbox.js'
 import { DEFAULT_RUNTIME_MODE, type RuntimeMode } from './projectRuntime.js'
@@ -633,6 +633,18 @@ export function handleConnection(
                   for await (const ev of planner.submit(planSalvageNudge(planner))) {
                     if (ev.type === 'turnDone') continue
                     relay(ev)
+                  }
+                } else if (turnDir && !stageAborted) {
+                  // The plan EXISTS but may be unusable — over the pin cap (silently truncated in the
+                  // builder's context), missing its Design section, or planning banned imagery. One
+                  // revise round, then take what we get: a flawed contract still beats no contract.
+                  const issues = planQualityIssues(readFileSync(join(turnDir, 'PLAN.md'), 'utf8'))
+                  if (issues.length) {
+                    relay({ type: 'status', text: 'Tightening the plan…' })
+                    for await (const ev of planner.submit(planReviseNudge(issues))) {
+                      if (ev.type === 'turnDone') continue
+                      relay(ev)
+                    }
                   }
                 }
               } finally {

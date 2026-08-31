@@ -35,7 +35,14 @@ function parseFrontmatter(raw: string): { meta: Record<string, string>; body: st
 	return { meta, body: raw.slice(m[0].length).trim() }
 }
 
-const KNOWN_TOOLS = new Set(['Read', 'Glob', 'Grep', 'Write', 'Edit', 'MultiEdit', 'Bash', 'TodoWrite', 'Lsp', 'AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode', 'Memory', 'MemorySearch', 'Subagent', 'Skill'])
+// Core builtins, PLUS the tools the server injects per session via `extraTools` (browserTool.ts,
+// packTool.ts, imageSearchTool.ts, auditTool.ts). Omitting the injected ones made the lint fail two
+// correct agent definitions on every run — and a lint that cries wolf is a lint people stop reading.
+const KNOWN_TOOLS = new Set([
+	'Read', 'Glob', 'Grep', 'Write', 'Edit', 'MultiEdit', 'Bash', 'TodoWrite', 'Lsp', 'AskUserQuestion',
+	'EnterPlanMode', 'ExitPlanMode', 'Memory', 'MemorySearch', 'Subagent', 'Skill', 'WebFetch',
+	'Browser', 'ApplyPack', 'ImageSearch', 'TemplateAudit',
+])
 
 export function lintDoc(doc: Doc): Finding[] {
 	const f: Finding[] = []

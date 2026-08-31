@@ -26,6 +26,7 @@ export type TraceEvent =
   | { t: 'tool_result'; id: string; name: string; ok: boolean; ms: number; content: string }
   | { t: 'compaction'; kind: string; tokensBefore: number; tokensAfter: number; forced: boolean } // E1/ADR-039: which layer fired + what it reclaimed (estimates)
   | { t: 'verify_gate'; turn: number } // ADR-049: terminal answer refused — edits happened, nothing verified them; nudge injected
+  | { t: 'audit_gate'; turn: number; tools: string[] } // design-overhaul P1 (generalized): terminal refused once — mustRunBeforeDone tools still pending since the last mutation; nudge names them
   | { t: 'delegate_nudge'; turn: number; readTokens: number } // ADR-050: bulk-read pressure crossed the threshold with zero delegation; reminder injected
   | { t: 'plan_nudge'; turn: number } // ADR-056 rung 2: writes began with no PLAN.md and no planner spawn; exact Subagent call injected
   | { t: 'degraded_retry'; turn: number } // empty terminal response (no text/thinking/tools) — backend recycled once and the turn re-asked
@@ -37,6 +38,7 @@ export type TraceEvent =
   | { t: 'tool_cap'; turn: number; calls: number } // per-submit tool-call budget crossed — converge-or-report reminder injected (once per submit)
   | { t: 'recall'; turn: number; count: number } // ADR-074: dynamic archival recall surfaced `count` fresh durable facts at the tail (cache-safe append)
   | { t: 'stalled_verify'; turn: number } // ADR-058: edits pending unverified for N consecutive turns mid-flight — run-the-check reminder injected
+  | { t: 'stalled_audit'; turn: number; tools: string[] } // edits pending un-audited for N turns mid-flight — call-the-audit reminder injected
   | { t: 'post_edit_check'; turn: number; files: number } // ADR-059: harness type check after a mutating turn found errors — pushed to the model
   | { t: 'slow_prefill'; turn: number; waitedMs: number } // ADR-061: pre-first-token silence with a LIVE backend — a big cold prefill, waited out instead of killed
   | { t: 'max_tokens_cut'; turn: number }

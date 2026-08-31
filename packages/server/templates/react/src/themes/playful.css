@@ -1,0 +1,102 @@
+/* THEME PRESET: playful — friendly and bright, for consumer apps, food, social, and anything for kids.
+   Character: a good children's-book palette grown up. Sunny off-white paper, a confident coral primary
+   with a mint counterweight in the charts, chunky radii, and shadows that sit a little heavier so cards
+   feel like objects you could pick up. Display type is the SANS at heavy weight — friendly, not fancy;
+   the serif slot maps to Inter deliberately. Rhythm is standard: bright colors already create energy.
+
+   CONTRACT v2 — see premium.css for the canonical contract comment. */
+
+:root {
+	--preset: 'playful';
+	--radius: 1rem;
+
+	/* Density: standard — the color does the work, the spacing stays calm. */
+	--section-y: 4rem;
+	--section-y-lg: 5rem;
+	--hero-y: 6rem;
+	--nav-h: 4rem;
+
+	/* Sunny paper: a hint of yellow in every neutral. */
+	--background: oklch(0.99 0.012 95);
+	--foreground: oklch(0.22 0.03 40);
+	--card: oklch(1 0 0);
+	--card-foreground: oklch(0.22 0.03 40);
+	--popover: oklch(1 0 0);
+	--popover-foreground: oklch(0.22 0.03 40);
+	/* Coral — warm, energetic, still legible against the sunny ground. */
+	--primary: oklch(0.63 0.19 28);
+	--primary-foreground: oklch(0.99 0.01 95);
+	--secondary: oklch(0.95 0.02 95);
+	--secondary-foreground: oklch(0.3 0.04 40);
+	--muted: oklch(0.95 0.02 95);
+	--muted-foreground: oklch(0.5 0.03 50);
+	--accent: oklch(0.92 0.06 180);
+	--accent-foreground: oklch(0.35 0.09 200);
+	--destructive: oklch(0.58 0.22 27);
+	--destructive-foreground: oklch(0.99 0 0);
+	--border: oklch(0.91 0.015 95);
+	--input: oklch(0.91 0.015 95);
+	--ring: oklch(0.68 0.16 28);
+	/* Charts: a bright, well-separated ramp — coral, mint, sun, sky, grape. */
+	--chart-1: oklch(0.66 0.18 28);
+	--chart-2: oklch(0.72 0.13 175);
+	--chart-3: oklch(0.8 0.14 90);
+	--chart-4: oklch(0.65 0.14 240);
+	--chart-5: oklch(0.62 0.15 320);
+
+	/* Fonts (mode-invariant): friendly sans everywhere — a serif would read formal here. */
+	/* Sidebar roles derive from this preset's own tokens — authored once, correct in light AND dark
+	   (`.dark` redefines --card/--accent on the same :root element, so these re-resolve). */
+	--sidebar: var(--card);
+	--sidebar-foreground: var(--card-foreground);
+	--sidebar-primary: var(--primary);
+	--sidebar-primary-foreground: var(--primary-foreground);
+	--sidebar-accent: var(--accent);
+	--sidebar-accent-foreground: var(--accent-foreground);
+	--sidebar-border: var(--border);
+	--sidebar-ring: var(--ring);
+
+	--font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+	/* One family, heavy weights carry the personality instead of a second face. */
+	--font-serif: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+	--font-mono: 'Geist Mono Variable', ui-monospace, 'Cascadia Code', Consolas, monospace;
+
+	/* Shadows: warm and a touch heavier — cards read as objects. */
+	--shadow-color: oklch(0.45 0.09 40);
+	--shadow-opacity: 0.12;
+
+	/* Chunky friendly display type sits closer to neutral tracking. */
+	/* Geist display, gentle tightening. */
+	--tracking-display: -0.01em;
+	--leading-display: 1.05;
+}
+
+.dark {
+	/* Night mode stays warm — a dark plum-brown, never a cold slate. */
+	--background: oklch(0.18 0.02 40);
+	--foreground: oklch(0.95 0.012 95);
+	--card: oklch(0.225 0.024 40);
+	--card-foreground: oklch(0.95 0.012 95);
+	--popover: oklch(0.225 0.024 40);
+	--popover-foreground: oklch(0.95 0.012 95);
+	--primary: oklch(0.72 0.17 30);
+	--primary-foreground: oklch(0.18 0.03 30);
+	--secondary: oklch(0.28 0.028 40);
+	--secondary-foreground: oklch(0.95 0.012 95);
+	--muted: oklch(0.28 0.028 40);
+	--muted-foreground: oklch(0.74 0.02 60);
+	--accent: oklch(0.32 0.05 185);
+	--accent-foreground: oklch(0.85 0.1 180);
+	--destructive: oklch(0.68 0.19 25);
+	--destructive-foreground: oklch(0.99 0 0);
+	--border: oklch(1 0 0 / 12%);
+	--input: oklch(1 0 0 / 16%);
+	--ring: oklch(0.7 0.15 30);
+	--chart-1: oklch(0.72 0.17 30);
+	--chart-2: oklch(0.76 0.12 175);
+	--chart-3: oklch(0.83 0.13 90);
+	--chart-4: oklch(0.7 0.13 240);
+	--chart-5: oklch(0.68 0.14 320);
+	--shadow-color: oklch(0 0 0);
+	--shadow-opacity: 0.4;
+}

@@ -1,0 +1,6 @@
+{
+	"id": "builder-game",
+	"template": "react",
+	"prompt": "Build a small arcade reaction game called 'Pulse'. Requirements: (1) A start menu screen with the game's name, a one-or-two-line explanation of the rules, and a single Start button — the game never begins without it. (2) The game: five rounds; each round the play panel waits a random 1–2.5 seconds and then 'arms' (changes appearance); the player must click it as fast as possible — a faster click scores more points, and clicking before it arms scores zero for that round. (3) A HUD visible during play showing the current score, the round number (like 3/5), and the best score — laid out so nothing jumps when values change. (4) A game-over screen after round five showing the final score, a Play again button, and a Back to menu button. (5) A top-5 leaderboard of best runs persisted in localStorage (it must survive a page reload), shown on the game-over screen, with an empty state before any run has finished. Use client-side state only (no router, no new dependencies), style with Tailwind token utilities, and keep `npm run build` passing.",
+	"budgets": { "maxTurns": 60, "timeoutMs": 1800000 }
+}

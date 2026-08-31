@@ -26,16 +26,91 @@ export function listTemplates(): TemplateInfo[] {
   return REGISTRY.filter((t) => existsSync(join(TEMPLATES_DIR, t.id)))
 }
 
-/** Copy a template's files into `dest` (skipping node_modules/.git/dist; `_gitignore` → `.gitignore`). */
+// ── Residue contract (design-overhaul P1): what must be GONE before a generated app is "done" ─────────────
+// The contract lives in the template dir (data beside the data it describes, like package.pack.json) and is
+// read from TEMPLATES_DIR — outside the project and outside the model's Read jail, so the builder can never
+// edit the contract to pass its own audit. The TemplateAudit tool (auditTool.ts) is its only consumer.
+
+export interface ResidueFinding {
+  kind: 'path' | 'string' | 'file'
+  /** kind 'path'/'file': project-relative path. */
+  path?: string
+  /** kind 'string': the literal needle that must not appear. */
+  needle?: string
+  /** kind 'string': project-relative directory to scan (default 'src'). */
+  scope?: string
+  /** kind 'file': the literal content that must not appear in `path`. */
+  mustNotContain?: string
+  /**
+   * Only report this finding when the project ALSO shows one of these (project-relative paths or `@/…`
+   * import prefixes). For needles that are ordinary English.
+   *
+   * Measured (qwen36-agentic-iq4, builder-shop 2026-08-15): a shop named one of its products "Meridian
+   * Watch" — a plausible name for a watch — and the audit reported it twice as "the demo brand (legacy
+   * scaffold), replace with the app's own brand name". The model fixed everything else and left this,
+   * because the instruction does not parse: the app's brand was "Cascade Shop"; Meridian was a product.
+   *
+   * Since the demo stopped being copied into projects (design-overhaul P1), a FRESH project cannot inherit
+   * that word at all — it can only invent it, so there the needle is a false positive by construction. It
+   * still matters for LEGACY projects carrying the old demo, and those always have harder evidence too.
+   */
+  requires?: string[]
+  why: string
+  fix: string
+}
+
+export interface ResidueContract {
+  hard: ResidueFinding[]
+  soft: ResidueFinding[]
+}
+
+/** The template's residue contract, or undefined when the template ships none (audit self-disables). */
+export function readResidueContract(templateId: string): ResidueContract | undefined {
+  try {
+    const raw = readFileSync(join(TEMPLATES_DIR, templateId, 'residue.json'), 'utf8')
+    const parsed = JSON.parse(raw) as Partial<ResidueContract>
+    if (!Array.isArray(parsed.hard) && !Array.isArray(parsed.soft)) return undefined
+    return { hard: parsed.hard ?? [], soft: parsed.soft ?? [] }
+  } catch {
+    return undefined // no contract, unreadable, malformed — the audit simply doesn't exist for this template
+  }
+}
+
+/**
+ * What NEVER reaches a generated project:
+ * - `packs` (ADR-066): optional add-ons applied ON DEMAND by applyPack — a new project starts frontend-only.
+ * - `demo` (design-overhaul P1): the gallery lives at the template ROOT and never ships, so demo residue
+ *   in generated apps (the measured Meridian class) is structurally impossible.
+ * - `residue.json`: the audit contract, read server-side from TEMPLATES_DIR — never copied, so the builder
+ *   can't edit the contract to pass its own audit.
+ * - `skins` (design-overhaul P5): alternate block implementations, applied only via the Restyle tool —
+ *   copied wholesale they would be dead files, and the parity checker inside would not even compile in a
+ *   project (it imports across the template root).
+ * - `node_modules`/`.git`/`dist`/`*.tsbuildinfo`: build machinery, never source. (A tsbuildinfo left by a
+ *   local `npm run build` in the template would seed a fresh project with another tree's incremental state.)
+ *
+ * EXPORTED so the eval bench scaffolds byte-identically (scripts/eval/builder.mts). It previously copied
+ * the template raw, which handed every run a `demo/` containing complete reference implementations — an
+ * answer key for the very scenarios being measured — and a stray `node_modules` (from a plain `npm install`
+ * in the template dir, which is a reasonable thing to do) crashed the shared-deps junction outright. One
+ * filter, one scaffold: the bench cannot drift from what users actually get.
+ */
+/** Absolute path to a file inside a template's pristine source — the ground truth a generated project's
+ *  copy is compared against (see the audit's frozen-layer check). Read from TEMPLATES_DIR, which is
+ *  outside the model's Read jail, so a project can never doctor its own reference copy. */
+export function templateFilePath(templateId: string, relPath: string): string {
+  return join(TEMPLATES_DIR, templateId, relPath)
+}
+
+export function templateCopyFilter(p: string): boolean {
+  return !/[\\/](node_modules|\.git|dist|packs|demo|skins|residue\.json|[^\\/]+\.tsbuildinfo)([\\/]|$)/.test(p)
+}
+
+/** Copy a template's files into `dest` (see templateCopyFilter; `_gitignore` → `.gitignore`). */
 export function applyTemplate(templateId: string, dest: string): void {
   const src = join(TEMPLATES_DIR, templateId)
   if (!existsSync(src)) throw new Error(`Unknown template: ${templateId}`)
-  cpSync(src, dest, {
-    recursive: true,
-    // `packs` is EXCLUDED (ADR-066): packs are optional add-ons applied ON DEMAND by applyPack, never
-    // copied into a fresh prototype — a new project starts frontend-only.
-    filter: (p) => !/[\\/](node_modules|\.git|dist|packs)([\\/]|$)/.test(p),
-  })
+  cpSync(src, dest, { recursive: true, filter: templateCopyFilter })
   // Templates ship `_gitignore` (so it doesn't affect the Cascade repo); restore the dotfile in the project.
   const underscored = join(dest, '_gitignore')
   if (existsSync(underscored)) renameSync(underscored, join(dest, '.gitignore'))
@@ -142,4 +217,125 @@ export function ensureVisualEditConfig(projectDir: string): void {
 export function readAiRules(projectDir: string): string {
   const path = join(projectDir, AI_RULES_FILE)
   return existsSync(path) ? readFileSync(path, 'utf8').trim() : ''
+}
+
+// ── Restyle (design-overhaul P5): presets change TOKENS, skins change STRUCTURE ───────────────────────────
+// Both live outside the project (and the model's Read/Write jail): skins under templates/<id>/skins/, the
+// pristine base blocks under templates/<id>/src/components/blocks. The Restyle tool is the ONLY writer —
+// the same asymmetry as the frozen-path guard, and its complement: the model can never hand-edit a block,
+// but it can swap certified implementations wholesale. The freeze is what makes the swap safe.
+
+export interface SkinInfo {
+  id: string
+  description: string
+  /** Block basenames (no extension) this skin ships. Unlisted blocks stay base. */
+  blocks: string[]
+}
+
+const skinsDir = (templateId: string) => join(TEMPLATES_DIR, templateId, 'skins')
+
+/** Skins the template ships (each is skins/<id>/skin.json + blocks/). Empty when the template has none. */
+export function listSkins(templateId: string): SkinInfo[] {
+  const dir = skinsDir(templateId)
+  if (!existsSync(dir)) return []
+  const out: SkinInfo[] = []
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const manifest = join(dir, entry.name, 'skin.json')
+    if (!existsSync(manifest)) continue
+    try {
+      const raw = JSON.parse(readFileSync(manifest, 'utf8'))
+      out.push({ id: raw.id ?? entry.name, description: raw.description ?? '', blocks: raw.blocks ?? [] })
+    } catch {
+      /* malformed manifest — skip the skin rather than break the tool */
+    }
+  }
+  return out
+}
+
+/** Pristine sources for a project block file: the template base, plus every skin's copy of that basename.
+ *  The audit accepts ANY of these as untouched — a skin-swapped block is certified content, not an edit. */
+export function shippedVariantPaths(templateId: string, rel: string): string[] {
+  const norm = rel.replaceAll('\\', '/')
+  const out = [join(TEMPLATES_DIR, templateId, norm)]
+  if (norm.startsWith('src/components/blocks/')) {
+    const base = norm.slice('src/components/blocks/'.length)
+    for (const skin of listSkins(templateId)) out.push(join(skinsDir(templateId), skin.id, 'blocks', base))
+  }
+  return out
+}
+
+/** The preset a project has active, parsed from the one @import line in src/index.css. */
+export function activePreset(projectDir: string): string | undefined {
+  try {
+    return readFileSync(join(projectDir, 'src', 'index.css'), 'utf8').match(/@import\s+'\.\/themes\/([a-z-]+)\.css'/)?.[1]
+  } catch {
+    return undefined
+  }
+}
+
+/** Presets a project can switch to — the css files its own src/themes/ carries. */
+export function listPresets(projectDir: string): string[] {
+  const dir = join(projectDir, 'src', 'themes')
+  if (!existsSync(dir)) return []
+  return readdirSync(dir)
+    .filter((f) => f.endsWith('.css'))
+    .map((f) => f.replace(/\.css$/, ''))
+    .sort()
+}
+
+/** Switch the active preset: rewrite the ONE @import line. Returns "old → new" for the changelog. */
+export function setPreset(projectDir: string, preset: string): string {
+  const target = join(projectDir, 'src', 'themes', `${preset}.css`)
+  if (!existsSync(target)) throw new Error(`No preset "${preset}" — this project's src/themes/ has: ${listPresets(projectDir).join(', ')}`)
+  const cssPath = join(projectDir, 'src', 'index.css')
+  const css = readFileSync(cssPath, 'utf8')
+  const prev = css.match(/@import\s+'\.\/themes\/([a-z-]+)\.css'/)?.[1]
+  if (!prev) throw new Error("src/index.css has no @import './themes/<preset>.css' line to rewrite — the theme mechanism was removed or hand-edited")
+  writeFileSync(cssPath, css.replace(/@import\s+'\.\/themes\/[a-z-]+\.css'/, `@import './themes/${preset}.css'`))
+  return `${prev} → ${preset}`
+}
+
+/**
+ * Apply a skin (or restore base) into a project's src/components/blocks.
+ * - `skinId: 'base'` restores the template's pristine blocks — for the listed `components`, or ALL of them.
+ * - A named skin first restores base for EVERY block file (skins never half-stack), then overlays the
+ *   skin's blocks — unless `components` narrows it, which swaps just those and leaves the rest alone.
+ * Returns the changelog of files written.
+ */
+export function applySkin(projectDir: string, templateId: string, skinId: string, components?: string[]): string {
+  const baseDir = join(TEMPLATES_DIR, templateId, 'src', 'components', 'blocks')
+  const destDir = join(projectDir, 'src', 'components', 'blocks')
+  const allBase = readdirSync(baseDir).filter((f) => f.endsWith('.tsx'))
+  const norm = (c: string) => (c.endsWith('.tsx') ? c : `${c}.tsx`)
+
+  const written: string[] = []
+  const copy = (fromDir: string, file: string) => {
+    cpSync(join(fromDir, file), join(destDir, file))
+    written.push(file)
+  }
+
+  if (skinId === 'base') {
+    for (const c of components?.map(norm) ?? allBase) {
+      if (!allBase.includes(c)) throw new Error(`No base block "${c}" — the template ships: ${allBase.map((f) => f.replace('.tsx', '')).join(', ')}`)
+      copy(baseDir, c)
+    }
+    return `Restored the stock look for: ${written.map((f) => f.replace('.tsx', '')).join(', ')}.`
+  }
+
+  const skin = listSkins(templateId).find((s) => s.id === skinId)
+  if (!skin) throw new Error(`No skin "${skinId}" — available: base, ${listSkins(templateId).map((s) => s.id).join(', ') || '(none)'}`)
+  const skinBlocks = skin.blocks.map(norm)
+  const wanted = components?.map(norm) ?? skinBlocks
+  for (const c of wanted) {
+    if (!skinBlocks.includes(c)) {
+      throw new Error(`Skin "${skinId}" does not ship "${c}" — it covers: ${skin.blocks.join(', ')}. Unlisted blocks always render base.`)
+    }
+  }
+  if (!components) for (const f of allBase) copy(baseDir, f) // full apply resets first: skins never half-stack
+  for (const c of wanted) copy(join(skinsDir(templateId), skinId, 'blocks'), c)
+  return (
+    `Applied skin "${skinId}"${components ? ` to ${wanted.map((f) => f.replace('.tsx', '')).join(', ')}` : ''} — ` +
+    `${written.length} block file(s) replaced. Blocks the skin does not cover render the stock look.`
+  )
 }

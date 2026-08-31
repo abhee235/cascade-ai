@@ -1,0 +1,237 @@
+// REFERENCE PAGE — the whole shop (category: commerce). Never shipped to a project.
+//
+// All four views the commerce skill contracts for, in one file so the state flow is readable end to end:
+// catalog → detail → cart → checkout → confirmation. The cart is the ONLY stored state; the badge count,
+// the line totals and the order total are all useMemo. In a real app these views are separate components
+// under src/components/ (the ~150-line rule) — the state shape is what matters here.
+//
+// (The gallery renders its own chrome above this page; a real shop's NavBar is included because the live
+// cart badge in the header is part of the archetype.)
+
+import { useMemo, useState } from 'react'
+import { ArrowLeft, ShoppingCart, Store } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { CartRow } from '@/components/blocks/CartRow'
+import { CheckoutPanel } from '@/components/blocks/CheckoutPanel'
+import { EmptyState } from '@/components/blocks/EmptyState'
+import { MediaCard } from '@/components/blocks/MediaCard'
+import { NavBar } from '@/components/blocks/NavBar'
+import { PageHeader } from '@/components/blocks/PageHeader'
+import { Photo } from '@/components/blocks/Photo'
+import { Section } from '@/components/blocks/Section'
+
+interface Product {
+	id: string
+	name: string
+	price: number
+	category: string
+	description: string
+	/** Keywords for <Photo web> — imagery is DATA, stored on the entity (see the data skill). */
+	image: string
+}
+
+const CATALOG: Product[] = [
+	{ id: 'p1', name: 'Alpine Field Watch', price: 189, category: 'Instruments', description: 'Sapphire glass, 38mm case, ten-year battery. Made to be worn, not stored.', image: 'minimal field watch' },
+	{ id: 'p2', name: 'Trailline Runner', price: 129, category: 'Footwear', description: 'Resoleable trail shoe with a 4mm drop and a stitched — not glued — upper.', image: 'trail running shoe' },
+	{ id: 'p3', name: 'Atlas Daypack', price: 98, category: 'Carry', description: 'Twenty litres, waxed canvas, a lifetime of repairs included.', image: 'canvas backpack' },
+	{ id: 'p4', name: 'Harbor Ceramic Set', price: 64, category: 'Home', description: 'Four cups thrown in Stoke, glazed in a slow kiln.', image: 'ceramic mugs' },
+	{ id: 'p5', name: 'Ridge Enamel Mug', price: 28, category: 'Home', description: 'Steel core, double-dipped enamel, chips honourably.', image: 'enamel camp mug' },
+	{ id: 'p6', name: 'Coastline Throw', price: 86, category: 'Textiles', description: 'Lambswool from a mill we visit twice a year.', image: 'wool blanket texture' },
+]
+
+type View = 'catalog' | { kind: 'detail'; id: string } | 'cart'
+
+export function ShopCatalog() {
+	const [view, setView] = useState<View>('catalog')
+	const [cart, setCart] = useState<{ productId: string; quantity: number }[]>([{ productId: 'p1', quantity: 1 }, { productId: 'p5', quantity: 2 }])
+	const [checkingOut, setCheckingOut] = useState(false)
+	const [form, setForm] = useState({ name: '', email: '', address: '' })
+	const [errors, setErrors] = useState<Record<string, string>>({})
+	const [placed, setPlaced] = useState<number | null>(null)
+
+	// Everything below is DERIVED — never stored (a stored total drifts the first time a quantity changes).
+	const lines = useMemo(() => cart.map((l) => ({ ...l, product: CATALOG.find((p) => p.id === l.productId)! })), [cart])
+	const total = useMemo(() => lines.reduce((s, l) => s + l.product.price * l.quantity, 0), [lines])
+	const count = useMemo(() => cart.reduce((s, l) => s + l.quantity, 0), [cart])
+
+	const add = (id: string) =>
+		setCart((c) => (c.some((l) => l.productId === id) ? c.map((l) => (l.productId === id ? { ...l, quantity: l.quantity + 1 } : l)) : [...c, { productId: id, quantity: 1 }]))
+	const setQty = (id: string, delta: number) =>
+		setCart((c) => c.flatMap((l) => (l.productId !== id ? [l] : l.quantity + delta < 1 ? [] : [{ ...l, quantity: l.quantity + delta }])))
+
+	const submit = (e: React.FormEvent) => {
+		e.preventDefault() // validate ON SUBMIT, never on keystroke (forms skill)
+		const next: Record<string, string> = {}
+		if (!form.name.trim()) next.name = 'Tell us who the order is for.'
+		if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email)) next.email = 'A valid email, so we can send the receipt.'
+		if (!form.address.trim()) next.address = 'Where should it go?'
+		setErrors(next)
+		if (Object.keys(next).length === 0) {
+			setPlaced(total)
+			setCart([])
+		}
+	}
+
+	const detail = typeof view === 'object' ? CATALOG.find((p) => p.id === view.id) : undefined
+
+	return (
+		<div>
+			<NavBar
+				brand={
+					<>
+						<Store className="size-4 text-primary" /> Cascade Shop
+					</>
+				}
+				links={
+					<button type="button" onClick={() => setView('catalog')} className="text-sm text-muted-foreground transition-colors hover:text-foreground">
+						Shop
+					</button>
+				}
+				actions={
+					<Button variant="outline" onClick={() => setView('cart')}>
+						<ShoppingCart className="size-4" /> Cart
+						{count > 0 ? <Badge className="ml-1.5">{count}</Badge> : null}
+					</Button>
+				}
+			/>
+
+			{view === 'catalog' ? (
+				<Section eyebrow="The collection" heading="Autumn, in six pieces" description="Small runs. Made to be used, not stored.">
+					<div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+						{CATALOG.map((p) => (
+							<MediaCard
+								key={p.id}
+								onClick={() => setView({ kind: 'detail', id: p.id })}
+								media={<Photo web={p.image} seed={p.id} kind="product" alt={p.name} />}
+								title={p.name}
+								meta={p.category}
+								aside={<span className="font-medium">${p.price.toFixed(2)}</span>}
+								actions={
+									<Button
+										size="sm"
+										onClick={(e) => {
+											e.stopPropagation() // the card itself navigates; the button must not
+											add(p.id)
+										}}
+									>
+										Add to cart
+									</Button>
+								}
+							/>
+						))}
+					</div>
+				</Section>
+			) : detail ? (
+				<Section>
+					<Button variant="ghost" size="sm" className="mb-6" onClick={() => setView('catalog')}>
+						<ArrowLeft className="size-4" /> Back to the collection
+					</Button>
+					<div className="grid gap-10 md:grid-cols-2">
+						<div className="overflow-hidden rounded-xl border [&_img]:aspect-[4/3] [&_img]:size-full [&_img]:object-cover">
+							<Photo web={detail.image} seed={detail.id} kind="product" alt={detail.name} />
+						</div>
+						<div className="flex flex-col gap-4">
+							<span className="text-sm text-muted-foreground">{detail.category}</span>
+							<h1 className="font-serif text-3xl font-semibold tracking-display">{detail.name}</h1>
+							<span className="font-serif text-2xl font-semibold tabular-nums">${detail.price.toFixed(2)}</span>
+							<p className="text-muted-foreground">{detail.description}</p>
+							<div className="mt-2 flex gap-3">
+								<Button size="lg" onClick={() => add(detail.id)}>
+									Add to cart
+								</Button>
+								<Button size="lg" variant="outline" onClick={() => setView('cart')}>
+									View cart
+								</Button>
+							</div>
+						</div>
+					</div>
+				</Section>
+			) : (
+				<Section>
+					<PageHeader title="Your cart" description={lines.length ? `${count} item${count > 1 ? 's' : ''}` : undefined} className="px-0 pt-0" />
+					{placed !== null ? (
+						<EmptyState
+							title="Order confirmed"
+							description={`Thank you — your total was $${placed.toFixed(2)}. A receipt is on its way.`}
+							action={
+								<Button
+									onClick={() => {
+										setPlaced(null)
+										setView('catalog')
+									}}
+								>
+									Keep browsing
+								</Button>
+							}
+						/>
+					) : lines.length === 0 ? (
+						<EmptyState
+							icon={ShoppingCart}
+							title="Your cart is empty"
+							description="Find something you'll keep."
+							action={
+								<Button variant="outline" onClick={() => setView('catalog')}>
+									Browse the collection
+								</Button>
+							}
+						/>
+					) : !checkingOut ? (
+						<div className="flex flex-col gap-6">
+							<div className="rounded-xl border bg-card px-5">
+								{lines.map((l) => (
+									<CartRow
+										key={l.productId}
+										media={<Photo web={l.product.image} seed={l.productId} kind="product" alt={l.product.name} />}
+										title={l.product.name}
+										meta={l.product.category}
+										unitPrice={`$${l.product.price.toFixed(2)}`}
+										quantity={l.quantity}
+										lineTotal={`$${(l.product.price * l.quantity).toFixed(2)}`}
+										onQuantityChange={(d) => setQty(l.productId, d)}
+										onRemove={() => setQty(l.productId, -l.quantity)}
+									/>
+								))}
+							</div>
+							<div className="flex items-center justify-between border-t pt-4">
+								<span className="text-muted-foreground">Order total</span>
+								<span className="font-serif text-2xl font-semibold tabular-nums tracking-display">${total.toFixed(2)}</span>
+							</div>
+							<Button size="lg" className="self-end" onClick={() => setCheckingOut(true)}>
+								Checkout
+							</Button>
+						</div>
+					) : (
+						<form onSubmit={submit}>
+							<CheckoutPanel
+								lines={[
+									{ label: 'Subtotal', value: `$${total.toFixed(2)}` },
+									{ label: 'Shipping', value: 'Free', muted: true },
+								]}
+								total={`$${total.toFixed(2)}`}
+								action={<Button type="submit">Place order — ${total.toFixed(2)}</Button>}
+							>
+								{(['name', 'email', 'address'] as const).map((field) => (
+									<div key={field} className="grid gap-1.5">
+										<Label htmlFor={field} className="capitalize">
+											{field}
+										</Label>
+										<Input
+											id={field}
+											value={form[field]}
+											aria-invalid={!!errors[field]}
+											onChange={(e) => setForm((f) => ({ ...f, [field]: e.target.value }))}
+										/>
+										{errors[field] ? <p className="text-sm text-destructive">{errors[field]}</p> : null}
+									</div>
+								))}
+							</CheckoutPanel>
+						</form>
+					)}
+				</Section>
+			)}
+		</div>
+	)
+}

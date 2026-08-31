@@ -8,7 +8,7 @@ import type { Tool } from '../Tool'
 import { normalizeText } from '../fileState'
 import { readFreshnessError } from '../editCore'
 import { lineDiff } from '../../utils/diff'
-import { displayPath, ProjectPathError, resolveInProject } from '../projectPath'
+import { assertWritable, displayPath, FrozenPathError, ProjectPathError, resolveInProject } from '../projectPath'
 
 const inputSchema = z.object({
   file_path: z.string().describe('Path to the file to write, relative to the workspace or absolute.'),
@@ -47,8 +47,9 @@ Prefer Edit for changing part of a file — Write replaces the ENTIRE file, so i
     let path: string
     try {
       path = resolveInProject(ctx.cwd, input.file_path, ctx.sandbox?.root, ctx.pathScope) // ADR-033: jail to the project root
+      assertWritable(ctx.cwd, path, ctx.pathScope) // frozen prefixes (shared blocks/kit) reject writes
     } catch (e) {
-      if (e instanceof ProjectPathError) return { content: e.message, isError: true }
+      if (e instanceof ProjectPathError || e instanceof FrozenPathError) return { content: e.message, isError: true }
       throw e
     }
     try {

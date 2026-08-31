@@ -2,16 +2,62 @@
 # Blocks reference — page-section components. Pages are BLOCK COMPOSITIONS: assemble these, fill their slots with the kit.
 
 ## Contents
+- AppShell
 - ArtImage
+- AuthCard
+- BentoGrid
+- CTASection
+- CartRow
+- ChartCard
+- CheckoutPanel
+- Composer
+- DataTable
 - EmptyState
+- ErrorState
+- FAQ
 - FeatureGrid
+- FeedPost
+- FilterBar
 - Footer
 - Hero
+- LogoStrip
 - MediaCard
 - NavBar
 - PageHeader
+- Photo
+- PricingTable
+- ProfileHeader
 - Section
+- SettingRow
+- SkeletonList
+- StatCard
 - StatStrip
+- Testimonial
+
+## AppShell
+
+Import: `import { AppShell } from '@/components/blocks/AppShell'`
+
+Exports: AppShell
+
+Props: `brand: ReactNode` · `groups: AppNavGroup[]` · `user?: ReactNode` · `header?: ReactNode` · `headerActions?: ReactNode` · `children: ReactNode` · `className?: string`
+
+```tsx
+// EVERY signed-in view (dashboard, admin, settings, account) lives inside one of these. A bare centred
+// column reads as a marketing page, not a product.
+<AppShell
+  brand={<><BarChart3 className="size-4 text-primary" /> Cadence</>}
+  groups={[
+    { items: [{ label: 'Overview', icon: LayoutDashboard, active: true }, { label: 'Runs', icon: Package }] },
+    { heading: 'Billing', items: [{ label: 'Invoices', icon: FileText, onClick: () => setView('invoices') }] },
+  ]}
+  user={<div className="flex items-center gap-3"><Avatar className="size-8"><AvatarFallback>AR</AvatarFallback></Avatar>…</div>}
+  header="Overview"
+  headerActions={<Button>New invoice</Button>}
+>
+  {/* StatCard row → ChartCards → DataTable */}
+</AppShell>
+```
 
 ## ArtImage
 
@@ -19,9 +65,141 @@ Import: `import { ArtImage } from '@/components/blocks/ArtImage'`
 
 Exports: ArtImage
 
+Props: `seed: string` · `kind?: 'product' | 'banner' | 'avatar' | 'abstract'` · `className?: string`
+
 ```tsx
 <ArtImage seed={product.name} kind="product" />   // deterministic token-colored art — same seed, same art
 <ArtImage seed={user.name} kind="avatar" />        // initials avatar
+```
+
+## AuthCard
+
+Import: `import { AuthCard } from '@/components/blocks/AuthCard'`
+
+Exports: AuthCard
+
+Props: `brand?: ReactNode` · `title: ReactNode` · `subtitle?: ReactNode` · `children: ReactNode` · `footer?: ReactNode` · `error?: ReactNode` · `className?: string`
+
+## BentoGrid
+
+Import: `import { BentoGrid } from '@/components/blocks/BentoGrid'`
+
+Exports: BentoGrid
+
+Props: `tiles: BentoTile[]` · `columns?: 2 | 3 | 4` · `className?: string`
+
+```tsx
+// The modern feature band: MIXED-weight tiles, not a row of identical cards.
+// Compose 4–7: one media anchor (span 2), one or two stats, ONE accent tile for the CTA, rest plain.
+<BentoGrid
+  tiles={[
+    { kind: 'media', span: 2, title: 'Repaired, not replaced', description: 'Send it back any year.',
+      media: <Photo web="leather workshop" seed="bench" kind="product" /> },
+    { kind: 'stat', value: '11 yrs', label: 'Median product lifespan' },
+    { kind: 'plain', icon: ShieldCheck, title: 'Lifetime repairs', description: 'Free for a decade.' },
+    { kind: 'accent', title: 'Join the list', description: 'One letter a month.',
+      action: <Button variant="secondary">Subscribe</Button> },
+  ]}
+/>
+```
+
+## CTASection
+
+Import: `import { CTASection } from '@/components/blocks/CTASection'`
+
+Exports: CTASection
+
+Props: `headline: ReactNode` · `subcopy?: ReactNode` · `actions?: ReactNode` · `fineprint?: ReactNode` · `variant?: 'panel' | 'full'` · `className?: string`
+
+```tsx
+// The closing ask — the last band before the Footer. variant="full" paints it primary edge-to-edge.
+<CTASection
+  headline="Put your first pipeline on a schedule tonight"
+  subcopy="Fork a template, point it at your warehouse."
+  actions={<><Button size="lg">Start free</Button><Button size="lg" variant="outline">Read the docs</Button></>}
+  fineprint="No card required · Cancel in one click"
+/>
+```
+
+## CartRow
+
+Import: `import { CartRow } from '@/components/blocks/CartRow'`
+
+Exports: CartRow
+
+Props: `media?: ReactNode` · `title: ReactNode` · `unitPrice: ReactNode` · `meta?: ReactNode` · `quantity: number` · `onQuantityChange?: (delta: number) => void` · `onRemove?: () => void` · `lineTotal?: ReactNode` · `className?: string`
+
+```tsx
+// One cart line. The stepper + remove are what make a cart feel real; a static list reads as a receipt.
+{lines.map((l) => (
+  <CartRow key={l.id} media={<Photo web={l.name} seed={l.id} kind="product" />} title={l.name}
+    unitPrice={`$${l.price.toFixed(2)}`} quantity={l.qty} lineTotal={`$${(l.price * l.qty).toFixed(2)}`}
+    onQuantityChange={(d) => changeQty(l.id, d)} onRemove={() => remove(l.id)} />
+))}
+```
+
+## ChartCard
+
+Import: `import { ChartCard } from '@/components/blocks/ChartCard'`
+
+Exports: ChartCard
+
+Props: `title: ReactNode` · `description?: ReactNode` · `data: Record<string, string | number>[]` · `xKey?: string` · `yKey?: string` · `kind?: 'area' | 'bar' | 'line'` · `tone?: 1 | 2 | 3 | 4 | 5` · `action?: ReactNode` · `showYAxis?: boolean` · `height?: number` · `className?: string`
+
+```tsx
+// ONE series per card. tone picks the preset's chart colour; the block handles axes, grid and tooltip.
+<ChartCard title="Runs per day" description="Scheduled and manual." kind="area" tone={1}
+  data={[{ label: 'Mon', value: 820 }, { label: 'Tue', value: 932 }]} />
+// In your OWN chart code use the PRESET vars — var(--chart-1), var(--border) — never var(--color-chart-1):
+// Tailwind only emits a --color-* alias when a utility uses it, so that one is empty at runtime.
+```
+
+## CheckoutPanel
+
+Import: `import { CheckoutPanel } from '@/components/blocks/CheckoutPanel'`
+
+Exports: CheckoutPanel
+
+Props: `lines: OrderLine[]` · `total: ReactNode` · `totalLabel?: ReactNode` · `children?: ReactNode` · `action?: ReactNode` · `confirmation?: ReactNode` · `className?: string`
+
+```tsx
+// Summary beside the form. Validate ON SUBMIT (forms skill); swap in `confirmation` after success.
+<CheckoutPanel
+  lines={[{ label: 'Subtotal', value: '$318.00' }, { label: 'Shipping', value: 'Free', muted: true }]}
+  total="$318.00"
+  action={<Button type="submit" disabled={!valid}>Place order</Button>}
+>
+  <Label htmlFor="email">Email</Label>
+  <Input id="email" value={form.email} onChange={set('email')} aria-invalid={!!errors.email} />
+</CheckoutPanel>
+```
+
+## Composer
+
+Import: `import { Composer } from '@/components/blocks/Composer'`
+
+Exports: Composer
+
+Props: `avatar?: ReactNode` · `value: string` · `onValueChange: (value: string) => void` · `onSubmit: () => void` · `placeholder?: string` · `maxLength?: number` · `submitLabel?: ReactNode` · `className?: string`
+
+## DataTable
+
+Import: `import { DataTable } from '@/components/blocks/DataTable'`
+
+Exports: DataTable
+
+Props: `columns: DataColumn<T>[]` · `rows: T[]` · `rowKey: (row: T) => string` · `sort?: { key: string; dir: 'asc' | 'desc' }` · `onSortChange?: (key: string) => void` · `onRowClick?: (row: T) => void` · `empty?: ReactNode` · `toolbar?: ReactNode` · `caption?: ReactNode` · `className?: string`
+
+```tsx
+// Sorting/filtering happen ONCE upstream in a useMemo; this block just renders and reports sort clicks.
+const columns: DataColumn<Order>[] = [
+  { key: 'id', header: 'Invoice', cell: (o) => o.id, sortable: true },
+  { key: 'status', header: 'Status', cell: (o) => <Badge variant="secondary">{o.status}</Badge> },
+  { key: 'amount', header: 'Amount', cell: (o) => `$${o.amount}`, numeric: true, sortable: true },
+]
+<DataTable columns={columns} rows={rows} rowKey={(o) => o.id} sort={sort}
+  onSortChange={(key) => setSort((s) => ({ key, dir: s.key === key && s.dir === 'desc' ? 'asc' : 'desc' }))}
+  empty={<EmptyState title="No invoices match" action={<Button variant="outline" onClick={clear}>Clear filters</Button>} />} />
 ```
 
 ## EmptyState
@@ -30,8 +208,34 @@ Import: `import { EmptyState } from '@/components/blocks/EmptyState'`
 
 Exports: EmptyState
 
+Props: `icon?: ComponentType<{ className?: string }>` · `title: string` · `description?: ReactNode` · `action?: ReactNode` · `className?: string`
+
 ```tsx
 <EmptyState icon={ShoppingCart} title="Your cart is empty" description="Find something you'll keep." action={<Button variant="outline" onClick={goCatalog}>Browse</Button>} />
+```
+
+## ErrorState
+
+Import: `import { ErrorState } from '@/components/blocks/ErrorState'`
+
+Exports: ErrorState
+
+Props: `icon?: ComponentType<{ className?: string }>` · `code?: string` · `title: string` · `description?: ReactNode` · `action?: ReactNode` · `className?: string`
+
+## FAQ
+
+Import: `import { FAQ } from '@/components/blocks/FAQ'`
+
+Exports: FAQ
+
+Props: `items: FaqItem[]` · `defaultOpenFirst?: boolean` · `className?: string`
+
+```tsx
+// Answer what BLOCKS a purchase (price, cancellation, data, support) — not what flatters the product.
+<FAQ items={[
+  { question: 'Can I self-host?', answer: 'Yes — the runner is a single binary, on every plan.' },
+  { question: 'Do you charge per seat?', answer: 'No. Pricing follows pipelines and run minutes.' },
+]} />
 ```
 
 ## FeatureGrid
@@ -40,8 +244,36 @@ Import: `import { FeatureGrid } from '@/components/blocks/FeatureGrid'`
 
 Exports: FeatureGrid
 
+Props: `features: Feature[]` · `columns?: 2 | 3` · `className?: string`
+
 ```tsx
 <FeatureGrid features={[{ icon: Truck, title: 'Free shipping', description: 'Over $50, everywhere.' }, …]} />
+```
+
+## FeedPost
+
+Import: `import { FeedPost } from '@/components/blocks/FeedPost'`
+
+Exports: FeedPost
+
+Props: `avatar: ReactNode` · `author: ReactNode` · `meta?: ReactNode` · `children: ReactNode` · `media?: ReactNode` · `actions?: ReactNode` · `onClick?: () => void` · `className?: string`
+
+## FilterBar
+
+Import: `import { FilterBar } from '@/components/blocks/FilterBar'`
+
+Exports: FilterBar
+
+Props: `query?: string` · `onQueryChange?: (value: string) => void` · `placeholder?: string` · `children?: ReactNode` · `chips?: { label: ReactNode; onRemove?: () => void }[]` · `onClear?: () => void` · `action?: ReactNode` · `className?: string`
+
+```tsx
+// Active filters must be VISIBLE (chips) and reversible (clear) — a filtered list that looks like an
+// empty list is the most common way a dashboard lies to its user.
+<FilterBar query={query} onQueryChange={setQuery} placeholder="Search invoices…"
+  chips={plan === 'all' ? [] : [{ label: `Plan: ${plan}`, onRemove: () => setPlan('all') }]}
+  onClear={dirty ? clearAll : undefined} action={<Button>New invoice</Button>}>
+  <Select value={plan} onValueChange={setPlan}>…</Select>
+</FilterBar>
 ```
 
 ## Footer
@@ -49,6 +281,8 @@ Exports: FeatureGrid
 Import: `import { Footer } from '@/components/blocks/Footer'`
 
 Exports: Footer
+
+Props: `brand: ReactNode` · `tagline?: string` · `columns?: FooterColumn[]` · `fineprint?: ReactNode` · `className?: string`
 
 ```tsx
 <Footer brand="Meridian" tagline="Small-batch goods." columns={[{ heading: 'Shop', links: ['Instruments', 'Home'] }]} fineprint="© 2026 Meridian" />
@@ -59,6 +293,8 @@ Exports: Footer
 Import: `import { Hero } from '@/components/blocks/Hero'`
 
 Exports: Hero
+
+Props: `badge?: ReactNode` · `headline: ReactNode` · `subcopy?: ReactNode` · `actions?: ReactNode` · `media?: ReactNode` · `layout?: 'split' | 'centered' | 'bleed' | 'collage'` · `className?: string`
 
 ```tsx
 <Hero
@@ -71,11 +307,29 @@ Exports: Hero
 />
 ```
 
+## LogoStrip
+
+Import: `import { LogoStrip } from '@/components/blocks/LogoStrip'`
+
+Exports: LogoStrip
+
+Props: `label?: ReactNode` · `items: ReactNode[]` · `variant?: 'bordered' | 'bare'` · `className?: string`
+
+```tsx
+// Social proof under the hero. Plain TEXT wordmarks are the intended default — credible with zero assets.
+<LogoStrip
+  label="Stocked by independent shops in 14 countries"
+  items={['Northline', 'Hallowell', 'Studio Mena', 'The Good Press', 'Fieldnote', 'Vestry & Co']}
+/>
+```
+
 ## MediaCard
 
 Import: `import { MediaCard } from '@/components/blocks/MediaCard'`
 
 Exports: MediaCard
+
+Props: `media: ReactNode` · `title: ReactNode` · `meta?: ReactNode` · `aside?: ReactNode` · `actions?: ReactNode` · `onClick?: () => void` · `className?: string`
 
 ```tsx
 <MediaCard
@@ -92,7 +346,9 @@ Import: `import { NavBar } from '@/components/blocks/NavBar'`
 
 Exports: NavBar
 
-variant: `solid` · `Glass` · `floating`
+Props: `brand: ReactNode` · `links?: ReactNode` · `actions?: ReactNode` · `className?: string`
+
+variant: `solid` · `floating`
 
 ```tsx
 <NavBar
@@ -108,9 +364,55 @@ Import: `import { PageHeader } from '@/components/blocks/PageHeader'`
 
 Exports: PageHeader
 
+Props: `title: ReactNode` · `description?: ReactNode` · `actions?: ReactNode` · `className?: string`
+
 ```tsx
 <PageHeader title="Catalog" description="128 products" actions={<><Input placeholder="Search…" /><Button>Add product</Button></>} />
 ```
+
+## Photo
+
+Import: `import { Photo } from '@/components/blocks/Photo'`
+
+Exports: Photo
+
+Props: `web?: string` · `seed: string` · `kind?: ArtImageProps['kind']` · `className?: string` · `alt?: string`
+
+```tsx
+// The DEFAULT for any grid/list of distinct subjects: a real, deterministic photo per item, with an
+// automatic <ArtImage> fallback if the host is blocked or slow — never a broken box.
+{products.map((p) => (
+  <MediaCard key={p.id} title={p.name} meta={p.category}
+    media={<Photo web="leather watch minimal" seed={p.id} kind="product" />} />
+))}
+// NEVER photoFor() across a list — the bundled pack holds ~2 photos per category, so every card repeats.
+```
+
+## PricingTable
+
+Import: `import { PricingTable } from '@/components/blocks/PricingTable'`
+
+Exports: PricingTable
+
+Props: `tiers: PricingTier[]` · `className?: string`
+
+```tsx
+// 2–4 tiers, EXACTLY ONE highlighted — an undifferentiated row makes the visitor choose, and they leave.
+<PricingTable tiers={[
+  { name: 'Solo', price: '$0', period: 'mo', features: ['3 pipelines'], action: <Button variant="outline">Start free</Button> },
+  { name: 'Team', price: '$49', period: 'mo', features: ['Unlimited', 'On-call routing'],
+    action: <Button>Start trial</Button>, highlighted: true },
+  { name: 'Company', price: 'Custom', features: ['SSO', 'Residency'], action: <Button variant="outline">Talk to us</Button> },
+]} />
+```
+
+## ProfileHeader
+
+Import: `import { ProfileHeader } from '@/components/blocks/ProfileHeader'`
+
+Exports: ProfileHeader
+
+Props: `cover?: ReactNode` · `avatar: ReactNode` · `name: ReactNode` · `handle?: ReactNode` · `bio?: ReactNode` · `stats?: ProfileStat[]` · `action?: ReactNode` · `className?: string`
 
 ## Section
 
@@ -118,10 +420,45 @@ Import: `import { Section } from '@/components/blocks/Section'`
 
 Exports: Section
 
+Props: `eyebrow?: string` · `heading?: ReactNode` · `description?: ReactNode` · `tone?: 'default' | 'muted' | 'wash'` · `children: ReactNode` · `className?: string`
+
 ```tsx
 <Section eyebrow="How it works" heading="Three steps" description="One line." tone="muted">
   {/* any content — grids, FeatureGrid, StatStrip… */}
 </Section>
+```
+
+## SettingRow
+
+Import: `import { SettingRow } from '@/components/blocks/SettingRow'`
+
+Exports: SettingRow
+
+Props: `label: ReactNode` · `description?: ReactNode` · `control?: ReactNode` · `children?: ReactNode` · `className?: string`
+
+## SkeletonList
+
+Import: `import { SkeletonList } from '@/components/blocks/SkeletonList'`
+
+Exports: SkeletonList
+
+Props: `count?: number` · `shape?: 'rows' | 'cards' | 'stats'` · `className?: string`
+
+## StatCard
+
+Import: `import { StatCard } from '@/components/blocks/StatCard'`
+
+Exports: StatCard
+
+Props: `label: ReactNode` · `value: ReactNode` · `delta?: number` · `trendLabel?: ReactNode` · `note?: ReactNode` · `icon?: ComponentType<{ className?: string }>` · `lowerIsBetter?: boolean` · `className?: string`
+
+```tsx
+// A dashboard's top row is 3–4 of these. Values are DERIVED (useMemo), never hardcoded, and always
+// carry a comparison — a number with nothing to compare it to tells the reader nothing.
+// delta renders as a badge top-right; trendLabel is the takeaway, note is the quiet context line.
+<StatCard label="Revenue (paid)" value={`$${revenue.toLocaleString()}`} delta={12.4}
+  trendLabel="Trending up this month" note="Paid invoices in the current view" icon={CreditCard} />
+<StatCard label="Failure rate" value="0.42%" delta={-1.1} trendLabel="Fewer failures" lowerIsBetter />  // down = good
 ```
 
 ## StatStrip
@@ -130,8 +467,25 @@ Import: `import { StatStrip } from '@/components/blocks/StatStrip'`
 
 Exports: StatStrip
 
+Props: `stats: Stat[]` · `className?: string`
+
 ```tsx
 <StatStrip stats={[{ value: '12 yrs', label: 'making goods' }, { value: '48k', label: 'repairs' }]} />
+```
+
+## Testimonial
+
+Import: `import { Testimonial } from '@/components/blocks/Testimonial'`
+
+Exports: Testimonial
+
+Props: `quotes: TestimonialQuote[]` · `variant?: 'cards' | 'feature'` · `className?: string`
+
+```tsx
+// variant="cards" for 2–3 voices · variant="feature" for one strong quote. Real names + roles only.
+<Testimonial variant="feature" quotes={[
+  { quote: 'We deleted 4,000 lines of glue in a fortnight.', author: 'Priya Raman', role: 'Staff Engineer, Kestrel' },
+]} />
 ```
 
 ## Canonical page assembly

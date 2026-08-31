@@ -27,3 +27,20 @@ export function useAuth() {
 - **Guarding**: views that need auth render a friendly gate, not a crash:
   `if (!user) return <LoginPrompt onLogin={() => setView({ kind: 'login' })} />`.
 - NEVER pretend it's secure — no fake "encryption", no real-looking API calls. It's a demo pattern.
+
+## The screen — `<AuthCard>`, never a hand-rolled centred div
+
+```tsx
+<AuthCard brand={<><Sparkles className="size-5 text-primary" /> Meridian</>}
+  title="Welcome back" subtitle="Sign in to pick up where you left off."
+  error={failed ? 'That email and password do not match.' : undefined}
+  footer={<>No account? <button type="button" onClick={goSignUp} className="text-foreground underline underline-offset-4">Create one</button></>}>
+  <div className="grid gap-1.5"><Label htmlFor="email">Email</Label><Input id="email" type="email" /></div>
+  <div className="grid gap-1.5"><Label htmlFor="password">Password</Label><Input id="password" type="password" /></div>
+  <Button className="mt-1 w-full">Sign in</Button>
+</AuthCard>
+```
+
+An auth page has **no NavBar and no Footer** — there is nothing to navigate to until the user is in.
+Sign-up, sign-in, and password reset are the SAME block with different fields. For account, settings,
+and notification-preference screens, load the `app-shell` skill.

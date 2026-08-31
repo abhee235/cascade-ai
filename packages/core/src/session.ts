@@ -74,6 +74,8 @@ export interface SessionOptions {
   topK?: number
   repeatPenalty?: number
   presencePenalty?: number
+  /** Reasoning-effort control (TASK-thinking-control): rides the sampling plumbing; capability-gated in the UI. */
+  thinking?: import('./llm/provider').ThinkingLevel
   /** Compaction tuning: `compactRatio` is the proportional trigger `pct` in the ADR-039 ladder (default 0.7);
    *  `keepRecentRatio` is the fraction of the effective window kept verbatim (default 0.25). */
   compactRatio?: number
@@ -116,6 +118,10 @@ export interface SessionOptions {
   /** Extra directories treated as inside the workspace (no prompt). Only meaningful with
    *  `pathAccess: 'prompt'`. */
   additionalDirectories?: string[]
+  /** Project-relative prefixes that are READ-ONLY: Read/Glob/Grep work, Write/Edit/MultiEdit refuse with a
+   *  message telling the model to compose instead. Undeclared ⇒ nothing is frozen, so every existing
+   *  frontend is byte-identical. See PathScope.frozen for the measurement that motivated it. */
+  frozenPaths?: string[]
   /** Small fast model for SIDE-QUERIES — compaction summaries and memory curation. On a single local GPU
    *  the side-query otherwise runs on the BUILDER model itself, competing for its KV cache (measured: a
    *  curation call blocked a model switch for minutes; every constrained-compaction summarize evicts build
@@ -164,7 +170,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
   // Path confinement (ADR-033). 'jail' stays the DEFAULT so the sandboxed web builder — whose
   // project dir is model-writable and which runs `bypass` — keeps its hard refuse. The extension opts into
   // 'prompt': outside paths become approvable via a working-directory prompt.
-  const pathScope = { roots: opts.additionalDirectories, policy: opts.pathAccess ?? 'jail' } as const
+  const pathScope = { roots: opts.additionalDirectories, policy: opts.pathAccess ?? 'jail', frozen: opts.frozenPaths } as const
   const state: PermissionState = {
     mode: opts.mode ?? 'default',
     allow: new Set(opts.allow ?? []),
@@ -422,8 +428,8 @@ export function createSession(opts: SessionOptions): CascadeSession {
           hooks: hooksConfig, // ADR-036
           modelLimits: confidentLimits.contextWindow || confidentLimits.maxOutputTokens ? confidentLimits : undefined, // ADR-038 enforcement
           sampling:
-            opts.temperature !== undefined || opts.topP !== undefined || opts.topK !== undefined || opts.repeatPenalty !== undefined || opts.presencePenalty !== undefined
-              ? { temperature: opts.temperature, topP: opts.topP, topK: opts.topK, repeatPenalty: opts.repeatPenalty, presencePenalty: opts.presencePenalty }
+            opts.temperature !== undefined || opts.topP !== undefined || opts.topK !== undefined || opts.repeatPenalty !== undefined || opts.presencePenalty !== undefined || opts.thinking !== undefined
+              ? { temperature: opts.temperature, topP: opts.topP, topK: opts.topK, repeatPenalty: opts.repeatPenalty, presencePenalty: opts.presencePenalty, thinking: opts.thinking }
               : undefined, // ADR-067
         })
       } catch (err) {

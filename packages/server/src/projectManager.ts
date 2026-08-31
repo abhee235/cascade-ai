@@ -17,6 +17,8 @@ import { applyTemplate, readAiRules } from './templates.js'
 import { createPlannerSession, needsPlanStage } from './planStage.js'
 import { browserHostFor, createBrowserTool } from './browserTool.js'
 import { createPackTool } from './packTool.js'
+import { createTemplateAuditTool } from './auditTool.js'
+import { createRestyleTool } from './restyleTool.js'
 import { createImageSearchTool } from './imageSearchTool.js'
 import { hasVision } from './modelCaps.js'
 import type { ProjectRuntime } from './projectRuntime.js'
@@ -125,6 +127,11 @@ export const BUILDER_BEHAVIOR = [
   // Weak models route poorly on categories — the two always-needed skills are mandated, not routed;
   // situational skills carry literal trigger words in the catalog below.
   '- Before your first Write or Edit, load Skill {name: "architecture"} and Skill {name: "design"} — mandatory. Load the situational skills when their trigger words match.',
+  // The plan's `category:` token (design-overhaul P3 slice 5) is the routing instruction, and PLAN.md is
+  // pinned into EVERY turn — so unlike an inference made once from the brief, it survives compaction.
+  // `game` maps to the `game-dev` skill — the one token whose skill name differs. Stated explicitly:
+  // a weak model told "load that category's skill" will otherwise call Skill {name:"game"} and error.
+  '- PLAN.md\'s Design line opens with `category: <commerce|dashboard|landing|app-shell|social|game|none>`. Load THAT category\'s skill too (unless it is `none`; `game` loads Skill {name: "game-dev"}): it carries the view contract the plan was written against, plus `reference/pages.md` — the verbatim source of a full, working page of that kind. When a view fights you, read that page rather than inventing a shape.',
   '',
   '## Architecture and quality',
   // Measured (shop-iterate-1): one ever-growing App.tsx crossed the read cap by round 2 — every later
@@ -138,7 +145,11 @@ export const BUILDER_BEHAVIOR = [
   '## Verifying the running app',
   // Batch-3 (critique): three documents stated "done" at three bars, and the strongest imperative was the
   // weakest bar — a green tsc is fully compatible with a blank page. ONE canonical checklist, stated here.
-  '- Done means, in order: `npm run build` green (the declared check) → Browser {op:"open"} loads → Browser {op:"audit"} clean (no invisible content, CSS loaded, no console errors). Then end the turn.',
+  // Measured (qwen36-agentic-iq4, builder-shop 2026-08-11): written as a bare name between a backticked
+  // SHELL command and a braced TOOL call, "TemplateAudit clean" read as a CLI — the model burned three
+  // turns on `npx template-audit`, `npx -y @<some-scope>/template-audit`, `grep -i audit package.json`
+  // before finding the tool. Every rung now carries its own call syntax, so the kind is unambiguous.
+  '- Done means, in order: `npm run build` green (the declared check) → TemplateAudit {} clean (zero HARD findings — no demo residue, no unreplaced placeholders; it is a TOOL you call, not a shell command) → Browser {op:"open"} loads → Browser {op:"audit"} clean (no invisible content, CSS loaded, no console errors). Then end the turn.',
   // Batch-3 (critique): "only end when green" + "never ask" had no legal exit when green is impossible —
   // which contradicted "Report faithfully". The honest red is that exit; the gates bound the loop anyway.
   '- If the build still fails after 3 distinct fix attempts on the SAME error, stop: report the exact final error, what you tried, and what was completed. An honest red build is a valid ending; a loop is not.',
@@ -271,7 +282,7 @@ export class ProjectManager {
   /** ADR-067: the RUNTIME provider/model config. Starts from opts (env), mutated by setModelConfig so the
    *  UI can switch provider+model WITHOUT restarting the server. New sessions read this; switching
    *  invalidates cached sessions (history lives in chatStore and reloads on re-open). */
-  private active!: { provider: string; model: string; baseUrl?: string; apiKey?: string; api?: 'openai' | 'ollama'; contextWindow?: number; maxOutputTokens?: number; temperature?: number; topP?: number; topK?: number; repeatPenalty?: number; presencePenalty?: number }
+  private active!: { provider: string; model: string; baseUrl?: string; apiKey?: string; api?: 'openai' | 'ollama'; contextWindow?: number; maxOutputTokens?: number; temperature?: number; topP?: number; topK?: number; repeatPenalty?: number; presencePenalty?: number; thinking?: 'off' | 'low' | 'medium' | 'high' }
   /** Provider construction, injectable so tests can assert which model a session was actually built from. */
   private readonly makeProvider: typeof createProvider
 
@@ -288,6 +299,12 @@ export class ProjectManager {
       ((dir, sandbox, extraInstructions) =>
         createSession({
           cwd: dir,
+          // THE SHARED LAYERS ARE READ-ONLY, AND NOW ACTUALLY ARE. Both directories carried a READ-ONLY
+          // comment and nothing else; measured (qwen3.5:9b 2026-08-13) two of three builds rewrote blocks
+          // anyway — NavBar/Hero/LogoStrip edited, a DangerZone block invented. Every property that makes
+          // a generated app remixable and lintable ("pages COMPOSE frozen blocks") dies silently there,
+          // with the build still green. Reads stay open: composing a block requires reading it first.
+          frozenPaths: ['src/components/blocks', 'src/components/ui'],
           provider: this.makeProvider({ provider: this.active.provider, model: this.active.model, baseUrl: this.active.baseUrl, apiKey: this.active.apiKey, api: this.active.api }),
           model: this.active.model,
           // Hosted providers have no live window probe — honor an explicit override so the compactor sizes
@@ -304,6 +321,7 @@ export class ProjectManager {
           topK: this.active.topK,
           repeatPenalty: this.active.repeatPenalty,
           presencePenalty: this.active.presencePenalty,
+          thinking: this.active.thinking, // TASK-thinking-control: reasoning-effort knob (rides the sampling plumbing)
           // The autonomous builder has no synchronous user to answer mid-build — drop AskUserQuestion so a
           // weak model can't stall the turn asking permission / for the next step (it must ACT — see
           // BUILDER_BEHAVIOR). Clarifying questions belong to the planner stage, which keeps the tool.
@@ -378,7 +396,14 @@ export class ProjectManager {
               return host ? [createBrowserTool({ sandbox: host, vision: this.visionOk })] : []
             })(),
             createImageSearchTool(),
-            ...([createPackTool({ projectDir: dir, templateId: 'react' })].filter(Boolean) as import('@cascade/core').Tool[]),
+            ...([
+              createPackTool({ projectDir: dir, templateId: 'react' }),
+              // P1: the residue audit — self-gates to undefined when the template ships no contract.
+              createTemplateAuditTool({ projectDir: dir, templateId: 'react' }),
+              // P5: mechanical restyle (preset/skin swap) — self-gates when the project has no themes.
+              // The complement of frozenPaths above: blocks can't be hand-edited, only swapped whole.
+              createRestyleTool({ projectDir: dir, templateId: 'react' }),
+            ].filter(Boolean) as import('@cascade/core').Tool[]),
           ],
         }))
     this.load()
@@ -531,7 +556,7 @@ export class ProjectManager {
    *  reloads on re-open. The API key is resolved from the ENVIRONMENT for the built-in providers, OR passed
    *  explicitly (ADR-076: a custom endpoint's key, held server-side in the registry, never by the client).
    *  On a provider change, the old baseUrl/contextWindow/apiKey are dropped (provider-specific) unless supplied. */
-  async setModelConfig(cfg: { provider?: string; model?: string; baseUrl?: string; apiKey?: string; api?: 'openai' | 'ollama'; contextWindow?: number; maxOutputTokens?: number; temperature?: number; topP?: number; topK?: number; repeatPenalty?: number; presencePenalty?: number }): Promise<void> {
+  async setModelConfig(cfg: { provider?: string; model?: string; baseUrl?: string; apiKey?: string; api?: 'openai' | 'ollama'; contextWindow?: number; maxOutputTokens?: number; temperature?: number; topP?: number; topK?: number; repeatPenalty?: number; presencePenalty?: number; thinking?: 'off' | 'low' | 'medium' | 'high' }): Promise<void> {
     const providerChanged = !!cfg.provider && cfg.provider !== this.active.provider
     const modelChanged = !!cfg.model && cfg.model !== this.active.model
     // Per-model params (window/output/sampling) are dropped when the TARGET model changes — the caller
@@ -551,6 +576,7 @@ export class ProjectManager {
       topK: cfg.topK ?? (dropModelParams ? undefined : this.active.topK),
       repeatPenalty: cfg.repeatPenalty ?? (dropModelParams ? undefined : this.active.repeatPenalty),
       presencePenalty: cfg.presencePenalty ?? (dropModelParams ? undefined : this.active.presencePenalty),
+      thinking: cfg.thinking ?? (dropModelParams ? undefined : this.active.thinking),
     }
     this.visionOk = await hasVision(this.active.model, this.active.baseUrl, this.active.provider).catch(() => false)
     // Drop cached sessions so the next open() recreates them against the new provider (history reloads).

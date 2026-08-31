@@ -100,6 +100,12 @@ export interface Tool<I = unknown> {
   /** Safe to run in parallel with other tools this turn? Default when absent: false (conservative).
    *  Read-only tools are safe; writes are not (they can race). Used by the scheduler (Phase 6). */
   isConcurrencySafe?(input: I): boolean
+  /** This tool must run again after the LAST file mutation before the loop accepts a terminal answer
+   *  (design-overhaul P1, generalized): the loop tracks every declarer generically and nudges ONCE per
+   *  submit naming the pending tools. The contract rides tool REGISTRATION — a frontend gates a new tool
+   *  by setting this flag at its definition, with no session option and no core edit (the reviewed
+   *  alternative, one `SessionOptions` name-knob per gated tool, does not scale). Undeclared ⇒ inert. */
+  mustRunBeforeDone?: boolean
   /** ADR-043: this tool's effect IS a round-trip to the user (AskUserQuestion, ExitPlanMode). The scheduler
    *  yields a `question` event and awaits the answer via ctx.ask instead of running `call()`. Default: false. */
   requiresUserInteraction?(): boolean

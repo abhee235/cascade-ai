@@ -96,6 +96,37 @@ export function resolveCheckCommand(cwd: string): string | undefined {
 	return undefined
 }
 
+// ── Design-overhaul P1 (generalized): the RUN-BEFORE-DONE gate ────────────────────────────────────────────
+// Same doctrine as ADR-049 (prompt text alone doesn't hold weak models), different evidence: the measured
+// Meridian failures shipped template residue behind a GREEN build, so a build-command gate can never catch
+// them. The DECLARATION rides the Tool contract (Tool.mustRunBeforeDone) instead of a per-tool session
+// option — a frontend gates a tool at its definition site, and core tracks all declarers generically: a
+// successful file mutation re-arms every declared tool; any call of one clears it (even a call reporting
+// findings — the report reaching the model is what drives the fixes, identical to a red check run).
+
+/** Fold one executed batch into pending-before-done state. `declared` = the registry's current
+ *  mustRunBeforeDone tool names (recomputed per turn — MCP tools may join mid-session). */
+export function foldRunBeforeDone(pending: ReadonlySet<string>, declared: string[], toolUses: ToolUse[], results: ContentBlock[]): Set<string> {
+	if (declared.length === 0) return new Set() // nothing declared ⇒ permanently clean ⇒ the gate never fires
+	const okById = new Map(results.map((r) => [r.type === 'tool_result' ? r.tool_use_id : '', r.type === 'tool_result' && !r.isError]))
+	const next = new Set(pending)
+	for (const tu of toolUses) {
+		if (FILE_MUTATING_TOOLS.has(tu.name) && okById.get(tu.id)) for (const name of declared) next.add(name)
+	}
+	for (const tu of toolUses) next.delete(tu.name)
+	return next
+}
+
+/** The one run-before-done nudge, same channel and same re-anchoring shape as the verify nudge. */
+export function buildRunBeforeDoneNudge(pending: string[]): Message {
+	const names = pending.join(' and ')
+	return {
+		role: 'user',
+		content:
+			`<system-reminder>You edited files but never called the ${names} tool${pending.length > 1 ? 's' : ''} afterwards. Call ${names} NOW — ${pending.length > 1 ? 'they are TOOLS' : 'it is a TOOL'} available in this session, not a shell command — and fix every blocking finding reported before finishing. This is a background note, NOT a new request: do not reply to it — call the tool${pending.length > 1 ? 's' : ''}, then give your final answer on the ORIGINAL task.</system-reminder>`,
+	}
+}
+
 // ── ADR-058: the MID-FLIGHT check nudge (the Simmer live-lock) ─────────────────────────────────────────────
 // The terminal gate only fires when the model STOPS calling tools — a live-lock never reaches it (measured:
 // 53 turns of tool calls, edits since turn 8, `npm run build` never run once). Compiler/test output is
@@ -104,6 +135,37 @@ export function resolveCheckCommand(cwd: string): string | undefined {
 
 /** Consecutive turns of unverified-edit state before the mid-flight nudge fires (once per submit). */
 export const STALLED_VERIFY_TURNS = 5
+
+// ── The mid-flight AUDIT nudge (2026-08-15) ───────────────────────────────────────────────────────────
+// Same shape, different blind spot. The run-before-done gate also only fires when the model STOPS, and a
+// weak model does not stop — it runs out of budget. Measured (qwen3.5:9b, three of four category builds):
+// the model wrote its components and NEVER rewired src/App.tsx, so the app it "built" rendered the starter
+// scaffold; TemplateAudit was called ZERO times in every one of those runs, and the audit is exactly what
+// would have said so (an untouched entry still carries the scaffold's placeholder markers, a HARD finding).
+// A gate the model reaches only by finishing cannot help a model that never finishes.
+//
+// So the declared before-done tool is ALSO nudged mid-flight, on the same "N consecutive editing turns"
+// trigger. It is deliberately LATER than the verify nudge: a build error blocks everything and should be
+// heard first, while "your work is not wired up yet" is only worth saying once real work exists.
+// THRESHOLD, tuned by measurement (2026-08-15). At 8 it fired on 4 of 4 capable 35B runs, at turns 10-15,
+// while those models were going to audit on their own at turns 12-18 — so it was not detecting a stall, it
+// was detecting 'a build is happening'. A reminder that always fires is the kind a model learns to skip.
+// 20 sits ABOVE what a capable model needs (silent on all four) and well BELOW where a stuck one lives: the
+// 9B runs it was written for went 38-60 turns with ZERO audit calls.
+export const STALLED_AUDIT_TURNS = 20
+
+/** The mid-flight audit reminder — appended to the trailing tool_results message (ADR-034 channel). */
+export function buildStalledAuditNudge(pending: string[]): string {
+	const names = pending.join(' and ')
+	return (
+		`<system-reminder>You have been editing for ${STALLED_AUDIT_TURNS} turns without calling ${names}. ` +
+		`Call ${names} NOW — ${pending.length > 1 ? 'they are TOOLS' : 'it is a TOOL'} in this session, not a shell command. ` +
+		'It reports what still stands between this project and done, INCLUDING work that exists but is not reachable yet ' +
+		'(components nothing imports, an entry point still showing the starter scaffold) — a green build does not prove ' +
+		'your app renders. This is a background note, NOT a new request: do not reply to it — call the tool, fix what it ' +
+		'names, then continue the ORIGINAL task.</system-reminder>'
+	)
+}
 
 /** The mid-flight reminder — appended to the trailing tool_results message (ADR-034 channel). */
 export function buildStalledVerifyNudge(check?: CheckCommand): string {

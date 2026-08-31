@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { createSession, loadAgentDefs, type CompletionRequest, type ModelProvider } from '@cascade/core'
-import { createPlannerSession, ensurePlanPersisted, needsPlanStage, planSalvageNudge } from '../src/planStage'
+import { createPlannerSession, ensurePlanPersisted, needsPlanStage, planQualityIssues, planReviseNudge, planSalvageNudge } from '../src/planStage'
 import { agentDirsFor, ProjectManager } from '../src/projectManager'
 
 // ── fixtures ─────────────────────────────────────────────────────────────────────────────────────────
@@ -246,5 +246,82 @@ describe('planSalvageNudge (dokar-9B forensics) — spoken questions are a proto
 	it('no questions, just chatter → the nudge demands the plan itself', () => {
 		const nudge = planSalvageNudge(sessionWith('I will help you build an advanced to-do list app.'))
 		expect(nudge).toContain('Produce the plan NOW')
+	})
+})
+
+describe('planQualityIssues — the pinned contract must be usable (35B forensics, 2026-08-11)', () => {
+	// Measured: a 35B planner produced a 4,797-char plan with NO Design section that specified
+	// "emoji-only product images". PLAN.md is pinned every turn, so all three defects poison every
+	// build turn that follows — and the pin truncates at 2,500 chars, so its tail never even arrived.
+	const good = `# Shop — Plan\n\n## Goal\nA storefront.\n\n## Views\n- catalog — MediaCard grid\n\n## Design\ncategory: commerce; preset: premium; catalog: NavBar+MediaCard grid; imagery: <Photo web> per item\n\n## Data model\nProduct { id: string }\n`
+
+	it('accepts a terse plan that has a Design section and names real imagery', () => {
+		expect(planQualityIssues(good)).toEqual([])
+	})
+
+	it('flags a plan longer than the pin cap, naming the invisible tail', () => {
+		const issues = planQualityIssues(good + 'x'.repeat(3_000))
+		expect(issues.some((i) => i.includes('INVISIBLE'))).toBe(true)
+	})
+
+	it('flags a missing Design section', () => {
+		expect(planQualityIssues(good.replace('## Design', '## Notes')).some((i) => i.includes('Design'))).toBe(true)
+	})
+
+	it('flags emoji planned as imagery — the failure a missing Design section produces', () => {
+		expect(planQualityIssues(good.replace('<Photo web> per item', 'emoji per product')).some((i) => i.includes('EMOJI'))).toBe(true)
+		expect(planQualityIssues(good + '\n- 🛍️ 🛒 ✅ product art\n').some((i) => i.includes('EMOJI'))).toBe(true)
+	})
+
+	it('accepts the BOLD-label section form the planner template actually uses (no false positive)', () => {
+		// planner.md writes `**Design:** …`, not `## Design`. A heading-only check would have flagged the
+		// measured 35B plan — which was correct — and burned a revise round on it.
+		const bold = ['# Shop — Plan', '**Goal:** storefront.', '**Design:** `category: commerce`; `preset: premium`; catalog: MediaCard grid; imagery: `<Photo web>` per item'].join('\n')
+		expect(planQualityIssues(bold)).toEqual([])
+	})
+
+	it('flags photoFor() planned for a GRID, but not for a single hero', () => {
+		// Measured (35B, builder-shop): the plan chose `photoFor()` per product for a six-item catalog —
+		// the pack holds ~2 photos per category, so every card repeats. photoFor for ONE hero is correct.
+		const grid = ['# P', '**Design:** category: commerce; imagery: `photoFor()` per product, fallback ArtImage'].join('\n')
+		expect(planQualityIssues(grid).some((i) => i.includes('GRID'))).toBe(true)
+		const hero = ['# P', '**Design:** category: landing; imagery: hero via `photoFor()`, cards via `<Photo web>`'].join('\n')
+		expect(planQualityIssues(hero)).toEqual([])
+	})
+
+	it('requires the category: routing token, and accepts every mounted category', () => {
+		// PLAN.md is re-read every builder turn, so `category:` re-states which skill to load on EVERY turn
+		// — durable in a way a turn-one inference from the brief is not (compaction eats that).
+		const withCat = (c: string) => ['# P', `**Design:** category: ${c}; preset: premium; imagery: \`<Photo web>\` per item`].join('\n')
+		for (const c of ['commerce', 'dashboard', 'landing', 'app-shell', 'social', 'game', 'none']) {
+			expect(planQualityIssues(withCat(c)), `${c} should be accepted`).toEqual([])
+		}
+		const missing = ['# P', '**Design:** preset: premium; imagery: `<Photo web>` per item'].join('\n')
+		expect(planQualityIssues(missing).some((i) => i.includes('category:'))).toBe(true)
+		// A category we do not mount a skill for is not a routing target — treat it as missing.
+		expect(planQualityIssues(withCat('fintech')).some((i) => i.includes('category:'))).toBe(true)
+	})
+
+	it('rejects `category: none` when the plan itself reads like a category', () => {
+		// Measured (qwen36-agentic-iq4, builder-landing, 2026-08-11): the planner declared `category: none`
+		// for a SaaS MARKETING LANDING PAGE, then happened to self-correct on a second write. `none` is the
+		// escape hatch from deciding, and it silently skips the whole routing rung.
+		const asLanding = ['# Ferrite', '**Design:** category: none; preset: aurora-glass; home: NavBar + Hero + PricingTable + Testimonial + FAQ; imagery: `<Photo web>`'].join('\n')
+		const flagged = planQualityIssues(asLanding)
+		expect(flagged.some((i) => i.includes('landing'))).toBe(true)
+
+		// …but `none` STAYS legitimate for an app no category fits — a todo list is not a landing page.
+		const todo = ['# Todo', '**Design:** category: none; preset: minimal-mono; one list view; imagery: `<ArtImage>` for the empty state'].join('\n')
+		expect(planQualityIssues(todo)).toEqual([])
+
+		// ONE stray signal must not contradict a correct `none` — two independent ones are required.
+		const oneSignal = ['# Notes', '**Design:** category: none; preset: editorial; a FAQ section at the bottom; imagery: `<ArtImage>`'].join('\n')
+		expect(planQualityIssues(oneSignal)).toEqual([])
+	})
+
+	it('planReviseNudge names every issue and points at the design skill', () => {
+		const nudge = planReviseNudge(['it is too long', 'it has no Design section'])
+		expect(nudge).toContain('it is too long')
+		expect(nudge).toContain('Skill {name: "design"}')
 	})
 })
