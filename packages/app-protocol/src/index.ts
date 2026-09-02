@@ -29,6 +29,14 @@ export interface RuntimeInfo {
   dockerAvailable: boolean
   /** CASCADE_SANDBOX=off pins host mode; the UI disables the control rather than letting it lie. */
   forcedHost?: boolean
+  /** ADR-070 step 7: the WSL runtime is offerable (Windows + wsl.exe present + a registered distro or a
+   *  bundled rootfs). The UI shows the WSL option only when true. */
+  wslAvailable?: boolean
+  /** ADR-070 step 7: host mode is NOT necessarily unprotected — on a machine with a local backend
+   *  (Windows write-fence, macOS Seatbelt, Linux bwrap) the agent's commands are still confined. Present
+   *  only when host mode actually confines; the UI states the honest degree ('full' vs 'partial') instead
+   *  of a blanket "no isolation". Absent ⇒ host mode is genuinely unconfined on this machine. */
+  hostConfinement?: { backend: string; enforcement: 'full' | 'partial' }
 }
 
 /** A project scaffold the agent can start from (Phase 15). */

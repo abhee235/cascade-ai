@@ -21,7 +21,8 @@ import { ensurePlanPersisted, planSalvageNudge } from './planStage.js'
 import { DockerSandbox, dockerAvailable, sweepSandboxContainers } from './dockerSandbox.js'
 import { HostSandbox, sweepHostDevServers } from './hostSandbox.js'
 import { DEFAULT_RUNTIME_MODE, type RuntimeMode } from './projectRuntime.js'
-import { WslSandbox, resetWslCache, wslRuntimeUsable } from './wslSandbox.js'
+import { WslSandbox, resetWslCache, wslOfferable, wslRuntimeUsable } from './wslSandbox.js'
+import { localBackendClaims, selectLocalBackend } from './sandboxBackends.js'
 import type { RuntimeInfo } from '@cascade/app-protocol'
 import { ensureVisualEditConfig, listTemplates } from './templates.js'
 import { listModels, modelInfo, providerCatalog, setProviderKey } from './modelCaps.js'
@@ -1112,6 +1113,23 @@ export async function start(deps: ServerDeps = {}) {
   // Retained under its old name for the many `hasDocker` reads below; it means "the isolated runtime".
   const hasDocker = runtimeMode === 'docker'
 
+  // ADR-070 step 7: the honest runtime facts the Settings UI needs. Computed once at boot (both are
+  // machine-fixed or cheap): whether WSL can be OFFERED (no distro import — that waits for selection), and
+  // whether HOST mode actually confines commands via a local backend (the Windows write-fence, macOS
+  // Seatbelt, Linux bwrap) — so "host" no longer implies "no isolation" on those machines.
+  const wslCanOffer = process.platform === 'win32' && wslOfferable()
+  const hostBackend = selectLocalBackend()
+  const hostClaims = localBackendClaims()
+  const hostConfinement = hostClaims.enforcement ? { backend: hostBackend, enforcement: hostClaims.enforcement } : undefined
+  const runtimeInfoOf = (mode: RuntimeMode, requested: RuntimeMode, dockerAvailable: boolean): RuntimeInfo => ({
+    mode,
+    requested,
+    dockerAvailable,
+    forcedHost,
+    wslAvailable: wslCanOffer,
+    ...(hostConfinement ? { hostConfinement } : {}),
+  })
+
   /** Apply a runtime change and persist it. The CALLER has already torn down the sandboxes that were
    *  built for the old runtime — this only decides what the next one will be, and records the choice so
    *  the next launch honours it. Re-probes Docker, because its availability is exactly what changes
@@ -1128,7 +1146,7 @@ export async function start(deps: ServerDeps = {}) {
     // (measured: a container still publishing its port after the switch to host).
     await sweepSandboxContainers().catch(() => 0)
     await deps.config?.setSetting('runtimeMode', requestedMode)
-    return { mode: runtimeMode, requested: requestedMode, dockerAvailable: ready || (await dockerAvailable()), forcedHost }
+    return runtimeInfoOf(runtimeMode, requestedMode, ready || (await dockerAvailable()))
   }
 
   // ADR-081: both registries now read through the injected ConfigStore. AWAITED here — every getter they
@@ -1179,7 +1197,7 @@ export async function start(deps: ServerDeps = {}) {
       model: MODEL,
       // Fresh per connection: the mode can have changed since boot, and a stale badge is a lie about
       // whether the user's commands are isolated.
-      runtime: { mode: runtimeMode, requested: requestedMode, dockerAvailable: dockerReady, forcedHost },
+      runtime: runtimeInfoOf(runtimeMode, requestedMode, dockerReady),
       setRuntimeMode: applyRuntimeMode,
     }, deps.traces),
   )

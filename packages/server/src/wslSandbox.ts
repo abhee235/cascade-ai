@@ -172,6 +172,16 @@ export function wslRuntimeUsable(): boolean {
 	return ensureDistro() === 'ready'
 }
 
+/** CHEAP offerability check for the UI (ADR-070 step 7): is the WSL runtime a valid choice on this
+ *  machine WITHOUT importing/verifying the distro? True when wsl.exe is present AND either the distro is
+ *  already registered OR a bundled rootfs exists to import from. The actual import + boundary verification
+ *  happens only when the user selects wsl (applyRuntimeMode → wslRuntimeUsable). */
+export function wslOfferable(): boolean {
+	if (!wslAvailable()) return false
+	const rootfs = process.env.CASCADE_WSL_ROOTFS
+	return distroRegistered() || (!!rootfs && existsSync(rootfs))
+}
+
 // ── The runtime ─────────────────────────────────────────────────────────────────────────────────────
 
 export class WslSandbox implements ProjectRuntime {

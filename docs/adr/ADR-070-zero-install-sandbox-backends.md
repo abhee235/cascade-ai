@@ -191,19 +191,23 @@ built on OS token semantics (prior art: the public `windows-acl-restrict-poc` pa
 
 ## Implementation plan (one rung at a time, each independently shippable)
 
-| Step | Scope | Done when |
-|---|---|---|
-| 1. Policy vocabulary in core | `SandboxPolicy` (3 modes), `writableRoots`, canonical-path rule, structured `confine()` result, policy line in system prompt; `DockerSandbox` adapted to the new shape | Unit: mode resolution ladder, roots derivation, policy-section render. Existing Docker tests still green |
-| 2. Denial classification + escalation | Tool layer: classify confined stderr via `denialSignatures`; denial + hint markers; `sandbox_permissions`/`justification` schema fields; strict-widening check; approval flow; one-call grant | Unit: marker texts pinned; malformed pairings rejected; non-widening asks never prompt. Eval: weak-model denied-write scenario recovers via escalation |
-| 3. Toolchain layer (mise) | Bundle mise; Cascade-owned prefix; per-project `mise.toml`; TMP/prefix env injection in every exec mode | E2E: `install python` lands in the prefix, never in user PATH; project reproducible on second machine |
-| 4. macOS + Linux backends | Backend registry + platform chains + functional probes (bounded timeouts); Seatbelt profile; bwrap profile; Landlock fallback rung | Gated live tests per OS: write inside workspace ok, outside denied with correct signature; probe failure → next rung; no rung → fail closed |
-| 5. Windows WSL backend | Rootfs build script (Alpine/Debian + mise); first-run `wsl --import`; project-inside-distro; `\\wsl$` affordance; dispose/rebuild | E2E on fresh distro: scaffold + build a Node and a Python project; host FS diff outside project dir is empty |
-| 6. Windows write-fence rung | FFI runner (restricted token, deterministic workspace SID, session temp SID, job object, fail-closed), probe, `partial` report, ACE lifecycle (standing workspace / revocable temp) | Live suite: outside-workspace write denied; two sessions can't cross-write temps; runner failure ≠ denial; Everyone/hard-link boundaries pinned as known-partial |
-| 7. Selection UX | Chain status surface (which rung is active, why), degradation warnings, `hermetic mode` escape hatch (external VM endpoint) | Manual: pull each rung out (uninstall/disable) and watch the chain degrade visibly, never silently |
+| Step | Scope | Done when | Status |
+|---|---|---|---|
+| 1. Policy vocabulary in core | `SandboxPolicy` (3 modes), `writableRoots`, canonical-path rule, structured `confine()` result, policy line in system prompt; `DockerSandbox` adapted to the new shape | Unit: mode resolution ladder, roots derivation, policy-section render. Existing Docker tests still green | ✅ Done (`core/sandbox/policy.ts`, `sandboxPolicy.test.ts`) |
+| 2. Denial classification + escalation | Tool layer: classify confined stderr via `denialSignatures`; denial + hint markers; `sandbox_permissions`/`justification` schema fields; strict-widening check; approval flow; one-call grant | Unit: marker texts pinned; malformed pairings rejected; non-widening asks never prompt. Eval: weak-model denied-write scenario recovers via escalation | ✅ Done (`core/sandbox/escalation.ts`, `sandboxEscalation.test.ts`); eval scenario deferred to next batch |
+| 3. Toolchain layer (mise) | Bundle mise; Cascade-owned prefix; per-project `mise.toml`; TMP/prefix env injection in every exec mode | E2E: `install python` lands in the prefix, never in user PATH; project reproducible on second machine | ✅ Done (`server/toolchains.ts`); live E2E green (jq install into the prefix) |
+| 4. macOS + Linux backends | Backend registry + platform chains + functional probes (bounded timeouts); Seatbelt profile; bwrap profile; Landlock fallback rung | Gated live tests per OS: write inside workspace ok, outside denied with correct signature; probe failure → next rung; no rung → fail closed | ✅ Done (`server/sandboxBackends.ts`); unit matrix green; bwrap kernel live suite ready (Linux-gated). Landlock rung deferred (needs bundled launcher) |
+| 5. Windows WSL backend | Rootfs build script (Alpine/Debian + mise); first-run `wsl --import`; project drvfs-mount; `\\wsl$` affordance; dispose/rebuild | E2E on fresh distro: scaffold + build a Node and a Python project; host FS diff outside project dir is empty | ✅ Done (`server/wslSandbox.ts`, `scripts/build-wsl-rootfs.ps1`); full live E2E green on Windows |
+| 6. Windows write-fence rung | FFI runner (restricted token, deterministic workspace SID, private temp, fail-closed), probe, `partial` report, standing-ACE reuse cache | Live suite: outside-workspace write denied; runner failure ≠ denial; Everyone/hard-link boundaries pinned as known-partial | ✅ Done (`server/winFence.ts` + `winFenceRunner.ts` + `winFenceSid.ts`); live kernel suite green on Windows, no admin |
+| 7. Selection UX | Chain status surface (which rung is active, why), degradation warnings; honest host-mode confinement label | Manual: pull each rung out (uninstall/disable) and watch the chain degrade visibly, never silently | ✅ Done (`RuntimeInfo.wslAvailable`/`hostConfinement`, `SettingsPage`); Host/WSL/Docker selector + partial-fence note |
 
 Order rationale: steps 1–2 are pure core/tool work that pays off immediately (even Docker users get the
 escalation ladder); step 3 kills D2 everywhere; steps 4–6 land backends cheapest-first; step 7 makes
 degradation honest. Each step ends in a tagged checkpoint per the phase discipline.
+
+**Deferred (tracked, not blocking):** the Linux Landlock fallback rung (needs a bundled launcher binary);
+the weak-model escalation-recovery eval scenario (next eval batch); the `hermetic mode` external-VM escape
+hatch (power-user tier — the WSL rung already delivers the VM boundary for the common case).
 
 ## Consequences
 
