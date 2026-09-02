@@ -102,12 +102,15 @@ export class HostSandbox implements ProjectRuntime {
 		// the Preview owns the dev server in BOTH runtimes, and a second one binds a port nothing is watching.
 		const refusal = devServerRefusal(command)
 		if (refusal) return { output: refusal, exitCode: 1 }
-		// ADR-070 step 4: wrap the MODEL's command in the platform's confinement (Seatbelt/bwrap) per the
-		// call's policy. Passthrough when no policy / danger-full-access / no usable backend — so today's
-		// Windows host path is byte-identical, and product-owned commands (installDependencies, startDev,
-		// stopDev's taskkill) which call run() directly are deliberately NOT confined: they are ours, not
-		// the model's.
+		// ADR-070 step 4/6: wrap the MODEL's command in the platform's confinement (Seatbelt/bwrap, or the
+		// Windows write-fence) per the call's policy. Passthrough when no policy / danger-full-access / no
+		// usable backend — so an unconfigured host path is byte-identical, and product-owned commands
+		// (installDependencies, startDev, stopDev's taskkill) which call run() directly are deliberately
+		// NOT confined: they are ours, not the model's.
 		const confined = confineHostCommand(command, opts.policy)
+		// The fence uses argv form: spawn its runner from runnerCwd (where `tsx` resolves), NOT the project
+		// workspace — the runner sets the CHILD's cwd to the workspace itself via its --workspace flag.
+		if (confined.argv) return run(confined.command, confined.runnerCwd ?? this.projectDir, opts, confined.argv)
 		return run(confined.command, opts.cwd ?? this.projectDir, opts)
 	}
 
@@ -380,13 +383,18 @@ export function freePort(): Promise<number> {
  * On abort, the tree is killed on Windows: the `signal` option kills only the direct cmd.exe wrapper, and
  * the grandchild it spawned survives holding its port — the same reason stopDev kills with /T.
  */
-function run(command: string, cwd: string, opts: { signal?: AbortSignal; onData?: (s: string) => void }): Promise<ExecResult> {
+function run(command: string, cwd: string, opts: { signal?: AbortSignal; onData?: (s: string) => void }, argv?: string[]): Promise<ExecResult> {
 	return new Promise((resolve) => {
 		if (!existsSync(cwd)) return resolve({ output: `cwd does not exist: ${cwd}`, exitCode: 1 })
-		// Git Bash when available — node spawns a non-cmd shell string as `bash.exe -c <command>` — cmd otherwise.
-		// ADR-070 step 3: mise shims prepended (empty spread when mise is absent — byte-identical env), so
-		// every agent command resolves node/python/etc. through the project's pinned, Cascade-owned toolchain.
-		const child = spawn(command, { cwd, shell: hostBash ?? true, windowsHide: true, signal: opts.signal, env: { ...process.env, ...miseEnv() } })
+		// ADR-070 step 6: an ARGV-form backend (the write-fence) spawns its runner directly with NO shell,
+		// so the model's command — the runner's final argv element — is never re-parsed by a shell.
+		// Otherwise: Git Bash when available (node spawns a non-cmd shell string as `bash.exe -c <command>`),
+		// cmd otherwise. ADR-070 step 3: mise shims prepended (empty spread when mise is absent —
+		// byte-identical env), so every agent command resolves node/python/etc. through the pinned toolchain.
+		const env = { ...process.env, ...miseEnv() }
+		const child = argv
+			? spawn(argv[0], argv.slice(1), { cwd, shell: false, windowsHide: true, signal: opts.signal, env })
+			: spawn(command, { cwd, shell: hostBash ?? true, windowsHide: true, signal: opts.signal, env })
 		let output = ''
 		let settled = false
 		const finish = (r: ExecResult) => {

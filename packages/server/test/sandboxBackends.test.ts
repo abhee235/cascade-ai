@@ -83,10 +83,11 @@ describe('selection matrix — platform chain × probe verdicts', () => {
 		expect(selectLocalBackend({ platform: 'linux', probeBwrap: () => true })).toBe('bwrap')
 		expect(selectLocalBackend({ platform: 'linux', probeBwrap: () => false })).toBe('none')
 	})
-	it('win32: none, and no probe is ever spawned for a platform with no chain', () => {
+	it('win32: selects the fence when its probe passes; a platform with NO chain never spawns a probe', () => {
+		expect(selectLocalBackend({ platform: 'win32', probeWinFence: () => true })).toBe('win-write-fence')
 		const probeBwrap = vi.fn(() => true)
 		const probeSeatbelt = vi.fn(() => true)
-		expect(selectLocalBackend({ platform: 'win32', probeBwrap, probeSeatbelt })).toBe('none')
+		expect(selectLocalBackend({ platform: 'freebsd', probeBwrap, probeSeatbelt })).toBe('none') // no chain
 		expect(probeBwrap).not.toHaveBeenCalled()
 		expect(probeSeatbelt).not.toHaveBeenCalled()
 	})
@@ -95,9 +96,11 @@ describe('selection matrix — platform chain × probe verdicts', () => {
 		expect(selectLocalBackend({ platform: 'linux', probeBwrap: () => true })).toBe('none')
 	})
 	it('injected-platform calls never pollute the real-platform cache', () => {
+		// A win32 real host would otherwise cache whatever an injected linux probe returned.
 		expect(selectLocalBackend({ platform: 'linux', probeBwrap: () => true })).toBe('bwrap')
-		// The real platform here is win32 → 'none'; a cached 'bwrap' from the injected call would be a bug.
-		expect(selectLocalBackend()).toBe(process.platform === 'win32' ? 'none' : selectLocalBackend())
+		const real = selectLocalBackend() // real platform, its own probe; the injected 'bwrap' must not leak
+		expect(real).toBe(selectLocalBackend()) // stable/cached
+		if (process.platform === 'win32') expect(real).not.toBe('bwrap')
 	})
 })
 
@@ -124,10 +127,17 @@ describe('HostSandbox integration (this host)', () => {
 		expect(res.exitCode).toBe(0)
 		expect(res.output).toContain('confined-path-ok')
 	})
-	it('claims are absent when no backend is selected (no false promises on Windows today)', () => {
-		if (process.platform !== 'win32') return // claim shape is platform-dependent by design
+	it('claims are consistent with the selected backend — present iff a backend confines, never a false promise', () => {
 		const host = new HostSandbox(ws)
-		expect(host.enforcement).toBeUndefined()
-		expect(host.denialSignatures).toBeUndefined()
+		const backend = selectLocalBackend()
+		if (backend === 'none') {
+			expect(host.enforcement).toBeUndefined()
+			expect(host.denialSignatures).toBeUndefined()
+		} else {
+			// win32 today: the fence → 'partial' (writes only). bwrap/seatbelt → 'full'. Never absent when
+			// a backend was selected, and never claiming more than the backend delivers.
+			expect(host.enforcement).toBe(backend === 'win-write-fence' ? 'partial' : 'full')
+			expect(host.denialSignatures?.length).toBeGreaterThan(0)
+		}
 	})
 })

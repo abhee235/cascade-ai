@@ -51,6 +51,13 @@ const PROJECT_FILES_OK = new Set([
   // distro import — desktop-only machinery, like hostSandbox.ts; a hosted deployment injects a
   // remote-container Sandbox and never loads this class.
   'wslSandbox.ts',
+  // The WRITE-FENCE RUNNER (ADR-070 step 6). mkdirSync creates the workspace-private temp before spawning
+  // the restricted child — desktop Windows host-mode machinery; never loaded in a hosted deployment.
+  'winFenceRunner.ts',
+  // The LOCAL SANDBOX BACKEND REGISTRY (ADR-070 steps 4/6). existsSync resolves the bundled fence runner
+  // entry (built .js vs .ts source) — desktop machinery selecting how to confine host commands; a hosted
+  // deployment injects a remote-container Sandbox and never selects a local backend.
+  'sandboxBackends.ts',
   'versionManager.ts',
   'checkProject.ts',
   'loadDotEnv.ts',

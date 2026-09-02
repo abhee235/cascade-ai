@@ -22,6 +22,7 @@
     "@opentelemetry/resources": "^2.9.0",
     "@opentelemetry/sdk-trace-base": "^2.9.0",
     "dockerode": "^5.0.1",
+    "koffi": "^3.2.0",
     "playwright-core": "^1.61.1",
     "ws": "^8.18.0"
   },
