@@ -94,6 +94,12 @@ export class DockerSandbox implements ProjectRuntime {
   /** In-sandbox mount point of the project (the `-w` / `-v …:/workspace` below). The host file tools treat
    *  this as a synonym for the project root so the model's in-container paths resolve into the project. */
   readonly root = '/workspace'
+  /** ADR-070: the container boundary governs execution by construction — host writes are limited to the
+   *  bind-mounted project dir, which IS the workspace-write promise. Declared, not assumed. */
+  readonly enforcement = 'full' as const
+  /** ADR-070: how a denied file effect reads inside the container (root-squashed mounts, read-only FS
+   *  images). Consumed by the tool layer's denial classification (step 2). */
+  readonly denialSignatures = ['permission denied', 'read-only file system'] as const
   private containerId?: string
   private starting?: Promise<string>
   private hostPort?: number

@@ -39,6 +39,10 @@ export interface ToolContext {
   /** Phase 13.3: generic execution capability. When present, command-running tools (Bash) execute HERE
    *  (the server injects a per-project Docker sandbox); when absent, they run on the host. Core is agnostic. */
   sandbox?: Sandbox
+  /** ADR-070: the standing file-effect policy this call runs under. Set by the loop (derived once per
+   *  session); the SCHEDULER swaps in a widened copy for exactly one call when the user approves an
+   *  escalation — tools read it, never write it. Absent ⇒ no policy enforcement (the extension). */
+  sandboxPolicy?: import('../sandbox/policy').SandboxPolicy
   /** How file paths are confined (ADR-033 + the path-policy change): 'jail' (default — the sandboxed web
    *  builder refuses outside paths in the tool) vs 'prompt' (the extension — outside paths resolve and the
    *  permission gate asks), plus any additional allowed roots. Omit ⇒ jail to the project. */

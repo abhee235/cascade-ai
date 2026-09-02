@@ -86,6 +86,9 @@ export interface SessionOptions {
   /** Phase 13.3: execution sandbox. When set (the server injects a per-project Docker sandbox), command
    *  tools (Bash) run inside it; when absent, they run on the host (the extension's behavior). */
   sandbox?: import('./sandbox/sandbox').Sandbox
+  /** ADR-070 step 1: the session's standing file-effect policy. Optional — when absent the loop derives
+   *  the truthful default (sandbox ⇒ workspace-write at the sandbox root; no sandbox ⇒ no policy line). */
+  sandboxPolicy?: import('./sandbox/policy').SandboxPolicy
   /** Phase 15: generic extra system-prompt context (e.g. a project template's AI rules). */
   extraInstructions?: string
   /** ADR-056 rung 5: files pinned into the system prompt, re-read FRESH each turn (like memory) so their
@@ -402,6 +405,7 @@ export function createSession(opts: SessionOptions): CascadeSession {
           },
           recovery: opts.recovery,
           sandbox: opts.sandbox,
+          sandboxPolicy: opts.sandboxPolicy, // ADR-070: standing file policy (loop derives default when absent)
           readFileState,
           todoStore,
           ask, // ADR-043: AskUserQuestion round-trip

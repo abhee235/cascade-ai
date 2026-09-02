@@ -17,6 +17,7 @@ import { lineDiff } from '../../utils/diff'
 import { normalizeText } from '../fileState'
 import { displayPath, ProjectPathError, resolveInProject } from '../projectPath'
 import { findEditTarget, readFreshnessError, refreshReadState } from '../editCore'
+import { escalationFields, fileWriteFence } from '../../sandbox/escalation'
 
 const editSchema = z.object({
   old_string: z.string().min(1).describe('Exact text to replace — must match the file EXACTLY at this point in the sequence.'),
@@ -30,6 +31,8 @@ const inputSchema = z.object({
     .array(editSchema)
     .min(1)
     .describe('Edits applied IN ORDER, each to the result of the previous. ALL-OR-NOTHING: if any edit fails, none are written.'),
+  // ADR-070 step 2: the escalation pair — validated + consumed by the SCHEDULER (never read here).
+  ...escalationFields,
 })
 
 export const MultiEditTool: Tool<z.infer<typeof inputSchema>> = {
@@ -41,6 +44,9 @@ export const MultiEditTool: Tool<z.infer<typeof inputSchema>> = {
   isConcurrencySafe: () => false,
 
   async call(input, ctx) {
+    // ADR-070 step 2: the read-only fence — before any path/filesystem work (widened ctx passes).
+    const fence = fileWriteFence(ctx.sandboxPolicy)
+    if (fence) return { content: fence, isError: true }
     let path: string
     try {
       path = resolveInProject(ctx.cwd, input.file_path, ctx.sandbox?.root, ctx.pathScope) // ADR-033: jail to the project root

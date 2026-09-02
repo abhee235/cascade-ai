@@ -46,6 +46,10 @@ export interface LoopDeps {
   depth?: number // Phase 12: subagent nesting depth (0 = main agent)
   recovery?: Pick<RecoveryOptions, 'maxRetries' | 'baseDelayMs' | 'maxDelayMs' | 'sleep'> // Phase 12: tune/inject for tests
   sandbox?: import('../sandbox/sandbox').Sandbox // Phase 13.3: redirect command tools here (injected by the server)
+  /** ADR-070 step 1: the session's standing file-effect policy. Absent + a sandbox present ⇒ derived as
+   *  workspace-write at the sandbox root (the truthful description of the Docker builder today); absent +
+   *  no sandbox ⇒ no policy line (the extension's prompts stay byte-identical). */
+  sandboxPolicy?: import('../sandbox/policy').SandboxPolicy
   /** ADR-033: how file paths are confined (jail vs prompt) and any additional allowed roots. */
   pathScope?: import('../tools/projectPath').PathScope
   readFileState?: import('../tools/fileState').FileStateCache // ADR-032: read-before-edit freshness cache (session-scoped)
@@ -176,11 +180,14 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   // host is, but NOT for a host-process sandbox on Windows, which runs cmd.exe and must say so.
   const hostPlatform: 'win32' | 'posix' = process.platform === 'win32' ? 'win32' : 'posix'
   const execPlatform: 'win32' | 'posix' = deps.sandbox ? (deps.sandbox.shell ?? 'posix') : hostPlatform
+  // ADR-070 step 1: the standing policy for the prompt line (and, step 2+, for enforcement). Derived ONCE —
+  // stable per session, so the rendered line never breaks the KV-cache prefix.
+  const sandboxPolicy = deps.sandboxPolicy ?? (deps.sandbox ? { mode: 'workspace-write' as const, workspaceRoot: deps.sandbox.root } : undefined)
   // ADR-052: window-derived Read cap — one bite must never exceed the plate. Budget: a single read may span
   // ~25% of the effective window; at ~4 chars/token that is numerically effectiveWindow in CHARS. 8k window →
   // ~6k chars (~1.5k tok); 32k → ~24k chars; big windows hit the 50k ceiling → unchanged (no-overfitting rule).
   const readCapChars = deps.compact ? Math.min(50_000, Math.max(6_000, deps.compact.plan.effectiveWindow)) : undefined
-  const ctx: ToolContext = { cwd: deps.cwd, abortSignal: deps.signal, permission: deps.permission, tracer, registry, archival: deps.archival, depth, sandbox: deps.sandbox, pathScope: deps.pathScope, readFileState: deps.readFileState, todoStore: deps.todoStore, ask: deps.ask, hooks: deps.hooks, readCapChars }
+  const ctx: ToolContext = { cwd: deps.cwd, abortSignal: deps.signal, permission: deps.permission, tracer, registry, archival: deps.archival, depth, sandbox: deps.sandbox, sandboxPolicy, pathScope: deps.pathScope, readFileState: deps.readFileState, todoStore: deps.todoStore, ask: deps.ask, hooks: deps.hooks, readCapChars }
   // Subagent delegation (ADR-017): inject a spawn closure (avoids an import cycle). Absent at the depth cap.
   // The child runs a NESTED runAgentLoop with its OWN messages + a filtered tool set (never Subagent → no
   // recursion; read-only subset for `explore`). Only its final text returns — its steps stay in its context.
@@ -215,6 +222,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
         tracer,
         permission: deps.permission,
         sandbox: deps.sandbox, // subagent's commands run in the same sandbox
+        sandboxPolicy, // ADR-070: and under the same standing file policy (the parent's derived one)
         pathScope: deps.pathScope, // and under the same path policy
         readFileState: deps.readFileState, // share freshness cache: a file the parent read is editable by the child
         todoStore: deps.todoStore, // shared store, keyed by depth → the child's checklist is scoped separately
@@ -343,7 +351,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     // (measured: inputTokens 8191 of 8192, ONE token of output room). The static chars/4 estimate is the
     // FLOOR; once the backend has reported a real prompt size, the MEASURED overhead (real − estimate,
     // which also captures our estimate's own error) takes over — self-correcting at the margin.
-    const systemNow = buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext, skillsSection: deps.skillsSection, contextFiles: deps.contextFiles })
+    const systemNow = buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext, skillsSection: deps.skillsSection, contextFiles: deps.contextFiles, sandboxPolicy })
     const staticOverhead = Math.ceil((systemNow.length + JSON.stringify(registry.schemas(tier, execPlatform)).length) / 4) + 256
     const overheadTokens = Math.max(staticOverhead, wireOverhead ?? 0)
 
@@ -405,7 +413,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     // a (reactive) compaction then retries; abort/fatal surface. `make` re-reads `messages` each attempt, so
     // an overflow-compaction is reflected on the retry. System is rebuilt too (memory may have changed).
     const makeStream = () =>
-      deps.provider.stream({ messages, model: deps.model, ...deps.modelLimits, ...deps.sampling, system: buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext, skillsSection: deps.skillsSection, contextFiles: deps.contextFiles }), tools: registry.schemas(tier, execPlatform) }, deps.signal)
+      deps.provider.stream({ messages, model: deps.model, ...deps.modelLimits, ...deps.sampling, system: buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext, skillsSection: deps.skillsSection, contextFiles: deps.contextFiles, sandboxPolicy }), tools: registry.schemas(tier, execPlatform) }, deps.signal)
     for await (const ev of streamWithRecovery(makeStream, {
       ...deps.recovery,
       signal: deps.signal,
