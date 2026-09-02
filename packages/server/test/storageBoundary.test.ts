@@ -43,6 +43,14 @@ const PROJECT_FILES_OK = new Set([
   // own directories, in a shell they opened. Nothing here is app state, and a hosted deployment attaches a
   // remote shell instead.
   'hostTerminal.ts',
+  // The TOOLCHAIN layer (ADR-070 step 3). It writes the project's OWN mise.toml (project content, like
+  // templates.ts) and probes/provisions toolchain binaries for the host runtime. Hosted deployments run
+  // containers whose image is the toolchain — this file, like hostSandbox.ts, simply isn't used there.
+  'toolchains.ts',
+  // The WSL RUNTIME (ADR-070 step 5). Filesystem use is the rootfs/install-dir existence checks for the
+  // distro import — desktop-only machinery, like hostSandbox.ts; a hosted deployment injects a
+  // remote-container Sandbox and never loads this class.
+  'wslSandbox.ts',
   'versionManager.ts',
   'checkProject.ts',
   'loadDotEnv.ts',

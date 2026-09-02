@@ -22,6 +22,8 @@ import { join } from 'node:path'
 import type { ExecOptions, ExecResult } from '@cascade/core'
 import { devServerRefusal } from './dockerSandbox.js'
 import { type ProjectRuntime, stripAnsi } from './projectRuntime.js'
+import { confineHostCommand, localBackendClaims } from './sandboxBackends.js'
+import { ensureProjectToolchainConfig, installProjectToolchains, miseEnv } from './toolchains.js'
 
 /** Where a detached dev server's output goes. Inside the project so it travels with it, and so a user can
  *  open it; `.cascade/` is already this project's scratch area. */
@@ -84,13 +86,29 @@ export class HostSandbox implements ProjectRuntime {
 		this.root = projectDir
 	}
 
+	/** ADR-070 step 4: the selected local backend's honest claims (Seatbelt/bwrap ⇒ 'full' + its denial
+	 *  dialect; 'none' — Windows today — ⇒ no claim), surfaced through the core seam so Bash's denial
+	 *  classifier speaks this host's dialect. Getters because selection is probed lazily, once. */
+	get enforcement(): 'full' | 'partial' | undefined {
+		return localBackendClaims().enforcement
+	}
+	get denialSignatures(): readonly string[] | undefined {
+		return localBackendClaims().denialSignatures
+	}
+
 	async exec(command: string, opts: ExecOptions = {}): Promise<ExecResult> {
 		// The SAME refusal Docker mode has had all along, and host mode was missing — which is exactly how a
 		// desktop trace ended with the model starting its own dev server via `start /b` and hanging the turn:
 		// the Preview owns the dev server in BOTH runtimes, and a second one binds a port nothing is watching.
 		const refusal = devServerRefusal(command)
 		if (refusal) return { output: refusal, exitCode: 1 }
-		return run(command, opts.cwd ?? this.projectDir, opts)
+		// ADR-070 step 4: wrap the MODEL's command in the platform's confinement (Seatbelt/bwrap) per the
+		// call's policy. Passthrough when no policy / danger-full-access / no usable backend — so today's
+		// Windows host path is byte-identical, and product-owned commands (installDependencies, startDev,
+		// stopDev's taskkill) which call run() directly are deliberately NOT confined: they are ours, not
+		// the model's.
+		const confined = confineHostCommand(command, opts.policy)
+		return run(confined.command, opts.cwd ?? this.projectDir, opts)
 	}
 
 	/**
@@ -125,6 +143,11 @@ export class HostSandbox implements ProjectRuntime {
 	}
 
 	async installDependencies(onData?: (chunk: string) => void): Promise<boolean> {
+		// ADR-070 step 3: declare + provision the project's toolchains FIRST, so the npm that installs is
+		// the project's pinned one (from the Cascade prefix), not whatever the host happens to have. Both
+		// are best-effort no-ops without mise — the host path must keep working on a bare machine.
+		ensureProjectToolchainConfig(this.projectDir)
+		await installProjectToolchains(this.projectDir, onData)
 		const res = await run('npm install --no-audit --no-fund', this.projectDir, { onData })
 		return res.exitCode === 0
 	}
@@ -154,7 +177,8 @@ export class HostSandbox implements ProjectRuntime {
 		// for one port and the loser would silently drift to 5174 — the exact failure Docker mode hits.
 		const child = spawn(npm(), ['run', 'dev', '--', '--host', '--port', String(port)], {
 			cwd: this.projectDir,
-			env: { ...process.env, ...env },
+			// ADR-070: mise shims first, so the dev server runs on the project's pinned toolchain too.
+			env: { ...process.env, ...miseEnv(), ...env },
 			stdio: ['ignore', out, out],
 			detached: !isWindows, // POSIX: its own process group, so we can kill the whole tree
 			shell: isWindows, // Windows needs a shell to resolve npm.cmd
@@ -330,8 +354,9 @@ function isListening(port: number): Promise<boolean> {
 	})
 }
 
-/** Ask the OS for an unused port by binding 0 and reading what it gave us. */
-function freePort(): Promise<number> {
+/** Ask the OS for an unused port by binding 0 and reading what it gave us. Exported for WslSandbox,
+ *  whose preview port is a HOST port too (WSL2 localhostForwarding serves it on the same number). */
+export function freePort(): Promise<number> {
 	return new Promise((resolve, reject) => {
 		const srv = createServer()
 		srv.once('error', reject)
@@ -359,7 +384,9 @@ function run(command: string, cwd: string, opts: { signal?: AbortSignal; onData?
 	return new Promise((resolve) => {
 		if (!existsSync(cwd)) return resolve({ output: `cwd does not exist: ${cwd}`, exitCode: 1 })
 		// Git Bash when available — node spawns a non-cmd shell string as `bash.exe -c <command>` — cmd otherwise.
-		const child = spawn(command, { cwd, shell: hostBash ?? true, windowsHide: true, signal: opts.signal })
+		// ADR-070 step 3: mise shims prepended (empty spread when mise is absent — byte-identical env), so
+		// every agent command resolves node/python/etc. through the project's pinned, Cascade-owned toolchain.
+		const child = spawn(command, { cwd, shell: hostBash ?? true, windowsHide: true, signal: opts.signal, env: { ...process.env, ...miseEnv() } })
 		let output = ''
 		let settled = false
 		const finish = (r: ExecResult) => {

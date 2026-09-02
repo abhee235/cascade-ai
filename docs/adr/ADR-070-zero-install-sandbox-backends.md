@@ -176,8 +176,15 @@ built on OS token semantics (prior art: the public `windows-acl-restrict-poc` pa
 
 ### Working defaults (overridable, recorded so implementation is unblocked)
 
-1. **Windows project location: inside the WSL distro FS** (fast I/O, strongest boundary), with an
-   "open in Explorer" affordance via `\\wsl$\cascade-sandbox\…`.
+1. **Windows project location — DECIDED at step 5 (supersedes the original "inside the distro FS"
+   default): the project stays on the HOST, drvfs-mounted into the distro per-project.** Building it
+   showed inside-placement breaks every host-path consumer at once (ProjectManager scaffolding, the
+   file tools, git checkpoints — all operate on real Windows paths), while the mount pattern is
+   Docker's proven bind-mount shape reused verbatim: the project dir is the ONLY host path reachable
+   from inside (automount off ⇒ the mount IS `workspace-write` made physical), `node_modules` is
+   shadowed by a distro-native dir (the measured 9p-speed lesson), and in-VM writes land where the
+   host tools already look. Two consequences carried forward: Vite needs `CHOKIDAR_USEPOLLING`
+   (inotify does not cross drvfs), and dev logs ride the mount so the host log-follower works as-is.
 2. **Network policy v1: outbound-open with a deny-list** (hermetic's accepted risk; least friction);
    allowlist-only ships later as a hardening flag.
 3. **Hosted web-app sandbox: separate future ADR** (server-side mechanisms; different problem).

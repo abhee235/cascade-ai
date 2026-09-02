@@ -14,8 +14,9 @@
  *  This is the public, host-path-free view (the `dir` never crosses the wire). */
 export type ProjectInfo = { id: string; name: string; createdAt: string }
 
-/** ADR-081 §4: where a project's commands execute. */
-export type RuntimeMode = 'host' | 'docker'
+/** ADR-081 §4: where a project's commands execute. 'wsl' (ADR-070 step 5, Windows): the cascade-sandbox
+ *  WSL2 VM — Docker-grade isolation with no Docker install. */
+export type RuntimeMode = 'host' | 'docker' | 'wsl'
 
 /** What the UI needs to render the runtime setting HONESTLY — which is more than the chosen value.
  *

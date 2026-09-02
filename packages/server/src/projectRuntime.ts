@@ -18,7 +18,7 @@ import type { Sandbox } from '@cascade/core'
 /** A project's execution environment: core's Sandbox plus what the preview needs. */
 export interface ProjectRuntime extends Sandbox {
 	/** For the status line, the boundary test's expectations, and the UI badge. */
-	readonly kind: 'host' | 'docker'
+	readonly kind: 'host' | 'docker' | 'wsl'
 
 	/** Are dependencies installed? Must test POPULATED, not merely present: under Docker `node_modules` is a
 	 *  named volume that exists-but-empty before the first install, so a presence check skips it forever. */
@@ -63,8 +63,9 @@ export function parseDevPort(log: string): number | undefined {
 	return last ? Number(last[1]) : undefined
 }
 
-/** Which runtime a project's commands execute in. */
-export type RuntimeMode = 'host' | 'docker'
+/** Which runtime a project's commands execute in. 'wsl' (ADR-070 step 5, Windows only): commands run
+ *  in the cascade-sandbox WSL2 VM with only the project dir mounted — Docker-grade isolation, no Docker. */
+export type RuntimeMode = 'host' | 'docker' | 'wsl'
 
 /** ADR-081 §4: host. The app must be useful the moment it is installed; isolation is opt-in. */
 export const DEFAULT_RUNTIME_MODE: RuntimeMode = 'host'
