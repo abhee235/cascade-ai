@@ -92,6 +92,26 @@ export function miseEnv(): Record<string, string> {
 	}
 }
 
+/**
+ * The COMPLETE toolchain env for one host spawn (ADR-070 Part D): mise (when present) plus the BUNDLED
+ * portable Node the desktop shell points at (`CASCADE_NODE_DIR`, the directory holding `node(.exe)`).
+ * PATH order is the whole design: mise shims (a project's pin always wins) → bundled Node (the offline
+ * default, so web projects build on first run with no download) → the user's own PATH last — never
+ * first, because a user's Node/npm colliding with the project's is the clash Layer B exists to remove.
+ * Empty when neither exists, so the spread is byte-identical to today's host path.
+ */
+export function toolchainEnv(): Record<string, string> {
+	const env = miseEnv()
+	const nodeDir = process.env.CASCADE_NODE_DIR
+	if (!nodeDir || !existsSync(nodeDir)) return env
+	if (!env.PATH) return { PATH: `${nodeDir}${delimiter}${process.env.PATH ?? ''}` }
+	// miseEnv's PATH is `<shims>[<delimiter><mise-bin>]<delimiter><host PATH>`; slot the bundled node in
+	// right AFTER the mise-managed prefix and BEFORE the host PATH.
+	const hostPath = process.env.PATH ?? ''
+	const misePrefix = hostPath ? env.PATH.slice(0, env.PATH.length - hostPath.length) : env.PATH
+	return { ...env, PATH: `${misePrefix}${nodeDir}${delimiter}${hostPath}` }
+}
+
 /** The default declaration a scaffolded project gets: Node pinned to LTS — enough to make "works on my
  *  machine" reproducible without opining on anything else. The agent edits this file (it's project
  *  content) when a task needs Python/Go/Rust; `mise install` then provisions into the Cascade prefix. */

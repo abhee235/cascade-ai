@@ -25,8 +25,9 @@ import { join } from 'node:path'
 import type { SandboxEnforcement, SandboxPolicy } from '@cascade/core'
 import { canonicalPath, isConfined, writableRoots } from '@cascade/core'
 // Import-safe on every platform: winFence loads advapi32 LAZILY (only when a fence function first runs,
-// which is win32-only), and koffi's own native module loads cross-platform.
-import { buildRestrictedToken, grantWriteAce, spawnUnderToken } from './winFence.js'
+// which is win32-only), and koffi's own native module loads cross-platform. Only the ACL GRANT is ever
+// called in-process here; token creation and the restricted spawn live in the runner subprocess.
+import { grantWriteAce } from './winFence.js'
 import { workspaceWriteSid } from './winFenceSid.js'
 
 export type LocalBackendId = 'seatbelt' | 'bwrap' | 'win-write-fence' | 'none'
@@ -53,6 +54,17 @@ export interface ConfinedCommand {
 	/** ARGV backends only: stderr substrings that mean the RUNNER itself failed (the child never ran), so
 	 *  a runner refusal is never misclassified as a policy denial. */
 	runnerFailureSignatures?: readonly string[]
+	/** ARGV backends only: extra environment the RUNNER PROCESS needs. The fence runner is spawned from
+	 *  `process.execPath`, which inside a packaged desktop app is ELECTRON, not node — `ELECTRON_RUN_AS_NODE=1`
+	 *  makes it behave as node; without it a confined command would open a second app window (ADR-070 Part D). */
+	env?: Record<string, string>
+}
+
+/** The bwrap executable: a bundled static binary when the shell points at one (packaged Linux builds —
+ *  `CASCADE_BWRAP_PATH`), else the distro's own from PATH (dev, or hosts that ship bubblewrap). */
+function bwrapBin(): string {
+	const bundled = process.env.CASCADE_BWRAP_PATH
+	return bundled && existsSync(bundled) ? bundled : 'bwrap'
 }
 
 /** POSIX single-quote escaping: the one quoting form with no inner interpretation. `'` becomes `'\''`. */
@@ -97,7 +109,7 @@ export function seatbeltProfile(policy: SandboxPolicy): string {
 export function wrapCommand(backend: LocalBackendId, command: string, policy: SandboxPolicy): string {
 	switch (backend) {
 		case 'bwrap':
-			return `bwrap ${bwrapArgs(policy).join(' ')} -- /bin/sh -c ${shq(command)}`
+			return `${shq(bwrapBin())} ${bwrapArgs(policy).join(' ')} -- /bin/sh -c ${shq(command)}`
 		case 'seatbelt':
 			return `sandbox-exec -p ${shq(seatbeltProfile(policy))} /bin/sh -c ${shq(command)}`
 		case 'win-write-fence':
@@ -133,7 +145,7 @@ const PROBE_TIMEOUT_MS = 5_000
 
 /** Functional bwrap probe: can it actually create the read-only profile and run `true` under it? */
 function defaultProbeBwrap(): boolean {
-	const probe = spawnSync('bwrap', ['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--die-with-parent', '--', 'true'], {
+	const probe = spawnSync(bwrapBin(), ['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--die-with-parent', '--', 'true'], {
 		timeout: PROBE_TIMEOUT_MS,
 		stdio: 'ignore',
 	})
@@ -154,13 +166,28 @@ const PLATFORM_CHAINS: Record<string, readonly Exclude<LocalBackendId, 'none'>[]
 	win32: ['win-write-fence'], // the WSL runtime is the primary Windows isolation; this fence is the host-mode fallback
 }
 
-/** Functional write-fence probe: build a read-only restricted token and run `cmd /c exit 0` under it,
- *  IN-PROCESS (no node subprocess) — exit 0 proves the mechanism works on this machine. Any throw (wrong
- *  platform, missing privilege, koffi/DLL issue) ⇒ unusable, so the chain falls through to 'none'. */
+/**
+ * Functional write-fence probe: run the RUNNER itself, read-only, around `cmd /c exit 0`, with a bounded
+ * timeout — exit 0 proves the whole production path works on this machine (runner host, koffi resolution,
+ * token creation, and the console semantics a restricted child needs).
+ *
+ * Deliberately NOT in-process FFI. The server runs inside Electron's main thread in the packaged app; a
+ * synchronous CreateProcessAsUser + WaitForSingleObject there can block the entire UI if the child never
+ * initializes (a restricted child with no inheritable console dies or wedges in DLL init — measured as an
+ * app that launched but never served). A subprocess with a timeout can degrade to 'none'; it can never hang
+ * the app. It also means token/spawn FFI only ever executes in the runner process, never in the server.
+ */
 function defaultProbeWinFence(): boolean {
 	try {
-		const { token } = buildRestrictedToken({ mode: 'read-only' })
-		return spawnUnderToken(token, `${process.env.ComSpec ?? 'cmd.exe'} /d /s /c "exit 0"`, process.cwd()) === 0
+		const argv = [...fenceRunnerArgv(), '--workspace', process.cwd(), '--mode', 'read-only', '--', 'exit 0']
+		const probe = spawnSync(argv[0], argv.slice(1), {
+			cwd: fileURLToPath(new URL('.', import.meta.url)), // where `tsx` resolves in dev; harmless when bundled
+			env: { ...process.env, ...fenceRunnerEnv() },
+			timeout: 20_000,
+			stdio: 'ignore',
+			windowsHide: true,
+		})
+		return probe.status === 0
 	} catch {
 		return false
 	}
@@ -170,13 +197,41 @@ function defaultProbeWinFence(): boolean {
  *  (a workspace's write ACE is an expensive full-tree propagation; do it once, never per exec). */
 const grantedWorkspaces = new Set<string>()
 
-/** The runner invocation prefix: the built lib entry when present (production), else the .ts source via
- *  tsx (dev). A future native-exe runner keeps the same argv contract and only swaps these entries. */
-function fenceRunnerArgv(): string[] {
+/**
+ * The node that HOSTS the fence runner. The bundled portable node (`CASCADE_NODE_DIR/node.exe`, ADR-070
+ * Part D) when shipped, else this process's own executable.
+ *
+ * Load-bearing, not cosmetic: a child created under the restricted token cannot CREATE a console — it
+ * dies during DLL init with STATUS_DLL_INIT_FAILED (0xC0000142) — it can only INHERIT one. `node.exe` is a
+ * console-subsystem binary, so spawned with `windowsHide` it owns an invisible console the confined
+ * `cmd.exe` shares. Electron is a GUI-subsystem binary: even as `ELECTRON_RUN_AS_NODE` it has no console,
+ * and every confined command dies with exactly that code (measured on the first packaged build). So the
+ * packaged app must never host the runner in itself — the bundled node is the fix, and it is already shipped.
+ */
+function fenceHostNode(): string {
+	const dir = process.env.CASCADE_NODE_DIR
+	const bundled = dir ? join(dir, process.platform === 'win32' ? 'node.exe' : 'node') : undefined
+	return bundled && existsSync(bundled) ? bundled : process.execPath
+}
+
+/** The runner invocation prefix, in order: the BUNDLED runner the desktop shell points at
+ *  (`CASCADE_FENCE_RUNNER`, ADR-070 Part D), a built sibling entry, else the .ts source via tsx (dev). A
+ *  future native-exe runner keeps the same argv contract and only swaps these entries. */
+export function fenceRunnerArgv(): string[] {
+	const host = fenceHostNode()
+	const bundled = process.env.CASCADE_FENCE_RUNNER
+	if (bundled && existsSync(bundled)) return [host, bundled]
 	const builtEntry = fileURLToPath(new URL('./winFenceRunner.js', import.meta.url))
-	if (existsSync(builtEntry)) return [process.execPath, builtEntry]
+	if (existsSync(builtEntry)) return [host, builtEntry]
 	const srcEntry = fileURLToPath(new URL('./winFenceRunner.ts', import.meta.url))
-	return [process.execPath, '--import', 'tsx', srcEntry]
+	return [host, '--import', 'tsx', srcEntry]
+}
+
+/** Env the runner process needs beyond the caller's. Only when the host is this process AND this process
+ *  is Electron: `ELECTRON_RUN_AS_NODE=1` makes the app binary run a script as node (the dev-in-Electron
+ *  case; the packaged app hosts the runner in the bundled node instead — see fenceHostNode). */
+export function fenceRunnerEnv(): Record<string, string> {
+	return process.versions.electron && fenceHostNode() === process.execPath ? { ELECTRON_RUN_AS_NODE: '1' } : {}
 }
 
 let cachedBackend: LocalBackendId | undefined
@@ -250,6 +305,7 @@ function confineWithFence(command: string, policy: SandboxPolicy): ConfinedComma
 		backend: 'win-write-fence',
 		argv,
 		runnerCwd: fileURLToPath(new URL('.', import.meta.url)), // this src dir — where `tsx` resolves
+		env: fenceRunnerEnv(),
 		enforcement: 'partial',
 		denialSignatures: DENIAL_SIGNATURES['win-write-fence'],
 		runnerFailureSignatures: FENCE_RUNNER_FAILURE,

@@ -4,7 +4,8 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { canonicalPath, type SandboxPolicy } from '@cascade/core'
-import { bwrapArgs, confineHostCommand, resetBackendCache, seatbeltProfile, selectLocalBackend, shq, wrapCommand } from '../src/sandboxBackends.js'
+import { bwrapArgs, confineHostCommand, fenceRunnerArgv, fenceRunnerEnv, resetBackendCache, seatbeltProfile, selectLocalBackend, shq, wrapCommand } from '../src/sandboxBackends.js'
+import { writeFileSync } from 'node:fs'
 import { HostSandbox } from '../src/hostSandbox.js'
 
 const ws = mkdtempSync(join(tmpdir(), 'sbxbackend-'))
@@ -61,7 +62,7 @@ describe('seatbelt profile — allow default, deny file-write*, re-allow per roo
 describe('wrapCommand', () => {
 	it('bwrap: full invocation around /bin/sh -c with the command quoted', () => {
 		const w = wrapCommand('bwrap', 'npm test', readOnly)
-		expect(w.startsWith('bwrap --ro-bind / /')).toBe(true)
+		expect(w.startsWith("'bwrap' --ro-bind / /")).toBe(true) // binary quoted: a bundled path may contain spaces
 		expect(w).toContain(`-- /bin/sh -c 'npm test'`)
 	})
 	it('seatbelt: profile passed inline, command quoted', () => {
@@ -71,6 +72,49 @@ describe('wrapCommand', () => {
 	})
 	it('none: identity', () => {
 		expect(wrapCommand('none', 'npm test', readOnly)).toBe('npm test')
+	})
+})
+
+describe('bundled binaries (ADR-070 Part D) — the packaged app points at shipped files', () => {
+	const saved = { bwrap: process.env.CASCADE_BWRAP_PATH, runner: process.env.CASCADE_FENCE_RUNNER }
+	afterEach(() => {
+		if (saved.bwrap === undefined) delete process.env.CASCADE_BWRAP_PATH
+		else process.env.CASCADE_BWRAP_PATH = saved.bwrap
+		if (saved.runner === undefined) delete process.env.CASCADE_FENCE_RUNNER
+		else process.env.CASCADE_FENCE_RUNNER = saved.runner
+	})
+	it('CASCADE_BWRAP_PATH: an existing bundled bwrap is what the wrap invokes; a missing one falls back to PATH', () => {
+		const bundled = join(mkdtempSync(join(tmpdir(), 'bwrapbin-')), 'bwrap')
+		writeFileSync(bundled, '')
+		process.env.CASCADE_BWRAP_PATH = bundled
+		expect(wrapCommand('bwrap', 'ls', readOnly).startsWith(`'${bundled}' --ro-bind`)).toBe(true)
+		process.env.CASCADE_BWRAP_PATH = join(tmpdir(), 'does-not-exist', 'bwrap')
+		expect(wrapCommand('bwrap', 'ls', readOnly).startsWith("'bwrap' --ro-bind")).toBe(true)
+	})
+	it('CASCADE_FENCE_RUNNER: an existing bundled runner replaces the tsx dev invocation', () => {
+		const savedNode = process.env.CASCADE_NODE_DIR
+		delete process.env.CASCADE_NODE_DIR
+		const bundled = join(mkdtempSync(join(tmpdir(), 'fencebin-')), 'winFenceRunner.mjs')
+		writeFileSync(bundled, '')
+		process.env.CASCADE_FENCE_RUNNER = bundled
+		expect(fenceRunnerArgv()).toEqual([process.execPath, bundled])
+		delete process.env.CASCADE_FENCE_RUNNER
+		expect(fenceRunnerArgv()).toContain('tsx') // dev path when nothing is bundled and nothing is built
+		if (savedNode !== undefined) process.env.CASCADE_NODE_DIR = savedNode
+	})
+	it('the runner is HOSTED by the bundled node when shipped — a console-subsystem host is what lets a restricted child init', () => {
+		const savedNode = process.env.CASCADE_NODE_DIR
+		const nodeDir = mkdtempSync(join(tmpdir(), 'nodehost-'))
+		const exe = join(nodeDir, process.platform === 'win32' ? 'node.exe' : 'node')
+		writeFileSync(exe, '')
+		process.env.CASCADE_NODE_DIR = nodeDir
+		expect(fenceRunnerArgv()[0]).toBe(exe)
+		expect(fenceRunnerEnv()).toEqual({}) // not hosted by Electron ⇒ no ELECTRON_RUN_AS_NODE, even inside Electron
+		if (savedNode === undefined) delete process.env.CASCADE_NODE_DIR
+		else process.env.CASCADE_NODE_DIR = savedNode
+	})
+	it('fenceRunnerEnv: ELECTRON_RUN_AS_NODE only when Electron itself hosts the runner (plain node here ⇒ {})', () => {
+		expect(fenceRunnerEnv()).toEqual(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {})
 	})
 })
 
@@ -114,7 +158,7 @@ describe('confineHostCommand — the HostSandbox entry point', () => {
 	it('a confined policy on a probing platform wraps and carries the backend claims', () => {
 		const c = confineHostCommand('npm test', wsWrite, { platform: 'linux', probeBwrap: () => true })
 		expect(c.backend).toBe('bwrap')
-		expect(c.command.startsWith('bwrap ')).toBe(true)
+		expect(c.command.startsWith("'bwrap' ")).toBe(true)
 		expect(c.enforcement).toBe('full')
 		expect(c.denialSignatures).toContain('read-only file system')
 	})

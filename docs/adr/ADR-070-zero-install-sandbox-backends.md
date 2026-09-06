@@ -205,9 +205,57 @@ Order rationale: steps 1–2 are pure core/tool work that pays off immediately (
 escalation ladder); step 3 kills D2 everywhere; steps 4–6 land backends cheapest-first; step 7 makes
 degradation honest. Each step ends in a tagged checkpoint per the phase discipline.
 
+| 8. Packaging (Part D) | Ship every mechanism INSIDE the desktop build: per-platform `sandbox/` resources (mise, portable Node LTS, static bwrap, gzipped WSL rootfs, bundled fence runner), Electron shell sets the resource env before the server boots, fence runner runs under Electron-as-Node, koffi shipped outside the asar | Packaged app on a clean machine: WSL mode imports from the bundled rootfs, host mode fences via the bundled runner, `npm install`/`node` resolve to the bundled toolchain — with no separate install of anything | ✅ Built (`desktop/build.mts`, `forge.config.cjs`, `scripts/fetch-sandbox.mts`, resource env in `desktop/src/main.ts`); packaged-app verification recorded below |
+
 **Deferred (tracked, not blocking):** the Linux Landlock fallback rung (needs a bundled launcher binary);
 the weak-model escalation-recovery eval scenario (next eval batch); the `hermetic mode` external-VM escape
 hatch (power-user tier — the WSL rung already delivers the VM boundary for the common case).
+
+### Part D — Packaging: the zero-install claim is made by the INSTALLER, not the mechanisms
+
+The mechanisms above locate their binaries through env overrides (`CASCADE_MISE_PATH`, `CASCADE_WSL_ROOTFS`,
+`CASCADE_BWRAP_PATH`, `CASCADE_NODE_DIR`, `CASCADE_FENCE_RUNNER`). Part D is the build that fills them:
+
+| Resource (per platform, `resources/sandbox/<platform>/`) | Windows | macOS | Linux | Why bundled |
+|---|---|---|---|---|
+| `mise` static binary (**~90 MB on disk**, ~25 MB compressed — measured 2026.9.1; the earlier "~10 MB" estimate was wrong; `-musl` on Linux) | ✓ | ✓ | ✓ | Layer B, any-language toolchains |
+| Portable Node LTS (~95 MB on disk, ~30 MB compressed — measured v22.23.2) | ✓ (host-fallback path) | ✓ | ✓ | Web projects work OFFLINE on first run; mise fetches only other versions/languages |
+| `cascade-sandbox-rootfs.tar.gz` (~80 MB gz) | ✓ | — | — | The primary Windows rung; bakes node+python+git+bwrap+mise so WSL mode needs zero downloads |
+| `winFenceRunner.mjs` (bundled, koffi external) | ✓ | — | — | The host-mode fallback rung |
+| static `bwrap` (~1 MB) | — | — | ✓ | Linux host confinement without a distro package |
+| Seatbelt / WSL feature / Win32 token APIs | OS-provided | OS-provided | — | Nothing to ship. **WSL is the one dependency that cannot be bundled** (a Windows feature); its absence degrades to the fence, visibly |
+
+Mechanics worth recording: (1) `koffi` is a native addon → `EXTERNAL` in the server bundle and copied to
+`resources/node_modules` (outside the asar) like `playwright-core`; it is N-API, so one prebuilt serves both
+Node and Electron — **and koffi 3.x keeps that prebuilt in a separate platform package
+(`@koromix/koffi-<platform>-<arch>`), which must be copied too** (measured: the first package shipped the
+loader with nothing to load). (2) **The fence runner is hosted by the bundled portable `node.exe`, never by
+Electron.** A child created under the restricted token cannot *create* a console — it dies in DLL init with
+`STATUS_DLL_INIT_FAILED` (0xC0000142) — it can only *inherit* one; `node.exe` is a console-subsystem binary
+that, spawned with `windowsHide`, owns an invisible console the confined `cmd.exe` shares, while Electron
+(GUI subsystem, even as `ELECTRON_RUN_AS_NODE`) has none (measured on the first packaged build: every
+confined command exited 0xC0000142). `ELECTRON_RUN_AS_NODE` is now used only in the dev-in-Electron case
+where Electron itself hosts the runner. (3) The
+rootfs ships gzipped (`wsl --import` accepts `.tar.gz`) — the single largest installer cost, ~230 MB → ~80 MB.
+(4) Binaries are fetched by `scripts/fetch-sandbox.mts` with SHA-256 verified against each project's
+published `SHASUMS256.txt`, and the resolved versions/hashes are written to `sandbox/<platform>/manifest.json`
+so a build is auditable. (5) Toolchain PATH order under the host runtime: mise shims (project pins win) →
+bundled Node (the offline default) → the user's PATH (never first — that is the clash we are removing).
+(6) The boot-time fence probe spawns the RUNNER (bounded timeout), never in-process FFI: the server runs on
+Electron's main thread in the packaged app, and a synchronous restricted spawn there can block the whole UI;
+token/spawn FFI now executes only in the runner process.
+
+**Packaged-app verification (Windows, 2026-09-07, Forge `package` output):** resources carry
+`sandbox/win32/{mise.exe 89 MB, node/ 95 MB, cascade-sandbox-rootfs.tar.gz 83 MB, winFenceRunner.mjs}` plus
+`node_modules/{koffi,@koromix/koffi-win32-x64}` outside the asar. Measured: (a) the bundled runner under the
+bundled `node.exe` — exit code propagates (42), read-only write denied "Access is denied", stdout captured;
+(b) the packaged app boots and its greeting reports `wslAvailable: true` **with the distro unregistered** (i.e.
+from the bundled rootfs) and `hostConfinement: win-write-fence/partial` (koffi loaded inside Electron);
+(c) launched with `CASCADE_RUNTIME=wsl`, the packaged app **imports the bundled `.tar.gz` itself** (2.5 s),
+verifies the boundary, and serves `mode: wsl, sandbox: true`; the imported distro carries node 24 / mise 2026.9.1
+/ bubblewrap 0.12 / python 3.14 and the hardened wsl.conf. Testing gotcha recorded: a shell spawned from VS
+Code's extension host inherits `ELECTRON_RUN_AS_NODE=1`, which makes the app binary run `main.cjs` as plain
+node (`app` undefined) — clear it before launching Electron from such a shell.
 
 ## Consequences
 

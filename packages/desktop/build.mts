@@ -13,10 +13,12 @@
 // starting), which CJS cannot express. Electron has supported ESM main since 28.
 
 import { build } from 'esbuild'
-import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, createReadStream, createWriteStream, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
+import { pipeline } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
+import { createGzip } from 'node:zlib'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = join(HERE, '..', '..')
@@ -31,9 +33,13 @@ const DIST = join(HERE, 'dist')
  * is a 10MB CJS library that reads `__filename`, which cannot coexist with this bundle's top-level await:
  * Node refuses to guess the module format and throws before the server starts.
  *
- * All three stay real dependencies of this package, so the packager copies them intact.
+ * `koffi` (the Windows write-fence's FFI, ADR-070 step 6) is a NATIVE addon — a `.node` binary cannot be
+ * inlined into a JS bundle, and it is N-API, so the one prebuilt serves Node and Electron alike. It is
+ * copied out beside the others below.
+ *
+ * All four stay real dependencies, so the packager copies them intact.
  */
-const EXTERNAL = ['electron', 'playwright-core', 'typescript']
+const EXTERNAL = ['electron', 'playwright-core', 'typescript', 'koffi']
 
 rmSync(DIST, { recursive: true, force: true })
 mkdirSync(DIST, { recursive: true })
@@ -107,8 +113,66 @@ for (const dir of ['skills', 'agents', 'templates']) {
 // They land beside server.mjs in the app's resources directory, which is exactly where Node's ordinary
 // upward resolution looks. Both happen to be dependency-free, so a flat copy is the whole story.
 console.log('• copying external dependencies…')
-for (const dep of ['playwright-core', 'typescript']) {
-	cpSync(join(REPO, 'node_modules', dep), join(DIST, 'node_modules', dep), { recursive: true, dereference: true })
+// koffi 3.x ships its NATIVE binary in a separate per-platform package (`@koromix/koffi-<platform>-<arch>`,
+// an optionalDependency that `koffi/index.cjs` requires at load) — copying `koffi` alone ships a loader with
+// nothing to load, and the failure only appears in the packaged app (measured: no .node anywhere in the
+// first package). Copy the one for the platform being built.
+const koffiNative = `@koromix/koffi-${process.platform}-${process.arch}`
+for (const dep of ['playwright-core', 'typescript', 'koffi', koffiNative]) {
+	const src = join(REPO, 'node_modules', dep)
+	if (!existsSync(src)) throw new Error(`external dependency missing: node_modules/${dep} — run npm install at the repo root`)
+	cpSync(src, join(DIST, 'node_modules', dep), { recursive: true, dereference: true })
+}
+
+// ── ADR-070 Part D: the zero-install sandbox resources → dist/sandbox/<platform>/ ─────────────────────
+//
+// Per-platform binaries fetched by scripts/fetch-sandbox.mts into packages/desktop/sandbox-bin/<platform>/
+// (gitignored, cached like browsers/): mise, a portable Node LTS, and on Linux a static bwrap. Plus two
+// built here: the Windows fence runner (bundled, koffi external — it resolves koffi from the
+// resources/node_modules copied above via ordinary upward resolution) and the WSL rootfs, gzipped
+// (`wsl --import` accepts .tar.gz; ~230 MB → ~80 MB, the single largest installer cost).
+//
+// Every piece is OPTIONAL at build time with a loud warning, mirroring the browser: the app still runs
+// without them, degraded exactly as a source checkout would be (mise dormant, host node, WSL not offered).
+// CASCADE_SKIP_SANDBOX_ASSETS=1 silences the warnings for a deliberately slim dev build.
+const PLATFORM = process.platform
+const SANDBOX_BIN = join(HERE, 'sandbox-bin', PLATFORM)
+const SANDBOX_OUT = join(DIST, 'sandbox', PLATFORM)
+mkdirSync(SANDBOX_OUT, { recursive: true })
+const warnMissing = (what: string, fix: string) => {
+	if (!process.env.CASCADE_SKIP_SANDBOX_ASSETS) console.warn(`! sandbox: ${what} not found — ${fix}`)
+}
+
+console.log('• sandbox: fetched binaries (mise, node, bwrap)…')
+if (existsSync(SANDBOX_BIN)) {
+	cpSync(SANDBOX_BIN, SANDBOX_OUT, { recursive: true, dereference: true })
+} else {
+	warnMissing(`packages/desktop/sandbox-bin/${PLATFORM}`, 'run: npx tsx packages/desktop/scripts/fetch-sandbox.mts')
+}
+
+if (PLATFORM === 'win32') {
+	console.log('• sandbox: bundling the write-fence runner…')
+	await build({
+		entryPoints: [join(REPO, 'packages', 'server', 'src', 'winFenceRunner.ts')],
+		outfile: join(SANDBOX_OUT, 'winFenceRunner.mjs'),
+		bundle: true,
+		platform: 'node',
+		format: 'esm',
+		target: 'node22',
+		external: ['koffi'],
+		minify: false,
+		sourcemap: false,
+		logLevel: 'warning',
+	})
+
+	// The rootfs: built by scripts/build-wsl-rootfs.ps1 (→ <repo>/dist/wsl/), gzipped here.
+	const rootfsSrc = process.env.CASCADE_WSL_ROOTFS_SRC ?? join(REPO, 'dist', 'wsl', 'cascade-sandbox-rootfs.tar')
+	if (existsSync(rootfsSrc)) {
+		console.log('• sandbox: gzipping the WSL rootfs (this takes a minute)…')
+		await pipeline(createReadStream(rootfsSrc), createGzip({ level: 6 }), createWriteStream(join(SANDBOX_OUT, 'cascade-sandbox-rootfs.tar.gz')))
+	} else {
+		warnMissing('the WSL rootfs', 'run: .\\scripts\\build-wsl-rootfs.ps1 (or set CASCADE_WSL_ROOTFS_SRC)')
+	}
 }
 
 // The headless Chromium the Browser tool drives (ADR-081 §7).

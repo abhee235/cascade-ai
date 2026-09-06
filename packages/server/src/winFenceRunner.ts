@@ -79,7 +79,8 @@ export function runFence(argv: string[]): number {
 	}
 }
 
-// Entry point when spawned directly (not when imported by a test).
-if (process.argv[1]?.endsWith('winFenceRunner.ts') || process.argv[1]?.endsWith('winFenceRunner.js')) {
+// Entry point when spawned directly (not when imported by a test). `.mjs` is the packaged bundle
+// (desktop/build.mts emits resources/sandbox/win32/winFenceRunner.mjs — ADR-070 Part D).
+if (/winFenceRunner\.(ts|js|mjs)$/.test(process.argv[1] ?? '')) {
 	process.exit(runFence(process.argv.slice(2)))
 }

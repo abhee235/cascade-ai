@@ -38,3 +38,6 @@ logs/
 packages/desktop/dist/
 packages/desktop/out/
 packages/desktop/browsers/
+
+# Fetched zero-install sandbox binaries (ADR-070 Part D) - cached like desktop/browsers, never committed
+packages/desktop/sandbox-bin/

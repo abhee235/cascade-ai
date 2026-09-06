@@ -53,11 +53,22 @@ module.exports = {
       /^\/build\.mts$/,
       /^\/forge\.config\.cjs$/,
       /^\/tsconfig\.json$/,
-      /^\/dist\/(web|browsers|resources|node_modules)($|\/)/, // all extraResource
+      /^\/dist\/(web|browsers|resources|node_modules|sandbox)($|\/)/, // all extraResource
       /^\/dist\/server\.mjs/, // extraResource (and its .map)
+      /^\/sandbox-bin($|\/)/, // fetched binaries; shipped via dist/sandbox
     ],
     // Copied verbatim into the app's `resources/` directory, beside (not inside) the asar.
-    extraResource: [join(DIST, 'server.mjs'), join(DIST, 'server.mjs.map'), join(DIST, 'web'), join(DIST, 'resources'), join(DIST, 'node_modules'), ...(existsSync(join(DIST, 'browsers')) ? [join(DIST, 'browsers')] : [])],
+    // `sandbox/` (ADR-070 Part D) holds per-platform binaries the backends EXECUTE (mise, node, bwrap, the
+    // fence runner) and the WSL rootfs — all of which must be real files, never asar entries.
+    extraResource: [
+      join(DIST, 'server.mjs'),
+      join(DIST, 'server.mjs.map'),
+      join(DIST, 'web'),
+      join(DIST, 'resources'),
+      join(DIST, 'node_modules'),
+      ...(existsSync(join(DIST, 'browsers')) ? [join(DIST, 'browsers')] : []),
+      ...(existsSync(join(DIST, 'sandbox')) ? [join(DIST, 'sandbox')] : []),
+    ],
     appBundleId: 'ai.cascade.desktop',
     appCategoryType: 'public.app-category.developer-tools',
     // WINDOWS SIGNING. Unsigned builds still work — they just greet the user with SmartScreen — so this is

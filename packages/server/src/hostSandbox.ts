@@ -23,7 +23,7 @@ import type { ExecOptions, ExecResult } from '@cascade/core'
 import { devServerRefusal } from './dockerSandbox.js'
 import { type ProjectRuntime, stripAnsi } from './projectRuntime.js'
 import { confineHostCommand, localBackendClaims } from './sandboxBackends.js'
-import { ensureProjectToolchainConfig, installProjectToolchains, miseEnv } from './toolchains.js'
+import { ensureProjectToolchainConfig, installProjectToolchains, toolchainEnv } from './toolchains.js'
 
 /** Where a detached dev server's output goes. Inside the project so it travels with it, and so a user can
  *  open it; `.cascade/` is already this project's scratch area. */
@@ -110,7 +110,7 @@ export class HostSandbox implements ProjectRuntime {
 		const confined = confineHostCommand(command, opts.policy)
 		// The fence uses argv form: spawn its runner from runnerCwd (where `tsx` resolves), NOT the project
 		// workspace — the runner sets the CHILD's cwd to the workspace itself via its --workspace flag.
-		if (confined.argv) return run(confined.command, confined.runnerCwd ?? this.projectDir, opts, confined.argv)
+		if (confined.argv) return run(confined.command, confined.runnerCwd ?? this.projectDir, { ...opts, env: confined.env }, confined.argv)
 		return run(confined.command, opts.cwd ?? this.projectDir, opts)
 	}
 
@@ -180,8 +180,8 @@ export class HostSandbox implements ProjectRuntime {
 		// for one port and the loser would silently drift to 5174 — the exact failure Docker mode hits.
 		const child = spawn(npm(), ['run', 'dev', '--', '--host', '--port', String(port)], {
 			cwd: this.projectDir,
-			// ADR-070: mise shims first, so the dev server runs on the project's pinned toolchain too.
-			env: { ...process.env, ...miseEnv(), ...env },
+			// ADR-070: mise shims + bundled Node first, so the dev server runs on the project's toolchain too.
+			env: { ...process.env, ...toolchainEnv(), ...env },
 			stdio: ['ignore', out, out],
 			detached: !isWindows, // POSIX: its own process group, so we can kill the whole tree
 			shell: isWindows, // Windows needs a shell to resolve npm.cmd
@@ -383,15 +383,16 @@ export function freePort(): Promise<number> {
  * On abort, the tree is killed on Windows: the `signal` option kills only the direct cmd.exe wrapper, and
  * the grandchild it spawned survives holding its port — the same reason stopDev kills with /T.
  */
-function run(command: string, cwd: string, opts: { signal?: AbortSignal; onData?: (s: string) => void }, argv?: string[]): Promise<ExecResult> {
+function run(command: string, cwd: string, opts: { signal?: AbortSignal; onData?: (s: string) => void; env?: Record<string, string> }, argv?: string[]): Promise<ExecResult> {
 	return new Promise((resolve) => {
 		if (!existsSync(cwd)) return resolve({ output: `cwd does not exist: ${cwd}`, exitCode: 1 })
 		// ADR-070 step 6: an ARGV-form backend (the write-fence) spawns its runner directly with NO shell,
 		// so the model's command — the runner's final argv element — is never re-parsed by a shell.
 		// Otherwise: Git Bash when available (node spawns a non-cmd shell string as `bash.exe -c <command>`),
-		// cmd otherwise. ADR-070 step 3: mise shims prepended (empty spread when mise is absent —
-		// byte-identical env), so every agent command resolves node/python/etc. through the pinned toolchain.
-		const env = { ...process.env, ...miseEnv() }
+		// cmd otherwise. ADR-070 step 3/Part D: mise shims + bundled Node prepended (empty spread when
+		// neither exists — byte-identical env), so every agent command resolves node/python/etc. through
+		// the project's toolchain; `opts.env` carries backend-specific extras (ELECTRON_RUN_AS_NODE).
+		const env = { ...process.env, ...toolchainEnv(), ...(opts.env ?? {}) }
 		const child = argv
 			? spawn(argv[0], argv.slice(1), { cwd, shell: false, windowsHide: true, signal: opts.signal, env })
 			: spawn(command, { cwd, shell: hostBash ?? true, windowsHide: true, signal: opts.signal, env })
