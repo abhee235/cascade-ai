@@ -61,6 +61,11 @@ export function projectKey(projectDir: string): string {
 /** The in-distro project root — the `Sandbox.root` alias the model sees and the file tools reconcile. */
 export const linuxRoot = (key: string) => `/projects/${key}`
 
+/** A per-project WRITABLE home inside the VM. Distro-native (never on the drvfs mount) for the same
+ *  reason node_modules is: a package manager's cache over 9p is pathologically slow, and none of this
+ *  belongs in the user's project folder. See buildExecScript for the measured failure that forced it. */
+export const linuxHome = (key: string) => `/var/cascade/home/${key}`
+
 /**
  * The idempotent mount prelude prefixed to EVERY in-distro command. Needed every time because the
  * distro VM auto-terminates seconds after its last process exits, dropping all mounts: (1) drvfs-mount
@@ -71,8 +76,9 @@ export const linuxRoot = (key: string) => `/projects/${key}`
 export function mountPrelude(projectDir: string, key: string): string {
 	const root = linuxRoot(key)
 	const nm = `/var/cascade/nm/${key}`
+	const home = linuxHome(key)
 	return [
-		`mkdir -p ${shq(root)} ${shq(nm)}`,
+		`mkdir -p ${shq(root)} ${shq(nm)} ${shq(home)}`,
 		`mountpoint -q ${shq(root)} || mount -t drvfs ${shq(projectDir)} ${shq(root)}`,
 		`mkdir -p ${shq(`${root}/node_modules`)}`,
 		`mountpoint -q ${shq(`${root}/node_modules`)} || mount --bind ${shq(nm)} ${shq(`${root}/node_modules`)}`,
@@ -84,7 +90,10 @@ export function mountPrelude(projectDir: string, key: string): string {
  *  bwrap refuses a missing bind source. The linux-side meaning of each mode is spelled here directly. */
 export function bwrapArgsInDistro(policy: SandboxPolicy, key: string): string[] {
 	const args = ['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--unshare-pid', '--die-with-parent']
-	if (policy.mode === 'workspace-write') args.push('--bind', linuxRoot(key), linuxRoot(key), '--bind', '/tmp', '/tmp')
+	// workspace-write also re-binds the project's own HOME: a build writes far more than source (npm's
+	// cache, mise state), and with HOME read-only the very first `npm install` dies EROFS. read-only
+	// deliberately gets none of this — a mode that forbids writes must forbid cache writes too.
+	if (policy.mode === 'workspace-write') args.push('--bind', linuxRoot(key), linuxRoot(key), '--bind', '/tmp', '/tmp', '--bind', linuxHome(key), linuxHome(key))
 	return args
 }
 
@@ -92,9 +101,41 @@ export function bwrapArgsInDistro(policy: SandboxPolicy, key: string): string[] 
  *  policy confines and the rootfs carries bwrap. */
 export function buildExecScript(projectDir: string, key: string, command: string, policy: SandboxPolicy | undefined, bwrapInside: boolean): string {
 	const root = linuxRoot(key)
+	// HOME must point somewhere WRITABLE inside the box. Measured 2026-09-16 (live WSL build): the distro's
+	// default HOME=/root sits under bwrap's `--ro-bind / /`, so the agent's own `npm install` died with
+	// `EROFS … /root/.npm/_cacache` — and the model, correctly reading a real denial, escalated to
+	// danger-full-access just to obtain a cache directory. A provisioning gap must never be answerable by
+	// widening the sandbox. Note why this hid for so long: installDependencies() calls exec() WITHOUT a
+	// policy, so it is never wrapped and writes to /root freely — only the agent's own confined call fails.
+	// Exported (not a `VAR=x cmd` prefix) so it applies to every part of a compound command.
+	const prefix = `cd ${shq(root)} && export HOME=${shq(linuxHome(key))}`
 	const confined = policy !== undefined && isConfined(policy.mode) && bwrapInside
-	const run = confined ? `bwrap ${bwrapArgsInDistro(policy, key).join(' ')} -- /bin/sh -c ${shq(`cd ${root} && ${command}`)}` : `cd ${shq(root)} && ${command}`
+	const run = confined ? `bwrap ${bwrapArgsInDistro(policy, key).join(' ')} -- /bin/sh -c ${shq(`${prefix} && ${command}`)}` : `${prefix} && ${command}`
 	return `${mountPrelude(projectDir, key)} && ${run}`
+}
+
+/**
+ * The detached dev-server script. Pure + exported so the trap below stays pinned by a test.
+ *
+ * THE BRACES ARE LOAD-BEARING. `&` binds LOOSER than `&&`, so the obvious spelling —
+ *   `mount && cd && mkdir && setsid npm run dev … & echo $! > dev.pid`
+ * parses as `(mount && cd && mkdir && setsid …) & (echo $!)`: the ENTIRE chain, mount included, becomes one
+ * background job, and `wsl.exe` returns the instant the foreground `echo` finishes — tearing the session
+ * down before the chain ever reaches vite. Measured 2026-09-16: every Browser call and every Preview start
+ * under WSL failed with "the dev server did not answer within 30s", leaving a fresh dev.pid and NO dev.log
+ * at all (the pid echo was the only part that ran in the foreground). Running the same commands by hand
+ * worked, because an interactive shell stays alive long enough for the background chain to finish — which
+ * is exactly what made this look like a preview bug rather than a quoting bug.
+ * Grouping keeps mount/cd/mkdir in the FOREGROUND and detaches only the server.
+ */
+export function buildDevScript(projectDir: string, key: string, port: number, env: Record<string, string>): string {
+	const envPrefix = Object.entries(env)
+		.map(([k, v]) => `${k}=${shq(v)}`)
+		.join(' ')
+	return (
+		`${mountPrelude(projectDir, key)} && cd ${shq(linuxRoot(key))} && mkdir -p .cascade && ` +
+		`{ setsid env ${envPrefix} npm run dev -- --host --port ${port} > .cascade/dev.log 2>&1 & echo $! > .cascade/dev.pid ; }`
+	)
 }
 
 // ── Distro lifecycle (module-level: ONE distro serves every project) ────────────────────────────────
@@ -263,16 +304,15 @@ export class WslSandbox implements ProjectRuntime {
 	async startDev(env: Record<string, string>): Promise<void> {
 		await this.stopDev()
 		const port = await this.previewPort()
-		const envPrefix = Object.entries(env)
-			.map(([k, v]) => `${k}=${shq(v)}`)
-			.join(' ')
 		// setsid → the pid file records a process-GROUP leader, so stopDev kills npm AND the vite it
 		// spawned. The log rides the drvfs mount: it IS <projectDir>\.cascade\dev.log on the host, which
-		// is what lets devLog/followDevLog delegate to the host implementation.
-		const script =
-			`${mountPrelude(this.projectDir, this.key)} && cd ${shq(this.root)} && mkdir -p .cascade && ` +
-			`setsid env ${envPrefix} npm run dev -- --host --port ${port} > .cascade/dev.log 2>&1 & echo $! > ${shq(this.root)}/.cascade/dev.pid`
-		await this.run(script)
+		// is what lets devLog/followDevLog delegate to the host implementation. See buildDevScript for the
+		// `&` precedence trap this composition exists to avoid.
+		const r = await this.run(buildDevScript(this.projectDir, this.key, port, env))
+		// SURFACE a launch failure. run() RETURNS errors rather than throwing (an unavailable distro yields
+		// `{exitCode: 1}`), so the old fire-and-forget `await this.run(script)` converted every launch
+		// failure into a silent 30-second timeout at the caller, with nothing anywhere saying why.
+		if (r.exitCode !== 0) throw new Error(`WSL dev server failed to launch (exit ${r.exitCode}): ${r.output.trim().slice(0, 400)}`)
 	}
 
 	async stopDev(): Promise<void> {

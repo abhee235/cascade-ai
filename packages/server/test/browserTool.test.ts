@@ -260,6 +260,25 @@ describe('browserHostFor — the host runtime gets a Browser too (was Docker-onl
 		expect(calls).toEqual(['install', 'startDev'])
 	})
 
+	// The regression that shipped: `kind` was an enum of two, then ADR-070 added a third. A runtime that
+	// implements ProjectRuntime gets a Browser — whatever its kind is called. Keep this parameterised so
+	// a FOURTH runtime cannot reintroduce the bug by simply not being thought of.
+	it.each(['wsl', 'host', 'podman'])('the %s runtime gets a Browser (no kind allowlist)', async (kind) => {
+		const calls: string[] = []
+		const runtime = {
+			kind,
+			previewPort: async () => 4173,
+			hasDependencies: async () => false,
+			installDependencies: async () => { calls.push('install'); return true },
+			startDev: async () => { calls.push('startDev') },
+		}
+		const adapted = browserHostFor(runtime as never)
+		expect(adapted).toBeDefined()
+		expect(await adapted!.getHostPort()).toBe(4173)
+		await adapted!.execDetached('ignored — the adapter owns the command')
+		expect(calls).toEqual(['install', 'startDev'])
+	})
+
 	it('undefined runtime ⇒ no Browser tool', () => {
 		expect(browserHostFor(undefined)).toBeUndefined()
 	})
