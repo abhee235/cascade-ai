@@ -42,10 +42,30 @@ export function parseOpenverse(json: unknown): { url: string; credit: string }[]
     .map((h) => ({ url: h.url, credit: `${h.title ?? 'photo'}${h.creator ? ` by ${h.creator}` : ''}${h.license ? ` (${h.license.toUpperCase()})` : ''}` }))
 }
 
+/** Words that carry no search signal and only tighten Openverse's AND. */
+const STOPWORDS = new Set(['a', 'an', 'the', 'of', 'in', 'on', 'at', 'with', 'and', 'for', 'photo', 'photos', 'photography', 'photograph', 'image', 'images', 'picture', 'pictures', 'shot', 'closeup', 'close-up', 'background', 'realistic', 'professional'])
+
+/**
+ * Progressively WIDENED queries — full, then stopword-free, then the 3 and 2 most salient words.
+ *
+ * Openverse AND-matches every term, so a natural-language query matches nothing at all. Measured
+ * 2026-09-27: `coffee beans bag Ethiopia natural roast photography` → **0** results, `Ethiopia coffee
+ * beans` → 47, `coffee beans` → 240 — and the original off-subject failure case, `cordless drill`, → 224.
+ * Models write the long form: 12 of 12 searches across two live builds came back empty, after which the
+ * model gave up on the tool and hand-wrote image URLs instead. The tool was never broken; it just took the
+ * model's phrasing literally. The same lesson `webPhoto` already encodes for its own AND-matching host.
+ */
+export function queryLadder(query: string): string[] {
+  const words = query.trim().split(/\s+/).filter(Boolean)
+  const salient = words.filter((w) => !STOPWORDS.has(w.toLowerCase()))
+  const rungs = [words.join(' '), salient.join(' '), salient.slice(0, 3).join(' '), salient.slice(0, 2).join(' ')]
+  return [...new Set(rungs.filter((r) => r.length > 0))] // dedup keeps a short query to a single request
+}
+
 export function createImageSearchTool(): Tool<z.infer<typeof inputSchema>> {
   return {
     name: 'ImageSearch',
-    description: `Find REAL stock photos for the app you're building — a product catalog, a hero image, a listing. Returns image URLs (already on allowlisted CDNs) you drop into <Photo web="…"> or <img src>. Use it when a subject needs a real photograph the bundled pack can't cover. For MANY similar items (a 12-product grid), prefer the runtime helper webPhoto('keywords', seed) — one line, no per-image call.`,
+    description: `Find REAL stock photos for the app you're building — a product catalog, a hero image, a listing. Returns image URLs (already on allowlisted CDNs) that you pass STRAIGHT to <Photo web="https://…" seed={…}> (it takes a URL as readily as keywords) or <img src>. SEARCH 2-3 CONCRETE NOUNS — "coffee beans", "cordless drill" — because the index AND-matches every word, so a long descriptive phrase ("coffee beans bag Ethiopia natural roast photography") matches NOTHING. Use it whenever a photo must match its label: a product catalog, a named-dish menu. The runtime helper webPhoto('keywords', seed) is only a guess AND its host is frequently unavailable, so it may render an unrelated photo — keep it for decorative imagery only. For a catalog, search once per product (or per category) and store the URLs on your data.`,
     inputSchema,
     activitySummary: (input) => `Finding images: ${input.query}`,
     isReadOnly: () => true,
@@ -57,18 +77,25 @@ export function createImageSearchTool(): Tool<z.infer<typeof inputSchema>> {
       const timeout = AbortSignal.timeout(15_000)
       const signal = ctx.abortSignal ? AbortSignal.any([ctx.abortSignal, timeout]) : timeout
       try {
-        const res = await fetch(`https://api.openverse.org/v1/images/?q=${encodeURIComponent(q)}&page_size=${Math.min(n * 3, 20)}&license_type=commercial&mature=false`, {
-          signal,
-          headers: { accept: 'application/json', 'user-agent': 'CascadeBot/1.0' },
-        })
-        if (!res.ok) return { content: `Image search unavailable (Openverse HTTP ${res.status}). Fall back to webPhoto('${q}', seed) or an <ArtImage>.`, isError: true }
-        const hits = parseOpenverse(await res.json()).slice(0, n)
-        if (!hits.length) return { content: `No stock photos for "${q}". Use webPhoto('${q}', seed) for a keyword photo, or <ArtImage> for an on-theme generated one.` }
-        const body = hits.map((h, i) => `${i + 1}. ${h.url}\n   ${h.credit}`).join('\n')
-        return { content: `Images for "${q}" (CC-licensed, allowlisted CDN — safe to hotlink):\n${body}\n\nUse in <Photo web="URL"> so a slow/failed load falls back to <ArtImage>.` }
+        // Walk the ladder: the first rung with usable hits wins. A query that is already short produces a
+        // single rung, so the common case still costs exactly one request.
+        for (const rung of queryLadder(q)) {
+          const res = await fetch(`https://api.openverse.org/v1/images/?q=${encodeURIComponent(rung)}&page_size=${Math.min(n * 3, 20)}&license_type=commercial&mature=false`, {
+            signal,
+            headers: { accept: 'application/json', 'user-agent': 'CascadeBot/1.0' },
+          })
+          if (!res.ok) return { content: `Image search unavailable (Openverse HTTP ${res.status}). Use <ArtImage> for an on-theme generated image.`, isError: true }
+          const hits = parseOpenverse(await res.json()).slice(0, n)
+          if (!hits.length) continue
+          const body = hits.map((h, i) => `${i + 1}. ${h.url}\n   ${h.credit}`).join('\n')
+          // Name the widening when it happened, so the model learns the shape that actually works.
+          const widened = rung === q ? '' : `\n(Nothing matched "${q}" — Openverse AND-matches every word, so this is "${rung}". Search 2-3 concrete nouns.)`
+          return { content: `Images for "${rung}" (CC-licensed, allowlisted CDN — safe to hotlink):\n${body}${widened}\n\nPaste a URL STRAIGHT into <Photo web="https://…" seed={…}> — it renders a URL as-is and falls back to <ArtImage> if the load fails.` }
+        }
+        return { content: `No stock photos for "${q}", even after widening the search. Try 2 concrete nouns ("coffee beans", "cordless drill"), or use <ArtImage> for an on-theme generated image.` }
       } catch (e) {
         const msg = (e as Error)?.name === 'TimeoutError' ? 'timed out' : (e as Error).message
-        return { content: `Image search failed: ${msg}. Use webPhoto('${q}', seed) instead.`, isError: true }
+        return { content: `Image search failed: ${msg}. Use <ArtImage seed={…} kind="product" /> for an on-theme generated image.`, isError: true }
       }
     },
   }
