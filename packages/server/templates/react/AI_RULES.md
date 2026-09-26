@@ -9,7 +9,10 @@ You are editing a **Vite + React + TypeScript + Tailwind CSS v4** app. Follow th
 - This project has a **design system**: theme tokens in `src/themes/` (active preset = the `@import`
   line in `src/index.css`), page blocks in `src/components/blocks/`, imagery via `src/lib/photos.ts` +
   `<ArtImage>`. Use token color utilities only (never raw colors); assemble pages from blocks.
-  `src/demo/` is the starter showcase — delete it (and rewrite `App.tsx`) when building the real app.
+  The scaffold ships BLANK with `data-placeholder` markers (the NavBar brand and the scaffold panel in
+  `App.tsx`) — replace every marked element with real app content and remove the attribute. The
+  TemplateAudit tool enforces this: the app is not done while any placeholder (or legacy `src/demo/`
+  residue) remains.
 - Add dependencies with the package manager (npm) — don't hand-edit `package.json` versions.
 - Keep the app runnable: `npm install` then `npm run dev` (Vite, port 5173). Don't break the build.
 - Prefer small, composable components and clear names. Don't scaffold a backend unless asked.

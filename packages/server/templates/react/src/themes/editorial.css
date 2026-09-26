@@ -1,0 +1,110 @@
+/* THEME PRESET: editorial — literary warmth for content, portfolios, and long-form landings.
+   Character: a well-set magazine page. Cream paper with real warmth, soft coffee-brown ink, and one
+   oxblood accent that reads like a ribbon bookmark. Fraunces doesn't just do headlines here — it IS
+   the voice; tracking pulls display type tight the way print does. Airy rhythm: sections get room to
+   end and begin like chapters. Color is scarcer than premium — the accent appears once per spread.
+
+   CONTRACT v2 — see premium.css for the canonical contract comment. */
+
+@font-face {
+	font-family: 'Fraunces Variable';
+	font-style: normal;
+	font-weight: 100 900;
+	font-display: swap;
+	src: url('../assets/fonts/fraunces-var-latin.woff2') format('woff2-variations');
+}
+
+:root {
+	--preset: 'editorial';
+	--radius: 0.5rem;
+
+	/* Density: airy — chapters, not panels. */
+	--section-y: 5rem;
+	--section-y-lg: 6.5rem;
+	--hero-y: 7rem;
+	--nav-h: 4.5rem;
+
+	/* Cream paper, coffee ink — hue 75-85 keeps every neutral warm like book stock. */
+	--background: oklch(0.975 0.008 85);
+	--foreground: oklch(0.24 0.02 60);
+	--card: oklch(0.99 0.005 85);
+	--card-foreground: oklch(0.24 0.02 60);
+	--popover: oklch(0.99 0.005 85);
+	--popover-foreground: oklch(0.24 0.02 60);
+	/* Oxblood — the ribbon bookmark. Spent once per spread. */
+	--primary: oklch(0.42 0.13 25);
+	--primary-foreground: oklch(0.97 0.01 85);
+	--secondary: oklch(0.94 0.01 85);
+	--secondary-foreground: oklch(0.3 0.02 60);
+	--muted: oklch(0.94 0.01 85);
+	--muted-foreground: oklch(0.5 0.02 60);
+	--accent: oklch(0.92 0.03 30);
+	--accent-foreground: oklch(0.38 0.11 25);
+	--destructive: oklch(0.55 0.21 27);
+	--destructive-foreground: oklch(0.985 0 0);
+	--border: oklch(0.9 0.012 85);
+	--input: oklch(0.9 0.012 85);
+	--ring: oklch(0.55 0.11 25);
+	/* Charts: warm bookish ramp — oxblood, ochre, olive, slate-blue, clay. */
+	--chart-1: oklch(0.5 0.13 25);
+	--chart-2: oklch(0.65 0.11 80);
+	--chart-3: oklch(0.55 0.09 130);
+	--chart-4: oklch(0.5 0.07 250);
+	--chart-5: oklch(0.6 0.1 50);
+
+	/* Fonts (mode-invariant): Fraunces is the voice; Inter serves quietly for UI text. */
+	/* Sidebar roles derive from this preset's own tokens — authored once, correct in light AND dark
+	   (`.dark` redefines --card/--accent on the same :root element, so these re-resolve). */
+	--sidebar: var(--card);
+	--sidebar-foreground: var(--card-foreground);
+	--sidebar-primary: var(--primary);
+	--sidebar-primary-foreground: var(--primary-foreground);
+	--sidebar-accent: var(--accent);
+	--sidebar-accent-foreground: var(--accent-foreground);
+	--sidebar-border: var(--border);
+	--sidebar-ring: var(--ring);
+
+	--font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+	/* Fraunces owns display AND lead paragraphs — this preset is about reading. */
+	--font-serif: 'Fraunces Variable', Georgia, serif;
+	--font-mono: 'Geist Mono Variable', ui-monospace, 'Cascadia Code', Consolas, monospace;
+
+	/* Shadows: warm and soft, like page curvature — not elevation. */
+	--shadow-color: oklch(0.35 0.05 60);
+	--shadow-opacity: 0.07;
+
+	/* Print-tight display tracking — Fraunces at size wants to close up. */
+	/* Fraunces is wide enough to take negative tracking; editorial leading is looser. */
+	--tracking-display: -0.02em;
+	--leading-display: 1.1;
+}
+
+.dark {
+	/* Reading lamp at night: warm near-black, cream ink, the oxblood glows slightly. */
+	--background: oklch(0.17 0.012 60);
+	--foreground: oklch(0.94 0.01 85);
+	--card: oklch(0.21 0.014 60);
+	--card-foreground: oklch(0.94 0.01 85);
+	--popover: oklch(0.21 0.014 60);
+	--popover-foreground: oklch(0.94 0.01 85);
+	--primary: oklch(0.68 0.13 28);
+	--primary-foreground: oklch(0.16 0.03 25);
+	--secondary: oklch(0.27 0.015 60);
+	--secondary-foreground: oklch(0.94 0.01 85);
+	--muted: oklch(0.27 0.015 60);
+	--muted-foreground: oklch(0.7 0.02 75);
+	--accent: oklch(0.3 0.04 30);
+	--accent-foreground: oklch(0.85 0.06 35);
+	--destructive: oklch(0.68 0.18 25);
+	--destructive-foreground: oklch(0.985 0 0);
+	--border: oklch(1 0 0 / 9%);
+	--input: oklch(1 0 0 / 13%);
+	--ring: oklch(0.62 0.11 28);
+	--chart-1: oklch(0.66 0.13 28);
+	--chart-2: oklch(0.72 0.1 80);
+	--chart-3: oklch(0.65 0.09 130);
+	--chart-4: oklch(0.62 0.08 250);
+	--chart-5: oklch(0.7 0.09 50);
+	--shadow-color: oklch(0 0 0);
+	--shadow-opacity: 0.35;
+}

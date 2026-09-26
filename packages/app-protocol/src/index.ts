@@ -94,6 +94,8 @@ export interface EnabledModelInfo {
   topK?: number
   repeatPenalty?: number
   presencePenalty?: number
+  /** TASK-thinking-control: reasoning-effort knob ('off'|'low'|'medium'|'high'). Omit ⇒ model default. */
+  thinking?: 'off' | 'low' | 'medium' | 'high'
   /** ADR-076: custom OpenAI-compatible endpoint (e.g. a rented vLLM/SGLang box). The CLEAN URL — safe to show. */
   baseUrl?: string
   /** ADR-076: whether an API key is stored server-side for this endpoint. The key VALUE is never sent to the client. */

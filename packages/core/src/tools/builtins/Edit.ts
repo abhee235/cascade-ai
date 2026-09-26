@@ -6,8 +6,8 @@ import { readFile, writeFile } from 'node:fs/promises'
 import type { Tool } from '../Tool'
 import { lineDiff } from '../../utils/diff'
 import { normalizeText } from '../fileState'
-import { displayPath, ProjectPathError, resolveInProject } from '../projectPath'
-import { findEditTarget, readFreshnessError, refreshReadState } from '../editCore'
+import { assertWritable, displayPath, FrozenPathError, ProjectPathError, resolveInProject } from '../projectPath'
+import { findEditTarget, readFreshnessError, refreshReadState, restoreLineEndings } from '../editCore'
 import { escalationFields, fileWriteFence } from '../../sandbox/escalation'
 
 // Param-level guidance: repeat the critical constraints ON the argument the model
@@ -42,12 +42,14 @@ export const EditTool: Tool<z.infer<typeof inputSchema>> = {
     let path: string
     try {
       path = resolveInProject(ctx.cwd, input.file_path, ctx.sandbox?.root, ctx.pathScope) // ADR-033: jail to the project root
+      assertWritable(ctx.cwd, path, ctx.pathScope) // frozen prefixes (shared blocks/kit) reject writes
     } catch (e) {
-      if (e instanceof ProjectPathError) return { content: e.message, isError: true }
+      if (e instanceof ProjectPathError || e instanceof FrozenPathError) return { content: e.message, isError: true }
       throw e
     }
     try {
-      const content = normalizeText(await readFile(path, 'utf8')) // CRLF→LF so a Windows file matches the model's \n old_string
+      const raw = await readFile(path, 'utf8')
+      const content = normalizeText(raw) // CRLF→LF so a Windows file matches the model's \n old_string
 
       // ── ADR-032: read-before-edit freshness (shared with MultiEdit; no-op when no cache is wired) ──
       const fs = ctx.readFileState
@@ -59,10 +61,10 @@ export const EditTool: Tool<z.infer<typeof inputSchema>> = {
       const target = findEditTarget(content, input.old_string, input.new_string)
       if (!target.ok) return { content: `${target.message} (file: ${input.file_path})`, isError: true }
       const after = content.replace(target.actual, () => target.newString) // fn replacer ⇒ `$` in new_string stays literal
-      await writeFile(path, after, 'utf8')
-      await refreshReadState(fs, path, after)
+      await writeFile(path, restoreLineEndings(raw, after), 'utf8') // disk keeps its own CRLF/LF style
+      await refreshReadState(fs, path, after) // cache stays LF-normalized (what matching compares against)
       return {
-        content: `Edited ${input.file_path} (1 replacement${target.via === 'trimmed' ? '; old_string matched with whitespace tolerance — indentation was taken from the file' : ''}).`,
+        content: `Edited ${input.file_path} (1 replacement${target.via !== 'exact' ? '; old_string matched with whitespace tolerance — indentation was taken from the file' : ''}).`,
         display: { kind: 'fileEdit', path: displayPath(ctx.cwd, path), op: 'edit', diff: lineDiff(content, after) }, // ADR-033: project-relative
       }
     } catch (e) {

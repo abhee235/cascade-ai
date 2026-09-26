@@ -1,0 +1,14 @@
+{
+	"$comment": "SKIN PACK (design-overhaul P5): the counterpoint to `sharp` \u2014 airy, extra-rounded, soft-shadowed, borderless-where-possible. Same interface contract, enforced by skins/parity.check.ts and the skins test.",
+	"id": "soft",
+	"description": "Airy and rounded: 2xl corners, soft layered shadows instead of borders, generous padding, pill accents",
+	"blocks": [
+		"ArtImage",
+		"Footer",
+		"Hero",
+		"MediaCard",
+		"NavBar",
+		"Section",
+		"StatCard"
+	]
+}

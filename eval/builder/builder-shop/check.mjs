@@ -1,10 +1,17 @@
 // builder-shop check — the app must BUILD and the bundle must carry the storefront the brief mandates.
-// Bundle-text assertions are deliberately on EXACT strings the prompt requires, so a half-built app
-// (catalog but no checkout, cart but no validation form) fails loudly with the missing piece named.
+// Bundle-text assertions are on the strings the prompt requires, so a half-built app (catalog but no
+// checkout, cart but no validation form) fails loudly with the missing piece named.
+//
+// Matching is CASE-INSENSITIVE (2026-08-11). Measured: a 35B run built every required surface and then
+// failed the whole scenario on "Add to Cart" vs the brief's "Add to cart" — a title-cased button label,
+// which is what a careful frontier model writes too. What this assertion measures is that the SURFACE
+// exists; capitalization is not the variable, and a check that fails correct work teaches models to game
+// the bar rather than meet it (the same reasoning that removed onePrimaryCta from designLint).
 import { spawnSync } from 'node:child_process'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { runDesignLint } from '../_lib/designLint.mjs'
+import { noResidue } from '../_lib/residue.mjs'
 
 const build = spawnSync(process.execPath, [join('node_modules', 'vite', 'bin', 'vite.js'), 'build'], { encoding: 'utf8', timeout: 180_000 })
 if (build.status !== 0) {
@@ -22,8 +29,9 @@ const required = [
 	['Checkout', 'the checkout button'],
 	['Remove', 'the cart line-item remove button'],
 ]
+const haystack = bundle.toLowerCase()
 for (const [needle, what] of required) {
-	if (!bundle.includes(needle)) {
+	if (!haystack.includes(needle.toLowerCase())) {
 		console.error(`built bundle is missing "${needle}" — ${what}`)
 		process.exit(1)
 	}
@@ -37,5 +45,7 @@ if (literalPrices < 4 && priceFields < 6) {
 	process.exit(1)
 }
 // Design-system v2: objective design assertions (tokens-only colors, block assembly, real imagery).
-if (runDesignLint(bundle, { blocks: ['navbar', 'media-card', 'empty-state'] }) > 0) process.exit(1)
+if (runDesignLint(bundle, { blocks: ['navbar', 'media-card', 'empty-state'], preset: 'premium', quality: process.env.EVAL_BAR === 'quality' }) > 0) process.exit(1)
+// Design-overhaul P1: no template residue (demo branding, unreplaced placeholders, unwired entry).
+if (noResidue(process.cwd()) > 0) process.exit(1)
 console.log('builder-shop check passed')

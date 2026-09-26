@@ -18,6 +18,7 @@ cascade-workspace/
 
 # Eval run outputs (PLAN-eval): per-run results + traces; fixtures under eval/tasks ARE committed
 eval/runs/
+eval/design-review/
 
 # Tier-2 external benchmarks (PLAN-eval): cloned suites + generated tasks + shared deps — never committed
 eval/external/
@@ -41,3 +42,6 @@ packages/desktop/browsers/
 
 # Fetched zero-install sandbox binaries (ADR-070 Part D) - cached like desktop/browsers, never committed
 packages/desktop/sandbox-bin/
+# Design review artifacts (screenshots + reference contact sheets from the preset/look authoring loop).
+# Regenerate any time by serving the template's demo/ gallery and re-capturing — 21MB of PNGs is not history.
+eval/design-review/

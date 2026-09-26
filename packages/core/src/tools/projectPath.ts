@@ -56,6 +56,70 @@ export interface PathScope {
   /** Extra directories treated as inside (no prompt). The project root is always implicitly included. */
   roots?: string[]
   policy?: PathAccess
+  /**
+   * Project-relative prefixes that are READ-ONLY: readable and greppable, never writable.
+   *
+   * Measured (qwen3.5:9b, 2026-08-13, builder-landing + builder-appshell): the template declares
+   * `src/components/blocks` read-only in a comment, and TWO OF THREE runs rewrote it anyway — NavBar
+   * (54 lines changed), Hero (22), LogoStrip (44), plus an invented DangerZone.tsx. That contract is
+   * load-bearing: designLint's block assertions, TemplateAudit, and the restyle feature all rest on
+   * "pages COMPOSE frozen blocks", so a model that edits Hero.tsx silently destroys the property while
+   * the build stays green. Prompt text alone does not hold a weak model (the standing finding), so the
+   * frontier that declares the contract also enforces it.
+   *
+   * Core stays policy-free: it knows only "these prefixes reject writes". WHICH paths are frozen is the
+   * frontend's call (the builder freezes its blocks + vendored kit; the CLI freezes nothing).
+   */
+  frozen?: string[]
+}
+
+/** `blocks/Hero.tsx` → `Hero`; `ui/alert-dialog.tsx` → `AlertDialog`. The kit ships kebab-case filenames
+ *  with PascalCase exports, so the import line has to be derived, not echoed. */
+function exportNameFor(relPath: string): string {
+  const base = relPath.split('/').pop()!.replace(/\.[jt]sx?$/, '')
+  return base
+    .split(/[-_.]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join('')
+}
+
+/**
+ * A write aimed at a read-only path. Returned to the model AS a tool error so it self-corrects into its
+ * own component instead of mutating the shared layer (same contract as ProjectPathError).
+ *
+ * The message carries a COPY-PASTEABLE import line rather than a description of one. Measured repeatedly
+ * on this project: weak models act on literal code and paraphrase prose, so "import the component and
+ * pass it props" is materially weaker than the two lines it would have written. It also states plainly
+ * that nothing was written — otherwise a model can read a refusal as a partial success and move on.
+ */
+export class FrozenPathError extends Error {
+  constructor(public readonly given: string) {
+    const rel = given.replace(/\\/g, '/')
+    const name = exportNameFor(rel)
+    const alias = `@/${rel.replace(/^src\//, '').replace(/\.[jt]sx?$/, '')}`
+    super(
+      `"${rel}" is READ-ONLY. Your edit was NOT applied and the file is unchanged.\n\n` +
+        `This file is shared by every page, so the app COMPOSES it instead of changing it. From your own file:\n\n` +
+        `    import { ${name} } from '${alias}'\n` +
+        `    <${name} … />   // pass what you need as props\n\n` +
+        `If you need behaviour its props do not offer, create a NEW component beside your own code — e.g. ` +
+        `src/components/My${name}.tsx, which may itself render <${name}/> — and use that. Never edit or replace a shared one.`,
+    )
+    this.name = 'FrozenPathError'
+  }
+}
+
+/** Throw if `abs` (a host path already resolved into the project) falls under a frozen prefix. Called by
+ *  the MUTATING file tools only — Read/Glob/Grep must keep working, since a model has to read a block to
+ *  compose it. */
+export function assertWritable(cwd: string, abs: string, scope?: PathScope): void {
+  if (!scope?.frozen?.length) return
+  const rel = relative(resolve(cwd), abs).replace(/\\/g, '/')
+  for (const prefix of scope.frozen) {
+    const p = prefix.replace(/\\/g, '/').replace(/\/$/, '')
+    if (rel === p || rel.startsWith(`${p}/`)) throw new FrozenPathError(rel)
+  }
 }
 
 /** True when `abs` is inside the project root or any additional allowed root. */

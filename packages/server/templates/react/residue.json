@@ -1,0 +1,14 @@
+{
+	"$comment": "The residue contract (design-overhaul P1): what must be GONE from a generated app before it may be called done. Read server-side from TEMPLATES_DIR by readResidueContract() — never copied into projects, so the builder cannot edit its own audit. 'hard' findings block done; 'soft' findings should be fixed or overridden with a stated reason. Covers BOTH the fresh scaffold's data-placeholder markers and legacy projects that still carry the old demo.",
+	"hard": [
+		{ "kind": "path", "path": "src/demo", "why": "the starter demo directory (legacy scaffold) — delete it entirely", "fix": "Delete src/demo/ and remove every '@/demo/' import." },
+		{ "kind": "string", "needle": "@/demo/", "scope": "src", "why": "App still imports the demo — the entry point was never rewired to your app", "fix": "Rewrite src/App.tsx: replace demo imports and the demo view union with your app's views." },
+		{ "kind": "string", "needle": "Meridian", "scope": "src", "requires": ["src/demo", "@/demo/"], "why": "the STARTER TEMPLATE's brand, still present alongside the demo this project was copied from", "fix": "Rename it to this app's own name. (Only reported because src/demo or an @/demo import is also present — Meridian is an ordinary word, and a project that merely chose it as a product name is not residue.)" },
+		{ "kind": "string", "needle": "The look", "scope": "src", "requires": ["src/demo", "@/demo/"], "why": "the demo's nav label, still present alongside the demo this project was copied from", "fix": "Replace the nav links with this app's real views." },
+		{ "kind": "string", "needle": "data-placeholder=", "scope": "src", "why": "a scaffold placeholder was never replaced with real app content", "fix": "Replace the marked element (brand or scaffold panel) with your app's real content and REMOVE the data-placeholder attribute." },
+		{ "kind": "file", "path": "index.html", "mustNotContain": "Vite + React + Tailwind", "why": "the default page title — the browser tab must show the app's name", "fix": "Edit index.html's <title> to the app's name." }
+	],
+	"soft": [
+		{ "kind": "file", "path": "package.json", "mustNotContain": "\"name\": \"vite-react-app\"", "why": "the default package name", "fix": "Set package.json name to a kebab-case app name (cosmetic — override with a reason if time-boxed)." }
+	]
+}

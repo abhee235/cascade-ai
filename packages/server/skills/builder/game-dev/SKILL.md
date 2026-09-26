@@ -99,3 +99,13 @@ seed(42) + step(300) twice from reset → identical state  (determinism — requ
 For a thorough check that keeps probe output out of your context:
 `Subagent {agent: "gametester", prompt: "<what the game is + its intended mechanics/speeds>"}` — it probes
 every assertion above, measures speeds against the bands, and returns a GAME REPORT punch-list to fix.
+
+## 7. The screens AROUND the game
+
+A game is a phase machine with four screens, and scaffolded games ship only the middle one. Every game
+needs: a MENU (Hero centered — title, one-line rules, ONE start button, best score visible), a
+layout-stable HUD (StatCard row whose slots never appear/disappear mid-game), a GAME-OVER showing the
+run's numbers with restart AND back-to-menu, and a persistent top-5 LEADERBOARD (localStorage,
+EmptyState when fresh). The full working set, verbatim:
+`Skill {name: "game-dev", file: "reference/pages.md"}` — copy its phase-union SHAPE
+(`menu | playing | gameover`), wrap your own mechanics in it.

@@ -154,19 +154,23 @@ function CommandCard({ item }: { item: Extract<Item, { kind: 'tool' }> }) {
   )
 }
 
-/** Collapsed "Thought for Ns" summary that expands to the raw thinking. */
+/** Collapsed "Thought for Ns" summary that expands to the raw thinking. The collapsed row also carries the
+ *  thought's FIRST LINE as a dimmed preview, so a stack of thought cards reads as "what was each about"
+ *  instead of identical timer rows. */
 function ThoughtBlock({ thinking, ms }: { thinking: string; ms?: number }) {
   const [open, setOpen] = useState(false)
   const label = ms != null ? `Thought for ${Math.max(1, Math.round(ms / 1000))}s` : 'Thought process'
+  const preview = thinking.trimStart().split('\n', 1)[0]
   return (
     <div className="mb-1.5">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1 text-[13px] leading-[21px] text-muted-foreground transition-colors hover:text-foreground"
+        className="flex w-full min-w-0 items-center gap-1 text-left text-[13px] leading-[21px] text-muted-foreground transition-colors hover:text-foreground"
       >
-        <ChevronRight className={cn('h-3 w-3 transition-transform', open && 'rotate-90')} />
-        {label}
+        <ChevronRight className={cn('h-3 w-3 shrink-0 transition-transform', open && 'rotate-90')} />
+        <span className="shrink-0">{label}</span>
+        {!open && preview && <span className="min-w-0 flex-1 truncate pl-2 text-muted-foreground/50">{preview}</span>}
       </button>
       {open && <div className="mt-1 whitespace-pre-wrap border-l-2 border-border pl-3 text-[13px] leading-[21px] text-muted-foreground">{thinking}</div>}
     </div>

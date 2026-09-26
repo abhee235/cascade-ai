@@ -154,7 +154,7 @@ function ModelDetail(props: { em: EnabledModelInfo; info?: { capabilities: strin
 	const tempMax = Math.max(lim.tempMax, em.temperature ?? 0)
 
 	// Local draft ('' = Auto/backend default) so dragging feels immediate; commit on Save.
-	const keys = ['contextWindow', 'maxOutputTokens', 'temperature', 'topP', 'topK', 'repeatPenalty', 'presencePenalty'] as const
+	const keys = ['contextWindow', 'maxOutputTokens', 'temperature', 'topP', 'topK', 'repeatPenalty', 'presencePenalty', 'thinking'] as const
 	const snapshot = () => ({
 		contextWindow: em.contextWindow?.toString() ?? '',
 		maxOutputTokens: em.maxOutputTokens?.toString() ?? '',
@@ -163,6 +163,7 @@ function ModelDetail(props: { em: EnabledModelInfo; info?: { capabilities: strin
 		topK: em.topK?.toString() ?? '',
 		repeatPenalty: em.repeatPenalty?.toString() ?? '',
 		presencePenalty: em.presencePenalty?.toString() ?? '',
+		thinking: em.thinking ?? '',
 	})
 	const [draft, setDraft] = useState<Record<string, string>>(snapshot)
 	useEffect(() => setDraft(snapshot()), [em]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -173,7 +174,12 @@ function ModelDetail(props: { em: EnabledModelInfo; info?: { capabilities: strin
 		const t = s.trim()
 		return t === '' || !Number.isFinite(Number(t)) ? undefined : Number(t)
 	}
-	const save = () => setModelParams(em.provider, em.model, { contextWindow: num(draft.contextWindow), maxOutputTokens: num(draft.maxOutputTokens), temperature: num(draft.temperature), topP: num(draft.topP), topK: num(draft.topK), repeatPenalty: num(draft.repeatPenalty), presencePenalty: num(draft.presencePenalty) })
+	const save = () => setModelParams(em.provider, em.model, { contextWindow: num(draft.contextWindow), maxOutputTokens: num(draft.maxOutputTokens), temperature: num(draft.temperature), topP: num(draft.topP), topK: num(draft.topK), repeatPenalty: num(draft.repeatPenalty), presencePenalty: num(draft.presencePenalty), thinking: (draft.thinking || undefined) as EnabledModelInfo['thinking'] })
+
+	// TASK-thinking-control capability gate (the ollama-webui pattern): the dropdown appears only when the
+	// /api/show probe reported the 'thinking' capability — or for custom endpoints (em.baseUrl), which have
+	// no probe: there the user knows the model (Hetzner Qwen3.8 was the motivating case) and Auto stays safe.
+	const showThinking = info?.capabilities?.includes('thinking') || !!em.baseUrl
 
 	return (
 		<div className="flex flex-col gap-6">
@@ -213,6 +219,27 @@ function ModelDetail(props: { em: EnabledModelInfo; info?: { capabilities: strin
 					{lim.topK && <SliderField label="Top K" value={draft.topK ?? ''} onChange={(v) => set('topK', v)} min={0} max={100} step={1} fallback={40} format={(n) => String(n)} note="Sampling breadth (local / self-hosted endpoints)." />}
 					{lim.topK && <SliderField label="Repeat penalty" value={draft.repeatPenalty ?? ''} onChange={(v) => set('repeatPenalty', v)} min={1} max={1.5} step={0.01} fallback={1.1} format={(n) => n.toFixed(2)} note="Discourages verbatim repetition — the main anti-loop lever for quantized local models." />}
 					{lim.topK && <SliderField label="Presence penalty" value={draft.presencePenalty ?? ''} onChange={(v) => set('presencePenalty', v)} min={0} max={2} step={0.1} fallback={0} format={(n) => n.toFixed(1)} note="Qwen recommends ~1.5 for quantized builds that loop." />}
+					{showThinking && (
+						<div className="flex flex-col gap-1.5">
+							<div className="flex items-center justify-between">
+								<label htmlFor="thinking-select" className="text-sm font-medium">Thinking</label>
+								<span className="text-xs tabular-nums text-muted-foreground">{draft.thinking || 'Auto'}</span>
+							</div>
+							<select
+								id="thinking-select"
+								value={draft.thinking ?? ''}
+								onChange={(e) => set('thinking', e.target.value)}
+								className="h-9 rounded-md border border-border bg-background px-2 text-sm"
+							>
+								<option value="">Auto (model default)</option>
+								<option value="off">Off</option>
+								<option value="low">Low</option>
+								<option value="medium">Medium</option>
+								<option value="high">High</option>
+							</select>
+							<p className="text-xs text-muted-foreground">Reasoning effort per turn. Lower = faster turns, less context burned; a thinking model's default is often its HIGHEST level (Qwen3.8: xhigh).</p>
+						</div>
+					)}
 
 				</div>
 

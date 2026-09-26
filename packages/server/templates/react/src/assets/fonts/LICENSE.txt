@@ -1,9 +1,15 @@
-Bundled fonts — both licensed under the SIL Open Font License 1.1 (OFL):
+Bundled fonts — all licensed under the SIL Open Font License 1.1 (OFL):
 
-- Inter Variable (inter-var-latin.woff2) — Copyright 2020 The Inter Project Authors
-  https://github.com/rsms/inter
+- Geist Variable (geist-var-latin.woff2) — Copyright 2023 Vercel, Inc.
+  https://github.com/vercel/geist-font
+- Geist Mono Variable (geist-mono-var-latin.woff2) — Copyright 2023 Vercel, Inc.
+  https://github.com/vercel/geist-font
 - Fraunces Variable (fraunces-var-latin.woff2) — Copyright 2020 The Fraunces Project Authors
   https://github.com/undercasetype/Fraunces
+
+Geist is the base UI face for every preset (declared in src/fonts.css). Fraunces is the display face
+for the `editorial` preset ONLY, and is declared inside src/themes/editorial.css so apps on other
+presets never download it.
 
 Latin subsets obtained via Fontsource (https://fontsource.org). The OFL permits bundling,
 redistribution, and commercial use. Full license text: https://openfontlicense.org

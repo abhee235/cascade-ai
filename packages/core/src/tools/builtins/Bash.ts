@@ -88,8 +88,21 @@ const CONTENT_WRITE_RE =
  *  `pkill -9 node` and `killall node`, which kill EVERY node process in the container, including the dev
  *  server the preview proxy points at. Result: "Preview unreachable", and a restart loop it could not exit.
  *  (A prose ban existed — it named `pkill -f node`; the model simply used other spellings. Hence a guard.)
- *  On the extension's HOST path this matters even more: `pkill node` would kill VS Code's own processes. */
-const KILL_RE = /(^|[;&|])\s*(pkill|killall)\b|(^|[;&|])\s*kill\s+(-\S+\s+)*(-9\b|\$\()/i
+ *  On the extension's HOST path this matters even more: `pkill node` would kill VS Code's own processes.
+ *
+ *  …and the guard itself had the same hole one level up: it knew only POSIX spellings. Measured
+ *  (qwen36-agentic-iq4, builder-dashboard 2026-08-15, on Windows): the model started a dev server, then
+ *  "cleaned up" with `taskkill //F //IM node.exe` — which killed EVERY node process on the machine,
+ *  including the eval harness running the build. It did not fail the scenario; it terminated the whole
+ *  bench mid-run, and the two scenarios queued behind it never started.
+ *
+ *  On the HOST runtime (the default since ADR-081) that same command takes out the user's Cascade server,
+ *  their editor's language servers, and anything else node they had open. So the image-name forms are
+ *  refused on every platform: `taskkill /IM`, PowerShell `Stop-Process -Name`, and `wmic process … delete`.
+ *  A PID-targeted `taskkill /PID` stays allowed — that is a specific process the model can reason about,
+ *  and it is what this tool uses internally to reap its own trees. */
+const KILL_RE =
+  /(^|[;&|])\s*(pkill|killall)\b|(^|[;&|])\s*kill\s+(-\S+\s+)*(-9\b|\$\()|(^|[;&|])\s*taskkill\b[^;&|]*[/-]{1,2}im\b|(^|[;&|])\s*stop-process\b[^;&|]*-name\b|(^|[;&|])\s*wmic\b[^;&|]*\bprocess\b[^;&|]*\bdelete\b/i
 
 /** Kill the whole process TREE. Node's `kill` signals only the direct child; on Windows a shell's
  *  grandchildren (the `start /b` case) survive it and keep the inherited stdio pipes open. Best-effort:
@@ -180,7 +193,7 @@ export const BashTool: Tool<z.infer<typeof inputSchema>> = {
     if (KILL_RE.test(input.command)) {
       return {
         content:
-          'Refused: broad process killing (pkill / killall / kill -9 / kill $(…)) takes down every matching process — including the dev server this preview depends on, which is how a previous build spent 30+ minutes in a restart loop with an unreachable preview. The dev server is MANAGED for you: it is restarted automatically when needed, so you do not need to kill it. If a port is genuinely stuck, start on a different one (`npx vite --port <n>`); if you believe a cache is stale, `rm -rf node_modules/.vite` alone is enough — do not kill processes.',
+          'Refused: broad process killing (pkill / killall / kill -9 / kill $(…) / taskkill /IM / Stop-Process -Name / wmic process delete) takes down EVERY process with that name on the machine — not just yours. One build ran `taskkill /F /IM node.exe` to tidy up a dev server and killed the tool running it, along with everything else node the user had open. The dev server is MANAGED for you: it is restarted automatically when needed, so you do not need to kill it. If a port is genuinely stuck, start on a different one (`npx vite --port <n>`); if a cache looks stale, `rm -rf node_modules/.vite` alone is enough. To stop one specific process you started, target its PID, never its image name.',
         isError: true,
       }
     }

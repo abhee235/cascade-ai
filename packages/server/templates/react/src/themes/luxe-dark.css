@@ -1,0 +1,99 @@
+/* THEME PRESET: luxe-dark — a dark-first stage for product launches, gaming, and premium tech.
+   Character: a lit object in a dark room. Near-black ground with a faint violet cast, warm champagne-gold
+   as the only accent, and elevated cards that read as glass rather than paper. Fraunces stays for display
+   because gold + serif is the luxury signature; Inter carries everything else. Rhythm is generous — a
+   dark page needs air or it reads heavy. This is the ONLY preset whose light mode is the alternate: the
+   .dark block below is the intended default, and :root is a warm-ivory fallback for users who force light.
+
+   CONTRACT v2 — see premium.css for the canonical contract comment. */
+
+:root {
+	--preset: 'luxe-dark';
+	--radius: 0.625rem;
+
+	/* Density: generous — dark surfaces need breathing room. */
+	--section-y: 4.5rem;
+	--section-y-lg: 6rem;
+	--hero-y: 7rem;
+	--nav-h: 4.25rem;
+
+	/* Light fallback: warm ivory with the same champagne accent, so a forced-light user stays on-brand. */
+	--background: oklch(0.97 0.008 85);
+	--foreground: oklch(0.2 0.015 60);
+	--card: oklch(0.99 0.004 85);
+	--card-foreground: oklch(0.2 0.015 60);
+	--popover: oklch(0.99 0.004 85);
+	--popover-foreground: oklch(0.2 0.015 60);
+	--primary: oklch(0.62 0.1 78);
+	--primary-foreground: oklch(0.18 0.02 60);
+	--secondary: oklch(0.94 0.008 85);
+	--secondary-foreground: oklch(0.28 0.015 60);
+	--muted: oklch(0.94 0.008 85);
+	--muted-foreground: oklch(0.5 0.015 60);
+	--accent: oklch(0.93 0.03 80);
+	--accent-foreground: oklch(0.4 0.08 70);
+	--destructive: oklch(0.55 0.21 27);
+	--destructive-foreground: oklch(0.985 0 0);
+	--border: oklch(0.9 0.01 85);
+	--input: oklch(0.9 0.01 85);
+	--ring: oklch(0.68 0.09 78);
+	--chart-1: oklch(0.65 0.1 78);
+	--chart-2: oklch(0.55 0.08 300);
+	--chart-3: oklch(0.6 0.09 200);
+	--chart-4: oklch(0.5 0.1 30);
+	--chart-5: oklch(0.7 0.07 140);
+
+	/* Fonts (mode-invariant): serif display + sans UI — the luxury pairing. */
+	/* Sidebar roles derive from this preset's own tokens — authored once, correct in light AND dark
+	   (`.dark` redefines --card/--accent on the same :root element, so these re-resolve). */
+	--sidebar: var(--card);
+	--sidebar-foreground: var(--card-foreground);
+	--sidebar-primary: var(--primary);
+	--sidebar-primary-foreground: var(--primary-foreground);
+	--sidebar-accent: var(--accent);
+	--sidebar-accent-foreground: var(--accent-foreground);
+	--sidebar-border: var(--border);
+	--sidebar-ring: var(--ring);
+
+	--font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+	--font-serif: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+	--font-mono: 'Geist Mono Variable', ui-monospace, 'Cascadia Code', Consolas, monospace;
+
+	--shadow-color: oklch(0.3 0.04 70);
+	--shadow-opacity: 0.1;
+
+	--tracking-display: -0.03em;
+	--leading-display: 1.05;
+}
+
+.dark {
+	/* THE intended mode: near-black with a violet cast, champagne gold, glassy elevated cards. */
+	--background: oklch(0.135 0.012 300);
+	--foreground: oklch(0.96 0.006 85);
+	--card: oklch(0.185 0.014 300);
+	--card-foreground: oklch(0.96 0.006 85);
+	--popover: oklch(0.185 0.014 300);
+	--popover-foreground: oklch(0.96 0.006 85);
+	/* Champagne gold — the single luminous element on the page. */
+	--primary: oklch(0.82 0.11 84);
+	--primary-foreground: oklch(0.17 0.02 70);
+	--secondary: oklch(0.24 0.016 300);
+	--secondary-foreground: oklch(0.96 0.006 85);
+	--muted: oklch(0.24 0.016 300);
+	--muted-foreground: oklch(0.72 0.012 85);
+	--accent: oklch(0.3 0.04 84);
+	--accent-foreground: oklch(0.88 0.09 84);
+	--destructive: oklch(0.68 0.18 25);
+	--destructive-foreground: oklch(0.985 0 0);
+	--border: oklch(1 0 0 / 12%);
+	--input: oklch(1 0 0 / 16%);
+	--ring: oklch(0.78 0.1 84);
+	--chart-1: oklch(0.82 0.11 84);
+	--chart-2: oklch(0.68 0.12 300);
+	--chart-3: oklch(0.7 0.1 200);
+	--chart-4: oklch(0.66 0.13 30);
+	--chart-5: oklch(0.74 0.09 140);
+	--shadow-color: oklch(0 0 0);
+	--shadow-opacity: 0.55;
+}
+

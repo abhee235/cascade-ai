@@ -41,13 +41,19 @@ export function toResponsesInput(messages: Message[], system?: string): { instru
         const content: Record<string, unknown>[] = []
         if (text) content.push({ type: 'input_text', text })
         for (const img of images) content.push({ type: 'input_image', image_url: img.url })
-        input.push({ role: 'user', content })
+        input.push({ type: 'message', role: 'user', content })
       } else if (text) {
         input.push({ role: 'user', content: text })
       }
     } else {
       const text = textOf(blocks)
-      if (text) input.push({ role: 'assistant', content: [{ type: 'output_text', text }] }) // assistant replay uses output_text
+      // `type: 'message'` is REQUIRED on array-content items (2026-08-19, measured against llama-server
+      // b10488): OpenAI infers the type from `role`, but llama.cpp's /v1/responses parser only infers it
+      // for STRING content — an array-content message without the explicit type is rejected with HTTP 400
+      // "Cannot determine type of 'item'". That killed every builder run at its FIRST COMPACTION (the
+      // summary is the first assistant TEXT message a session replays; pre-compaction assistant turns are
+      // pure function_calls). Explicit on both array-content sites; harmless everywhere else.
+      if (text) input.push({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }) // assistant replay uses output_text
       for (const b of blocks)
         if (b.type === 'tool_use') {
           input.push({ type: 'function_call', call_id: b.id, name: b.name, arguments: JSON.stringify(b.input ?? {}) })
@@ -70,7 +76,10 @@ export class OpenAIResponsesProvider extends OpenAIChatProvider {
   // full arguments string — no delta accumulation needed). Usage + truncation land on `response.completed`.
   async *stream(req: CompletionRequest, signal?: AbortSignal): AsyncIterable<StreamEvent> {
     const { instructions, input } = toResponsesInput(req.messages, req.system)
-    const body: Record<string, unknown> = { model: req.model, input, stream: true, store: false, reasoning: { summary: 'auto' } }
+    // TASK-thinking-control: Responses reasoning models can't fully disable reasoning — 'off' maps to
+    // 'minimal' (the floor). Omitted knob ⇒ the model's default effort, as before.
+    const effort = req.thinking === undefined ? undefined : req.thinking === 'off' ? 'minimal' : req.thinking
+    const body: Record<string, unknown> = { model: req.model, input, stream: true, store: false, reasoning: { summary: 'auto', ...(effort ? { effort } : {}) } }
     if (instructions) body.instructions = instructions
     const tools = toResponsesTools(req.tools)
     if (tools) body.tools = tools
@@ -117,6 +126,11 @@ export class OpenAIResponsesProvider extends OpenAIChatProvider {
             break
           case 'response.reasoning_summary_text.delta':
             if (ev.delta) yield { type: 'thinking_delta', thinking: ev.delta }
+            break
+          case 'response.output_item.added':
+            // The tool-call boundary (see provider.ts tool_call_start): the item announces its name here,
+            // then the arguments stream silently until output_item.done.
+            if (ev.item?.type === 'function_call' && ev.item.name) yield { type: 'tool_call_start', name: ev.item.name }
             break
           case 'response.output_item.done':
             if (ev.item?.type === 'function_call') {

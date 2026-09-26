@@ -22,13 +22,14 @@ import type { ToolUse } from '../tools/runTool'
 import { scheduleTools } from '../tools/scheduler'
 import { withoutEscalationFields } from '../sandbox/escalation'
 import { buildTodoReminder, shouldRemindTodos, type TodoReminderConfig } from './todoReminder'
-import { buildStalledVerifyNudge, buildVerifyNudge, foldVerifyState, isFilteredVerify, isVerifyCommand, STALLED_VERIFY_TURNS } from './verifyGate'
+import { buildRunBeforeDoneNudge, buildStalledAuditNudge, buildStalledVerifyNudge, buildVerifyNudge, foldRunBeforeDone, foldVerifyState, isFilteredVerify, isVerifyCommand, STALLED_AUDIT_TURNS, STALLED_VERIFY_TURNS } from './verifyGate'
 import { buildDelegateNudgeText, foldReadPressure, READ_PRESSURE_FRACTION, sawSubagent } from './delegateNudge'
 import { buildReadLoopNudge, foldReadLoop } from './readLoopGate'
 import { buildReEditNudge, foldReEdit, reEditCount } from './reEditGate'
 import { recallForTurn, recentFocusText } from './dynamicRecall'
 import { editedTsFiles, postEditDiagnostics } from './postEditCheck'
 import { agentChildInstructions } from './agentDefs'
+import { runHooks } from '../hooks/hookRunner'
 
 export interface LoopDeps {
   provider: ModelProvider
@@ -74,7 +75,7 @@ export interface LoopDeps {
    *  guess). Sent on every model request so the wire window equals the planned window. */
   modelLimits?: { contextWindow?: number; maxOutputTokens?: number }
   /** ADR-067: per-model sampling — passed on every stream request (each provider applies what it supports). */
-  sampling?: { temperature?: number; topP?: number; topK?: number; repeatPenalty?: number; presencePenalty?: number }
+  sampling?: { temperature?: number; topP?: number; topK?: number; repeatPenalty?: number; presencePenalty?: number; thinking?: import('../llm/provider').ThinkingLevel }
   /** ADR-037: window tier sizing the system prompt + tool descriptions. Defaults to the compaction plan's tier
    *  (one source of truth); set explicitly for loops without compaction (e.g. subagents inherit the parent's). */
   tier?: import('../llm/contextWindows').WindowTier
@@ -258,6 +259,13 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   let editedSinceVerify = false
   let verifyNudges = 0
   let verifiedEver = false
+  // Design-overhaul P1 (generalized): pending run-before-done state for every registry tool declaring
+  // Tool.mustRunBeforeDone (see verifyGate.foldRunBeforeDone). One nudge per submit, verify-gate budget.
+  let pendingBeforeDone = new Set<string>()
+  let beforeDoneNudged = false
+  // Stop hook (ADR-036 extension, the Stop event): a project/frontend hook may block ONE terminal per
+  // submit with a reason — the user's own deterministic done-policy, no core flag required.
+  let stopHookFired = false
   // Two strikes ONLY for a DECLARED check (eval/builder said done-means-check-passes). A package.json-
   // resolved check improves the nudge TEXT but never the firing semantics — chat stays one-nudge (the
   // no-overfitting rule: resolved-from-repo must not make the gate pushier for everyday strong-model use).
@@ -308,6 +316,10 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   // ADR-058 mid-flight check nudge: consecutive turns spent in unverified-edit state; one reminder per submit.
   let stalledVerifyTurns = 0
   let stalledVerifyNudged = false
+  // …and the same for the declared before-done tool: a weak model never STOPS, so it never reaches the
+  // terminal gate that would have told it the entry point is still the starter scaffold.
+  let stalledAuditTurns = 0
+  let stalledAuditNudged = false
   // REPEAT-NARRATION BREAKER (measured 2026-07-25): a session spent turns 100-103 re-emitting the SAME opening
   // — "The snapshot is completely empty … Let me systematically debug:" — each time calling one read. The
   // read-loop and re-edit breakers both missed it: the files differed, so no single counter crossed. The tell
@@ -465,6 +477,9 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
         text += ev.text
         if (isDegenerateTail(text)) break
         yield { type: 'text_delta', text: ev.text }
+      } else if (ev.type === 'tool_call_start') {
+        // Forward the args-generation boundary so the UI can settle the thinking card on a REAL event.
+        yield { type: 'toolPending', name: ev.name }
       } else if (ev.type === 'tool_use') {
         toolUses.push({ id: ev.id, name: ev.name, input: ev.input, repaired: ev.repaired })
       } else if (ev.type === 'done') {
@@ -598,6 +613,33 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
         turn++
         continue
       }
+      // RUN-BEFORE-DONE gate (design-overhaul P1, generalized): a terminal while any declared tool is
+      // pending gets ONE nudge naming them — after the verify gate (build correctness outranks audits),
+      // before the thinking-only salvage (real work first). No declarers ⇒ the set is always empty.
+      if (deps.verifyGate !== false && pendingBeforeDone.size > 0 && !beforeDoneNudged && turn + 1 < maxTurns) {
+        beforeDoneNudged = true
+        tracer.event({ t: 'audit_gate', turn, tools: [...pendingBeforeDone] })
+        messages.push(buildRunBeforeDoneNudge([...pendingBeforeDone]))
+        yield { type: 'status', text: 'Asking the agent to run the pre-done checks…' }
+        turn++
+        continue
+      }
+      // STOP hook (ADR-036 extension, the Stop event): the USER's own terminal policy — a hook exiting 2
+      // blocks this terminal once per submit, its stderr becoming the continue-nudge. Fail-open, budgeted.
+      if (deps.hooks?.Stop?.length && !stopHookFired && turn + 1 < maxTurns) {
+        stopHookFired = true // one evaluation per submit — a hook that allows is not re-asked either
+        const stop = await runHooks({ event: 'Stop', config: deps.hooks, cwd: deps.cwd, toolName: '', toolInput: undefined }).catch(() => undefined)
+        if (stop?.decision === 'deny') {
+          tracer.event({ t: 'hook', event: 'Stop', id: '', tool: '', decision: 'deny', ms: 0 })
+          messages.push({
+            role: 'user',
+            content: `<system-reminder>A project Stop hook blocked finishing: ${stop.reason ?? 'no reason given'}. Address it, then finish. Do not reply to this note.</system-reminder>`,
+          })
+          yield { type: 'status', text: 'A project hook asked the agent to continue…' }
+          turn++
+          continue
+        }
+      }
       // THINKING-ONLY terminal (measured, dokar/qwen3.5-9B): content empty, thinking full — the model
       // wrote its final report in the channel the user cannot see, and accepting it ends the session in
       // apparent silence. Checked LAST among the gates: real unfinished work (todos, verification) takes
@@ -631,6 +673,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
       content: toolImages.length ? [...results, ...toolImages.map((url): ContentBlock => ({ type: 'image', url }))] : results,
     }) // tool_results become the next turn's input
     editedSinceVerify = foldVerifyState(editedSinceVerify, toolUses, results, deps.check?.command) // ADR-049 gate state
+    pendingBeforeDone = foldRunBeforeDone(pendingBeforeDone, registry.list().filter((t) => t.mustRunBeforeDone).map((t) => t.name), toolUses, results)
 
     // Todo-gate re-arm state: ANY tool attempt (even a failed one) re-arms — measured (Simmer 128k submit 3):
     // the gate fired, the model complied with a TodoWrite whose args were corrupted (call FAILED), then went
@@ -762,6 +805,22 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
       tracer.event({ t: 'stalled_verify', turn })
       appendReminder(messages, buildStalledVerifyNudge(deps.check))
       yield { type: 'status', text: 'Edits unverified for several turns — asking the agent to run the check…' }
+    }
+
+    // MID-FLIGHT AUDIT NUDGE: same blind spot as above, one rung further out. `pendingBeforeDone` is
+    // non-empty exactly while edits are outstanding against a declared before-done tool, so counting turns
+    // in that state needs no new bookkeeping. Fires after the verify nudge (a broken build is heard first).
+    stalledAuditTurns = pendingBeforeDone.size > 0 ? stalledAuditTurns + 1 : 0
+    if (
+      deps.verifyGate !== false &&
+      !stalledAuditNudged &&
+      depth === 0 &&
+      stalledAuditTurns >= STALLED_AUDIT_TURNS
+    ) {
+      stalledAuditNudged = true
+      tracer.event({ t: 'stalled_audit', turn, tools: [...pendingBeforeDone] })
+      appendReminder(messages, buildStalledAuditNudge([...pendingBeforeDone]))
+      yield { type: 'status', text: 'Edits unaudited for several turns — asking the agent to check what is left…' }
     }
 
     // ADR-050 rung 2: harness-detected delegation reminder. Recognition ("I should delegate") is

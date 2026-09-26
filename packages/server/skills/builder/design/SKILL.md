@@ -18,21 +18,50 @@ Installed presets = the files in `src/themes/`. Pick by matching the USER'S adje
 
 | preset | character — pick when the user says… |
 |---|---|
-| `premium` | DEFAULT. Refined, minimal, elegant, luxury, professional, SaaS, boutique |
+| `premium` | DEFAULT. Refined, elegant, boutique, considered, expensive, editorial-commerce |
+| `minimal-mono` | Minimal, monochrome, precise, engineering, developer tool, dashboard, admin, data-heavy |
+| `editorial` | Warm, literary, magazine, portfolio, blog, story, calm, print-like |
+| `luxe-dark` | Dark, premium, luxury, cinematic, gaming, product launch, "make it dark" |
+| `playful` | Fun, friendly, bright, colorful, consumer, food, kids, social |
+| `aurora-glass` | Modern SaaS, AI startup, gradient, glassy, futuristic, "like Linear/Vercel" |
 
-To apply a different preset: edit the ONE `@import './themes/….css'` line in `src/index.css`. That is
-the entire operation — colors, fonts, radius, and shadows all follow.
+To apply a preset — at scaffold time or when the user asks for a different look later — call
+`Restyle {op: "preset", preset: "<name>"}`. It rewrites the one `@import` line in `src/index.css` for
+you; colors, fonts, radius, shadows and density all follow, and nothing else changes.
+
+Restyle has a second, independent axis: `Restyle {op: "skin", skin: "sharp"}` swaps the block
+STRUCTURE (card/nav/hero markup) for certified alternates with identical props — your pages and imports
+keep working untouched. `skin: "base"` restores the stock look; `components: ["MediaCard"]` swaps just
+one surface. Any preset composes with any skin. Never hand-edit `src/themes/`, the `@import` line, or
+`src/components/blocks/` to change a look — Restyle is the mechanism, and the blocks refuse edits anyway.
 
 ## 3. Blocks — pages are BLOCK COMPOSITIONS
 
 `src/components/blocks/` (READ-ONLY, like the kit) are the page sections. Assemble pages from blocks
 FIRST, then fill their slots with the kit:
 
-- `NavBar` — every page's header (brand, links, actions). `Hero` — landing headline (split|centered|bleed).
-- `Section` — every content band (eyebrow/heading/muted tone). `PageHeader` — app-view headers.
+- `AppShell` — the chrome for any SIGNED-IN view (sidebar nav + sticky header + content well). A
+  dashboard/admin/settings page belongs inside one; a bare centred column reads as a marketing page.
+- `NavBar` — every page's header (brand, links, actions). `Hero` — landing headline
+  (`layout="split|centered|bleed|collage"`; **collage** layers the image over offset panels — the modern
+  depth look, and it needs only ONE image).
+- `Section` — every content band (`tone="default|muted|wash"`; **wash** paints a soft gradient field from
+  the preset's own colors). `PageHeader` — app-view headers.
+- `BentoGrid` — **the modern feature band**: MIXED-weight tiles (`media` anchor + `stat` numbers + ONE
+  filled `accent` CTA + `plain`), not a row of identical cards. Reach for this before FeatureGrid on a
+  landing page.
+- `LogoStrip` — social proof under the hero; plain TEXT wordmarks are the default (zero assets needed).
 - `FeatureGrid` — icon+title cards. `MediaCard` — product/article/listing cards. `StatStrip` — big numbers.
-- `EmptyState` — REQUIRED for every list's empty case. `Footer` — landing pages end with one.
-- `ArtImage` — deterministic token-colored SVG art (see Imagery).
+- `EmptyState` — the list worked and has no data. `ErrorState` — the list FAILED (`code="404"` for a
+  missing route). `SkeletonList` — the list is loading. Three different causes, three different blocks;
+  see the `app-shell` skill. `Footer` — landing pages end with one.
+- `AuthCard` — sign-in/sign-up, centred, no nav. `SettingRow` — one settings/account row (label left,
+  control right), stacked in a `divide-y` card.
+- `Photo` — a real photo per item in a grid (see Imagery). `ArtImage` — token-colored SVG art.
+
+**A modern landing reads: Hero(collage) → LogoStrip → Section+BentoGrid → Section+MediaCard grid →
+Section(tone="wash") → Footer.** Two-tone headlines are the current idiom — put the second clause in
+`<span className="text-muted-foreground">`.
 
 **Never hand-roll a card grid or an empty state — these two are the workhorses, copy them:**
 
@@ -52,6 +81,29 @@ import { ArtImage } from '@/components/blocks/ArtImage'
 Other blocks' exact props + the canonical page assembly: `Skill {name: "design", file: "reference/blocks.md"}`.
 For kit components (Dialog, Select, Table…): `Skill {name: "design", file: "reference/components.md"}`.
 
+**The kit is FULL shadcn/ui — 53 components.** Before hand-rolling any interactive control, check the
+reference; it is almost certainly already there. The ones models most often rebuild by hand:
+
+| You need | Use — do NOT hand-roll |
+|---|---|
+| a destructive confirm | `AlertDialog` (never delete on a single click) |
+| mobile nav / side panel | `Sheet` · `Drawer` |
+| a range or price filter | `Slider` |
+| "you are here" nav trail | `Breadcrumb` |
+| long lists split up | `Pagination` |
+| a ⌘K / search palette | `Command` |
+| view switchers | `ToggleGroup` · `ButtonGroup` |
+| show/hide a section | `Collapsible` |
+| dates | `Calendar` (+ `Popover` = date picker) |
+| a scrolling pane | `ScrollArea` |
+| a loading spinner | `Spinner` |
+| a keyboard hint | `Kbd` |
+| a form field + label + error | `Field` · `FieldGroup` |
+| an inline empty block | `Empty` (or the `EmptyState` block for a whole view) |
+
+`Sidebar` also exists, but for a signed-in app shell prefer the `AppShell` **block** — it is prop-driven
+and already wired. Reach for `Sidebar` only when you need its collapsible/mobile behaviour.
+
 ## 4. Color discipline
 
 Token utilities ONLY: `bg-background text-foreground`, `bg-card`, `bg-primary text-primary-foreground`,
@@ -62,6 +114,22 @@ NO `bg-blue-600`, no `bg-white`/`bg-black`, no hex, no arbitrary values. **One s
 Common traps — the SUBSTITUTES are: star ratings → `text-primary` (never text-amber-*); success/"in
 stock" → `text-primary` or a `<Badge variant="secondary">` (never text-green-*); warnings/errors →
 `text-destructive` (never text-red-*).
+
+### Tokens in JS (charts, canvas, inline styles)
+
+Utilities are the normal path. When you MUST pass a colour to JavaScript — recharts, a canvas, an
+inline `style` — use the PRESET variable, never the Tailwind alias:
+
+```tsx
+fill="var(--chart-1)"   stroke="var(--border)"   background: 'var(--popover)'   // ✅ always defined
+fill="var(--color-chart-1)"                                                     // ❌ silently empty
+```
+
+Why: `@theme inline` only emits a `--color-*` alias when some generated UTILITY references it. Nothing
+uses `bg-chart-1`, so `--color-chart-1` does not exist at runtime and the chart paints black-on-black
+(measured, 2026-08-11). The preset variables — `--chart-1..5`, `--primary`, `--accent`, `--border`,
+`--popover`, `--muted-foreground`, `--radius` — are declared by the theme file itself and always resolve.
+`<ChartCard>` already does this for you; follow it if you ever drop to a raw chart.
 
 ## 5. Type & rhythm
 
@@ -118,9 +186,12 @@ ArtImage adapts automatically — if something looks wrong in dark, you used a r
 
 ## 8. States & feedback
 
-Every list view needs: an EmptyState (`<EmptyState icon title description action/>` — always one useful
-CTA), feedback after actions (toast/inline text), and disabled buttons for invalid actions (not error
-popups after the click).
+Every list view has FOUR states, and the wrong one is a lie the user acts on: `<SkeletonList>` while
+loading, `<ErrorState>` when the request FAILED (its action retries), `<EmptyState>` when it succeeded
+with no data (its action creates), and data. Check them in that order — `items.length === 0` first
+renders "nothing here" during every load and after every failure. Plus: feedback after actions
+(toast/inline text), and disabled buttons for invalid actions (not error popups after the click).
+The `app-shell` skill has the full pattern, including 404s and filtered-empty.
 
 ## Design pass — run this checklist before calling any UI work done
 
@@ -129,5 +200,5 @@ popups after the click).
 - [ ] Every image is photo()/photoFor()/<Photo>/<ArtImage> — zero emoji-as-image; any GRID/LIST of distinct items uses `<Photo web="<subject>" seed={item.id}>` (distinct per item), NEVER photoFor (repeats) or abstract art
 - [ ] Opened the grid in the Browser and COUNTED: no two cards share a photo, and each photo matches its label
       (any card showing abstract art or an off-subject photo ⇒ swap THAT item to an `ImageSearch` URL, don't shrug)
-- [ ] Exactly one bg-primary CTA per screenful; empty lists show <EmptyState>
+- [ ] Exactly one bg-primary CTA per screenful; every list handles loading/error/empty, not just data
 - [ ] Checked once in light AND dark mode before done

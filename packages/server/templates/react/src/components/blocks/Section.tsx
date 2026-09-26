@@ -6,22 +6,33 @@ export interface SectionProps {
 	eyebrow?: string
 	heading?: ReactNode
 	description?: ReactNode
-	/** muted: a full-width tinted band that breaks up long pages. */
-	tone?: 'default' | 'muted'
+	/** muted: a full-width tinted band that breaks up long pages · wash: a soft gradient field derived
+	 *  from the preset's primary/accent — atmosphere for a hero-adjacent or closing band. */
+	tone?: 'default' | 'muted' | 'wash'
 	children: ReactNode
 	className?: string
 }
 
 /** Page rhythm wrapper — every content band between Hero and Footer should be a Section.
- *  Encodes the vertical rhythm (py-16/24) and container (max-w-6xl px-6) so pages breathe evenly. */
+ *  Encodes the vertical rhythm (the preset's --section-y density tokens) and container (max-w-6xl px-6). */
 export function Section({ eyebrow, heading, description, tone = 'default', children, className }: SectionProps) {
 	return (
-		<section data-block="section" className={cn(tone === 'muted' && 'bg-muted', className)}>
-			<div className="mx-auto max-w-6xl px-6 py-16 md:py-20">
+		<section data-block="section" className={cn(tone === 'muted' && 'bg-muted', tone === 'wash' && 'relative isolate overflow-hidden', className)}>
+			{tone === 'wash' ? (
+				<div
+					aria-hidden
+					className="pointer-events-none absolute inset-0 -z-10"
+					style={{
+						background:
+							'radial-gradient(55% 45% at 12% -5%, color-mix(in oklab, var(--primary) 16%, transparent), transparent 70%), radial-gradient(50% 42% at 92% 0%, color-mix(in oklab, var(--accent) 70%, transparent), transparent 72%)',
+					}}
+				/>
+			) : null}
+			<div className="mx-auto max-w-6xl px-6 py-section-y md:py-section-y-lg">
 				{eyebrow || heading || description ? (
 					<div className="mb-10 flex max-w-2xl flex-col gap-3">
 						{eyebrow ? <span className="text-xs font-medium uppercase tracking-widest text-primary">{eyebrow}</span> : null}
-						{heading ? <h2 className="font-serif text-3xl font-semibold tracking-tight">{heading}</h2> : null}
+						{heading ? <h2 className="font-serif text-3xl font-semibold tracking-display">{heading}</h2> : null}
 						{description ? <p className="text-muted-foreground">{description}</p> : null}
 					</div>
 				) : null}

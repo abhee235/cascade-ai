@@ -40,7 +40,16 @@ export interface CompletionRequest {
   contextWindow?: number
   /** ADR-038: output-token cap (Ollama num_predict / OpenAI max_tokens). */
   maxOutputTokens?: number
+  /** Reasoning-effort control (TASK-thinking-control). Omit ⇒ the model's default (Qwen3.8: xhigh — measured
+   *  eating 30-45s/turn and most of a small window). Each adapter maps it to its wire: Ollama `think`,
+   *  chat-completions `reasoning_effort` (+ `chat_template_kwargs` on self-hosted), Responses `reasoning.effort`.
+   *  Backends that reject the knob degrade via the learned-quirk pattern — never a hard failure. */
+  thinking?: ThinkingLevel
 }
+
+/** The four user-facing reasoning levels. 'off' maps per-wire (Ollama think:false, chat 'none', Responses
+ *  'minimal' — OpenAI reasoning models can't fully disable). */
+export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high'
 
 /** Token counts reported by the backend for one completion (E1 / ADR-040). Fields are optional because not
  *  every backend reports them (and OpenAI-compat streams only do so via stream_options.include_usage). */
@@ -73,6 +82,12 @@ export type StreamEvent =
   | { type: 'text_delta'; text: string } // a chunk of the answer
   | { type: 'thinking_delta'; thinking: string } // a chunk of reasoning (e.g. Ollama delta.reasoning)
   | { type: 'tool_use'; id: string; name: string; input: unknown; repaired?: boolean } // a COMPLETE tool call; repaired = the args needed the item-4a JSON ladder (traced for measurement)
+  // The tool-call BOUNDARY, the moment the model starts emitting one (the name arrives in the first delta,
+  // the arguments stream silently after). Until this existed the UI inferred the args-generation phase from
+  // a 2.5s quiet timer — which shredded one thinking stream into many "Thought for 1s" cards on any slow
+  // remote backend (measured: Hetzner free tier). Ollama's native wire delivers tool calls whole, so this
+  // event never fires there; consumers must treat it as best-effort, not guaranteed.
+  | { type: 'tool_call_start'; name: string }
   | { type: 'retry'; attempt: number; delayMs: number; reason: string } // synthetic: streamWithRecovery is retrying (resets partial output)
   | { type: 'slow_prefill'; waitedMs: number } // synthetic (ADR-061): pre-first-token silence, backend verified alive — a big cold prefill is cooking; keep waiting
   | { type: 'done'; stopReason: 'end_turn' | 'max_tokens' | 'tool_use'; usage?: TokenUsage } // usage: E1/ADR-040

@@ -11,7 +11,7 @@ import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-export type HookEvent = 'PreToolUse' | 'PostToolUse'
+export type HookEvent = 'PreToolUse' | 'PostToolUse' | 'Stop'
 
 export interface HookCommand {
 	command: string
@@ -112,7 +112,8 @@ function interpret(event: HookEvent, r: SpawnResult): Partial<HookDecision> {
 	// Exit 2 = explicit block; stderr is the model-visible reason.
 	if (r.status === 2) {
 		const reason = r.stderr.trim() || 'Blocked by a project hook (no reason given).'
-		return event === 'PreToolUse' ? { decision: 'deny', reason } : { feedback: [reason] }
+		// PreToolUse: deny the call. Stop: block the terminal (the reason becomes the continue-nudge).
+		return event === 'PreToolUse' || event === 'Stop' ? { decision: 'deny', reason } : { feedback: [reason] }
 	}
 	if (r.status !== 0) return {} // other failures are non-critical (shown to the user only)
 	// Exit 0: check for the structured JSON decision on stdout (PreToolUse only).

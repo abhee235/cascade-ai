@@ -1,0 +1,6 @@
+{
+	"id": "builder-landing",
+	"template": "react",
+	"prompt": "Build a marketing landing page for 'Ferrite', a SaaS that turns error logs into ranked, deduplicated incidents. It must be a full page with, in order: a header with the brand and one primary call to action; a hero with a headline, one supporting sentence, two actions and a visual; a strip of customer names as social proof; a features band; a pricing section with three tiers where exactly one is highlighted as recommended and each tier has its own button; a customer quote; an FAQ of at least four questions with real answers; a closing call-to-action band; and a footer with the brand and at least two columns of links. Write real copy throughout — no lorem, no 'Feature one', no placeholder names. Style with Tailwind token utilities only, use the project's blocks rather than hand-rolling sections, and keep `npm run build` passing.",
+	"budgets": { "maxTurns": 60, "timeoutMs": 1800000 }
+}
