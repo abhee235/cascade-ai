@@ -14,6 +14,10 @@ export interface ExecOptions {
   signal?: AbortSignal
   /** Stream combined stdout+stderr chunks live (drives the tool card's progress). */
   onData?: (chunk: string) => void
+  /** ADR-070: the file-effect policy this execution runs under. Backends that understand policy enforce it
+   *  in their own dialect; backends that don't (or a call without one) behave as before. Optional so every
+   *  existing caller/backends pair keeps working unchanged. */
+  policy?: import('./policy').SandboxPolicy
 }
 
 export interface ExecResult {
@@ -22,6 +26,12 @@ export interface ExecResult {
   /** Process exit code (null if killed/aborted). */
   exitCode: number | null
 }
+
+/** ADR-070: how completely a backend enforces the policy's promise. 'full' = every promised file effect is
+ *  governed by construction (a container, a mount profile). 'partial' = documented boundaries remain (e.g.
+ *  a write-fence that cannot cover Everyone-granted objects or hard links) — the UI and the model-facing
+ *  docs must state the weaker boundary rather than advertise an absolute one. */
+export type SandboxEnforcement = 'full' | 'partial'
 
 export interface Sandbox {
   /** The path the project is mounted at INSIDE the sandbox (e.g. '/workspace'). The host-side file tools
@@ -38,6 +48,14 @@ export interface Sandbox {
    * exact failure the description was written to prevent (measured, Orbit build 2026-07-27).
    */
   readonly shell?: 'posix' | 'win32'
+  /** ADR-070: this backend's honest enforcement claim (see SandboxEnforcement). Absent ⇒ 'full' is assumed
+   *  for compatibility (the Docker backend's container boundary genuinely governs execution). */
+  readonly enforcement?: SandboxEnforcement
+  /** ADR-070: case-insensitive stderr substrings that mean "the sandbox DENIED a file effect" in this
+   *  backend's dialect (bwrap: 'read-only file system'; Seatbelt: 'operation not permitted'; …). The tool
+   *  layer classifies confined output with these (step 2) so a policy denial is recognized identically
+   *  across backends — and never confused with an ordinary command failure. Absent ⇒ no classification. */
+  readonly denialSignatures?: readonly string[]
   /** Run a shell command inside the isolated environment, streaming output via opts.onData. */
   exec(command: string, opts?: ExecOptions): Promise<ExecResult>
   /** Tear down the environment (e.g. stop/remove the container). Safe to call more than once. */

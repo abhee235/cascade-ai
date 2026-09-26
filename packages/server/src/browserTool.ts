@@ -152,14 +152,22 @@ export interface BrowserHost {
 	execDetached(command: string): Promise<unknown>
 }
 
-/** Adapt either runtime to BrowserHost. Docker IS the shape; the HOST runtime (the desktop default —
- *  ADR-081) maps previewPort/startDev, ensuring dependencies first because the Browser tool may run
- *  before the user ever opened the Preview pane. startDev reaps its own predecessor (stopDev inside),
- *  so the docker-path pkill reap becomes a no-op here. Undefined ⇒ no Browser tool for this runtime. */
+/** Adapt ANY runtime to BrowserHost. Docker IS the shape; every other runtime is built from the
+ *  ProjectRuntime methods it must implement anyway — previewPort/startDev, ensuring dependencies first
+ *  because the Browser tool may run before the user ever opened the Preview pane. startDev reaps its own
+ *  predecessor (stopDev inside), so the docker-path pkill reap becomes a no-op here.
+ *
+ *  Deliberately NOT keyed on `runtime.kind`: this used to read `if (runtime.kind !== 'host') return
+ *  undefined`, written when ADR-081 §4 defined the runtime vocabulary as `host | docker`. ADR-070 added a
+ *  third value (`wsl`) and audited command EXECUTION, not tool composition — so every WSL session silently
+ *  shipped with no Browser tool at all. Measured 2026-09-15 (Northline build, runtimeMode=wsl): the model
+ *  loaded the browser skill, spawned the smoketester subagent TWICE, got "Browser tool is unavailable"
+ *  both times, fell back to `curl` (absent, exit 127) and a `npm run dev` the preview guard correctly
+ *  refused — then reported "not verified" while a subagent invented a checkout bug that did not exist.
+ *  A capability must be derived from what a runtime CAN DO, never from an enum a later ADR can extend. */
 export function browserHostFor(runtime: ProjectRuntime | undefined): BrowserHost | undefined {
 	if (!runtime) return undefined
 	if ('getHostPort' in runtime) return runtime as unknown as BrowserHost
-	if (runtime.kind !== 'host') return undefined
 	return {
 		getHostPort: () => runtime.previewPort(),
 		exec: async () => undefined,

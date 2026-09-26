@@ -72,7 +72,15 @@ const seedNum = (s: string | number): number => {
 
 /** A REAL, subject-relevant photo from loremflickr (allowlisted, keyless). Deterministic per seed —
  *  `webPhoto('leather watch minimal', product.name)`. Use when generated ArtImage looks too abstract
- *  for the subject (real products, real-world listings). Space-separated keywords narrow the subject. */
+ *  for the subject (real products, real-world listings). Space-separated keywords narrow the subject.
+ *
+ *  DECORATIVE ONLY — do not build a catalog on this. Two measured problems: the keyword match returns a
+ *  loosely-related photo even when it works ("cordless drill" → a person at a laptop; "utility blades" → a
+ *  bowl of food), and on 2026-09-27 the host answered **401 to every request**, so the keyword path can be
+ *  unavailable outright. <Photo> therefore treats it as the FIRST of several sources: on failure it falls
+ *  back to `seedPhoto` (a real photo, random subject — still better than abstract art for a hero) and only
+ *  then to <ArtImage>. When a photo MUST match its label, use the ImageSearch tool (search 2-3 concrete
+ *  nouns) and pass the URL it returns straight to `<Photo web="https://…">`. */
 export function webPhoto(keywords: string, seed: string | number, size = 600): string {
 	// loremflickr AND-matches comma keywords; 3+ tags usually match NOTHING and it serves a generic
 	// placeholder at HTTP 200 (so <Photo>'s onError fallback never fires — you get a wrong photo, not

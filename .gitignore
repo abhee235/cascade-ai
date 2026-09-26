@@ -40,6 +40,8 @@ packages/desktop/dist/
 packages/desktop/out/
 packages/desktop/browsers/
 
+# Fetched zero-install sandbox binaries (ADR-070 Part D) - cached like desktop/browsers, never committed
+packages/desktop/sandbox-bin/
 # Design review artifacts (screenshots + reference contact sheets from the preset/look authoring loop).
 # Regenerate any time by serving the template's demo/ gallery and re-capturing — 21MB of PNGs is not history.
 eval/design-review/

@@ -158,10 +158,20 @@ Choose by what the subject needs — don't default to abstract art when a real p
   travel/real-estate/recipe listings): use the
   `<Photo>` block — `import { Photo } from '@/components/blocks/Photo'` →
   `<Photo web="leather watch minimal" seed={p.name} kind="product" />`. `web` = space-separated keywords
-  for the subject; it pulls a real, deterministic photo from an **allowlisted, hotlink-safe source** and
-  **auto-falls back to `<ArtImage>`** if the image is blocked or slow — so never a broken box. Only the
+  for the subject; it pulls a real, deterministic photo from an **allowlisted, hotlink-safe source**,
+  **retries once**, and then **auto-falls back to `<ArtImage>`** — so never a broken box. Only the
   allowlisted hosts are reachable (enforced in `photos.ts` — do NOT hand-write external image URLs).
   Prefer this over `<ArtImage>` for product grids/detail pages; it makes a store look real, not abstract.
+  ⚠️ **Keyword matching is DECORATIVE ONLY — it is not a catalog tool.** It returns a loosely-related photo
+  even when it works (measured on real builds: `"cordless drill"` rendered a person at a laptop, `"utility
+  blades"` a bowl of food), and on 2026-09-27 its host answered **401 to every request**, so it may produce
+  no photo at all. `<Photo>` then falls back to a real-but-random photo, and only then to `<ArtImage>`.
+- **`ImageSearch` is the way to get a photo that MATCHES ITS LABEL** — a product catalog, a named-dish menu.
+  Call it, then pass the URL it returns straight through: `<Photo web="https://…" seed={p.name} />` accepts
+  a URL as readily as keywords. **Search 2-3 concrete nouns** (`coffee beans`, `cordless drill`): the index
+  AND-matches every word, so a long descriptive phrase like `"coffee beans bag Ethiopia natural roast
+  photography"` matches **nothing** (measured: 0 results, vs 240 for `coffee beans`). Search once per
+  product or per category and store the URLs on your seed data.
 - **Generated art** (no real subject fits — abstract covers, avatars, decorative): `<ArtImage seed={name}
   kind="product" />` — same seed always renders the same token-colored art, in every preset and dark mode.
 - An emoji is never an image. An empty `bg-muted` box is never an image.
@@ -189,5 +199,6 @@ The `app-shell` skill has the full pattern, including 404s and filtered-empty.
 - [ ] Zero raw colors in your diff (no bg-white/black, -500/-600 shades, hex — stars/stock/success = text-primary)
 - [ ] Every image is photo()/photoFor()/<Photo>/<ArtImage> — zero emoji-as-image; any GRID/LIST of distinct items uses `<Photo web="<subject>" seed={item.id}>` (distinct per item), NEVER photoFor (repeats) or abstract art
 - [ ] Opened the grid in the Browser and COUNTED: no two cards share a photo, and each photo matches its label
+      (any card showing abstract art or an off-subject photo ⇒ swap THAT item to an `ImageSearch` URL, don't shrug)
 - [ ] Exactly one bg-primary CTA per screenful; every list handles loading/error/empty, not just data
 - [ ] Checked once in light AND dark mode before done

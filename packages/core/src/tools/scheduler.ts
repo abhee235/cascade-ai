@@ -12,6 +12,8 @@ import { executeTool, type ToolUse } from './runTool'
 import { describeInvalidInput, normalizeInput } from './inputNormalizer'
 import { checkPermission } from '../permissions/gate'
 import { splitCommandSegments } from '../permissions/bashClassifier'
+import { parseEscalation, SANDBOX_DENIAL_PREFIX, stripEscalationFields } from '../sandbox/escalation'
+import type { SandboxPolicy } from '../sandbox/policy'
 import { formatAnswers } from './builtins/AskUserQuestion'
 import { runHooks } from '../hooks/hookRunner'
 import { NoopTracer } from '../observability/tracer'
@@ -102,6 +104,15 @@ export async function* scheduleTools(
   const perm = ctx.permission
   const tracer = ctx.tracer ?? NoopTracer
   const registry = ctx.registry ?? defaultRegistry // builtins + ready MCP tools (Phase 9)
+  // ADR-070 step 2: per-call sandbox grants. An APPROVED escalation widens the policy for exactly the
+  // one tool-use id that asked — recorded here, consumed at execution as a per-call ctx override. Tools
+  // never read the escalation fields themselves (they're stripped after approval), so no tool can widen
+  // from its own arguments: the only path to a wider policy runs through this map.
+  const widened = new Map<string, SandboxPolicy>()
+  // ADR-082: escalation asks that were judged a NO-OP (same/narrower mode, unconfined, or no prior denial)
+  // run normally with the fields stripped; the judge's note rides the tool result so the model learns the
+  // rule at the decision point instead of being taught by a failed call.
+  const noopNotes = new Map<string, string>()
 
   for (const batch of partition(toolUses, registry)) {
     // ── 1. GATE every tool first. Reads auto-allow instantly (no await); a write in 'default' mode
@@ -160,6 +171,53 @@ export async function* scheduleTools(
         tracer.event({ t: 'tool_result', id: tu.id, name: tu.name, ok: !result.isError, ms: 0, content: result.content })
         yield { type: 'toolResult', id: tu.id, ok: !result.isError, preview: result.content.slice(0, 200) }
         continue
+      }
+
+      // ── ADR-070 step 2: sandbox ESCALATION — judged before the normal gate. A malformed or
+      //    non-widening ask is a MODEL error bounced immediately (it never reaches a human, same
+      //    principle as the interactive-tool validation above). A valid ask parks on the SAME
+      //    permission channel as any write; approval widens the policy for THIS call only, and the
+      //    consumed fields are stripped so the tool executes a clean input. Fail-closed: no approval
+      //    channel ⇒ no widening, ever. `allow-always` is deliberately treated as allow-ONCE here —
+      //    a standing "always widen the sandbox" rule must never be learnable from one prompt. ──
+      const esc = parseEscalation(tu.input, ctx.sandboxPolicy, { denialSeen: ctx.sandboxDenialSeen })
+      if (esc && 'noop' in esc) {
+        // Not an escalation this session can honor — strip the consumed fields and let the call proceed
+        // under the CURRENT policy through the normal gate below (ADR-082: a no-op, never a failure).
+        tu.input = stripEscalationFields(tu.input)
+        noopNotes.set(tu.id, esc.noop)
+      } else if (esc) {
+        const fail = (content: string) => {
+          byId.set(tu.id, { type: 'tool_result', tool_use_id: tu.id, content, isError: true })
+          tracer.event({ t: 'tool_result', id: tu.id, name: tu.name, ok: false, ms: 0, content })
+        }
+        if ('error' in esc) {
+          fail(esc.error)
+          yield { type: 'toolStart', id: tu.id, name: tu.name, summary: summary(tu, registry) }
+          yield { type: 'toolResult', id: tu.id, ok: false, preview: esc.error.slice(0, 200) }
+          continue
+        }
+        if (!perm) {
+          const msg = `sandbox escalation to "${esc.ask.mode}" requires approval, but no approval channel is composed`
+          fail(msg)
+          yield { type: 'toolStart', id: tu.id, name: tu.name, summary: summary(tu, registry) }
+          yield { type: 'toolResult', id: tu.id, ok: false, preview: msg.slice(0, 200) }
+          continue
+        }
+        yield { type: 'permission', id: tu.id, tool: tu.name, detail: `Escalate sandbox to ${esc.ask.mode}: ${esc.ask.justification}` }
+        const answer = await perm.request(tu.id) // ← BLOCKS until respondPermission(tu.id, …)
+        tracer.event({ t: 'permission', id: tu.id, tool: tu.name, decision: answer === 'deny' ? 'deny' : 'allow', asked: true })
+        if (answer === 'deny') {
+          const msg =
+            `The user rejected escalating this call to "${esc.ask.mode}" — a deliberate choice, not an error. ` +
+            'Do not retry the escalation; continue within the current file policy or ask the user how to proceed.'
+          fail(msg)
+          yield { type: 'toolStart', id: tu.id, name: tu.name, summary: summary(tu, registry) }
+          yield { type: 'toolResult', id: tu.id, ok: false, preview: 'Escalation rejected' }
+          continue
+        }
+        widened.set(tu.id, { ...ctx.sandboxPolicy!, mode: esc.ask.mode })
+        tu.input = stripEscalationFields(tu.input) // consumed — the tool sees a clean input
       }
 
       let decision = tool && perm ? checkPermission(tool, tu.input, perm.state) : 'allow'
@@ -234,7 +292,9 @@ export async function* scheduleTools(
     // each tool reports via callbacks: onProgress drops a chunk in the mailbox + rings the bell; .then
     // records the result, decrements pending, and rings the bell. The loop below does all the yielding.
     for (const tu of toRun) {
-      executeTool(tu, ctx, (chunk) => (queue.push({ id: tu.id, chunk }), bump())).then((block) => {
+      // ADR-070: an approved escalation executes under a per-call WIDENED ctx — the only widening path.
+      const callCtx = widened.has(tu.id) ? { ...ctx, sandboxPolicy: widened.get(tu.id) } : ctx
+      executeTool(tu, callCtx, (chunk) => (queue.push({ id: tu.id, chunk }), bump())).then((block) => {
         settled.set(tu.id, block)
         pending--
         bump()
@@ -255,6 +315,15 @@ export async function* scheduleTools(
     const ms = Date.now() - started
     for (const tu of toRun) {
       let block = settled.get(tu.id)!
+      // ADR-082: a REAL denial happened — from here on a strictly wider ask may reach the user. Recorded on
+      // the session ctx (not the per-call copy) so it persists across this session's steps.
+      if (block.type === 'tool_result' && block.content.includes(SANDBOX_DENIAL_PREFIX)) ctx.sandboxDenialSeen = true
+      // …and a judged no-op ask gets its teaching note appended, so the model stops sending the fields.
+      const noop = noopNotes.get(tu.id)
+      if (noop && block.type === 'tool_result') {
+        block = { ...block, content: `${block.content}\n[sandbox: ${noop}]` }
+        settled.set(tu.id, block)
+      }
       // ── ADR-036: PostToolUse hooks — the feedback channel. A hook exiting 2 gets its stderr APPENDED to
       //    the tool_result so THE MODEL sees it (e.g. a lint hook making the model fix its own edit). ──
       if (ctx.hooks && block.type === 'tool_result') {

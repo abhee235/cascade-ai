@@ -9,10 +9,13 @@ import { normalizeText } from '../fileState'
 import { readFreshnessError } from '../editCore'
 import { lineDiff } from '../../utils/diff'
 import { assertWritable, displayPath, FrozenPathError, ProjectPathError, resolveInProject } from '../projectPath'
+import { escalationFields, fileWriteFence } from '../../sandbox/escalation'
 
 const inputSchema = z.object({
   file_path: z.string().describe('Path to the file to write, relative to the workspace or absolute.'),
   content: z.string().describe('The full content to write. Overwrites the file if it exists.'),
+  // ADR-070 step 2: the escalation pair — validated + consumed by the SCHEDULER (never read here).
+  ...escalationFields,
 })
 
 /** Dependency names declared in `dependencies`/`devDependencies` of OLD but absent from BOTH sections of
@@ -44,6 +47,10 @@ Prefer Edit for changing part of a file — Write replaces the ENTIRE file, so i
   isConcurrencySafe: () => false, // writes can race — never parallelize
 
   async call(input, ctx) {
+    // ADR-070 step 2: the read-only fence — before any path/filesystem work. An approved escalation
+    // arrives as a widened ctx.sandboxPolicy (the scheduler's one-call grant) and passes.
+    const fence = fileWriteFence(ctx.sandboxPolicy)
+    if (fence) return { content: fence, isError: true }
     let path: string
     try {
       path = resolveInProject(ctx.cwd, input.file_path, ctx.sandbox?.root, ctx.pathScope) // ADR-033: jail to the project root

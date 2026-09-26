@@ -8,6 +8,8 @@ import { spawn } from 'node:child_process'
 import { z } from 'zod'
 import type { Tool } from '../Tool'
 import { cleanTerminalOutput } from '../../utils/ansi'
+import { denialText, escalationFields } from '../../sandbox/escalation'
+import { isConfined } from '../../sandbox/policy'
 
 const inputSchema = z.object({
   command: z.string().describe('The shell command to run (executed via the platform shell).'),
@@ -17,6 +19,8 @@ const inputSchema = z.object({
     .positive()
     .optional()
     .describe('Optional timeout in milliseconds (default 120000 = 2 min, max 600000 = 10 min). The command is killed if it runs longer.'),
+  // ADR-070 step 2: the escalation pair — validated + consumed by the SCHEDULER (never read here).
+  ...escalationFields,
 })
 
 // ADR-037: a weak model leans on the tool description to know WHEN and HOW to use Bash. It covers the
@@ -200,6 +204,19 @@ export const BashTool: Tool<z.infer<typeof inputSchema>> = {
         isError: true,
       }
     }
+    // ── ADR-070 step 2: the READ-ONLY fence. Under a read-only policy, a command that may mutate is
+    //    denied HERE — before any spawn, on both the sandbox and host paths — which makes read-only
+    //    mode real today even on backends that don't enforce it yet. The denial carries the shared
+    //    marker + escalation hint, so the model's sanctioned retry is taught at the decision point.
+    //    (An APPROVED escalation arrives as a widened ctx.sandboxPolicy — the scheduler's one-call
+    //    grant — so the same call passes this fence without this tool ever reading the fields.) ──
+    const policy = ctx.sandboxPolicy
+    if (policy?.mode === 'read-only' && !isReadOnlyCommand(input.command)) {
+      return {
+        content: denialText('read-only', 'command', 'This command may modify state, and the session file policy is read-only.'),
+        isError: true,
+      }
+    }
     // ADR-045: give every command a deadline. A weak model that fires a command which waits for input (or
     // loops forever) would otherwise hang the whole turn with no recovery. One AbortController drives the
     // child; it trips on EITHER the timer OR the session's Stop, and a flag tells the two apart so the model
@@ -229,6 +246,7 @@ export const BashTool: Tool<z.infer<typeof inputSchema>> = {
         const { output, exitCode } = await ctx.sandbox.exec(input.command, {
           cwd: ctx.cwd,
           signal: ctl.signal,
+          policy, // ADR-070: policy-aware backends enforce it; others ignore it
           onData: (chunk) => onProgress?.(chunk),
         })
         cleanup()
@@ -236,7 +254,18 @@ export const BashTool: Tool<z.infer<typeof inputSchema>> = {
         const body = acc.toString()
         if (timedOut) return { content: `${body}\n${timeoutMsg}`, isError: true }
         if (ctx.abortSignal.aborted) return { content: `${body}\n[aborted]`, isError: true }
-        return { content: `${body || '(no output)'}${exitCode ? `\n[exit ${exitCode}]` : ''}`, isError: exitCode !== 0 }
+        // ── ADR-070 step 2: DENIAL CLASSIFICATION. A failed command whose output speaks the backend's
+        //    denial dialect gets the shared marker + hint appended — the model recognizes a POLICY
+        //    denial (and its sanctioned retry) instead of misreading it as a broken filesystem. Only
+        //    under a confined policy: an ordinary EACCES on danger-full-access stays an ordinary error. ──
+        let denial = ''
+        if (exitCode !== 0 && policy && isConfined(policy.mode)) {
+          const low = output.toLowerCase()
+          if ((ctx.sandbox.denialSignatures ?? []).some((s) => low.includes(s.toLowerCase()))) {
+            denial = `\n${denialText(policy.mode, 'command', 'The sandbox denied a file effect of this command.')}`
+          }
+        }
+        return { content: `${body || '(no output)'}${exitCode ? `\n[exit ${exitCode}]` : ''}${denial}`, isError: exitCode !== 0 }
       } catch (e) {
         cleanup()
         if (timedOut) return { content: `${acc.toString()}\n${timeoutMsg}`, isError: true }

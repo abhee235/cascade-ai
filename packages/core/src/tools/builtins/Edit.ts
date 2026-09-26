@@ -8,6 +8,7 @@ import { lineDiff } from '../../utils/diff'
 import { normalizeText } from '../fileState'
 import { assertWritable, displayPath, FrozenPathError, ProjectPathError, resolveInProject } from '../projectPath'
 import { findEditTarget, readFreshnessError, refreshReadState, restoreLineEndings } from '../editCore'
+import { escalationFields, fileWriteFence } from '../../sandbox/escalation'
 
 // Param-level guidance: repeat the critical constraints ON the argument the model
 // is about to generate — measured, edit-mismatch is the #1 weak-model tool failure, and the parameter
@@ -20,6 +21,8 @@ const inputSchema = z.object({
       'The EXACT literal text to replace, copied verbatim from the file — all whitespace and indentation included, WITHOUT the "N→" line-number prefix Read displays. Must appear EXACTLY ONCE; if it is not unique, include 2–3 full lines of surrounding context before and after the target. Never regex- or backslash-escape it.',
     ),
   new_string: z.string().describe('The exact replacement text, indented correctly for its position. Use "" to delete the matched text.'),
+  // ADR-070 step 2: the escalation pair — validated + consumed by the SCHEDULER (never read here).
+  ...escalationFields,
 })
 
 export const EditTool: Tool<z.infer<typeof inputSchema>> = {
@@ -33,6 +36,9 @@ export const EditTool: Tool<z.infer<typeof inputSchema>> = {
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
   async call(input, ctx) {
+    // ADR-070 step 2: the read-only fence — before any path/filesystem work (widened ctx passes).
+    const fence = fileWriteFence(ctx.sandboxPolicy)
+    if (fence) return { content: fence, isError: true }
     let path: string
     try {
       path = resolveInProject(ctx.cwd, input.file_path, ctx.sandbox?.root, ctx.pathScope) // ADR-033: jail to the project root

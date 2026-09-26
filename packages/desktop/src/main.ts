@@ -42,6 +42,22 @@ process.env.CASCADE_WEB_ROOT ||= WEB_DIR
 // Playwright at a directory that does not exist turns a working system-browser fallback into a failure.
 if (existsSync(BROWSERS_DIR)) process.env.PLAYWRIGHT_BROWSERS_PATH ||= BROWSERS_DIR
 
+// ADR-070 Part D: the ZERO-INSTALL sandbox resources — per-platform binaries the build ships beside the
+// app (resources/sandbox/<platform>/). Each is pointed at ONLY when it actually exists: every one of these
+// env vars has a graceful absence (mise dormant, WSL not offerable, host bwrap from PATH, dev runner via
+// tsx, host node), and pointing at a missing file would turn that degradation into a hard failure. The
+// same "set before the server loads" rule applies — the backends read these at first use.
+const SANDBOX_DIR = app.isPackaged ? join(process.resourcesPath, 'sandbox', process.platform) : join(__dirname, 'sandbox', process.platform)
+const pointIfShipped = (envKey: string, relative: string): void => {
+	const p = join(SANDBOX_DIR, relative)
+	if (existsSync(p)) process.env[envKey] ||= p
+}
+pointIfShipped('CASCADE_MISE_PATH', process.platform === 'win32' ? 'mise.exe' : 'mise') // Layer B toolchains
+pointIfShipped('CASCADE_NODE_DIR', process.platform === 'win32' ? 'node' : join('node', 'bin')) // offline default Node
+pointIfShipped('CASCADE_WSL_ROOTFS', 'cascade-sandbox-rootfs.tar.gz') // the primary Windows rung's image
+pointIfShipped('CASCADE_FENCE_RUNNER', 'winFenceRunner.mjs') // the Windows host-mode fallback rung
+pointIfShipped('CASCADE_BWRAP_PATH', 'bwrap') // Linux host confinement without a distro package
+
 const SERVER_PORT = Number(process.env.CASCADE_PORT ?? 4319)
 
 /** Only ONE instance may own the database and the server port. A second launch focuses the first. */

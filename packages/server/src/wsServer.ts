@@ -21,6 +21,8 @@ import { ensurePlanPersisted, planQualityIssues, planReviseNudge, planSalvageNud
 import { DockerSandbox, dockerAvailable, sweepSandboxContainers } from './dockerSandbox.js'
 import { HostSandbox, sweepHostDevServers } from './hostSandbox.js'
 import { DEFAULT_RUNTIME_MODE, type RuntimeMode } from './projectRuntime.js'
+import { WslSandbox, resetWslCache, wslOfferable, wslRuntimeUsable } from './wslSandbox.js'
+import { localBackendClaims, selectLocalBackend } from './sandboxBackends.js'
 import type { RuntimeInfo } from '@cascade/app-protocol'
 import { ensureVisualEditConfig, listTemplates } from './templates.js'
 import { listModels, modelInfo, providerCatalog, setProviderKey } from './modelCaps.js'
@@ -1089,16 +1091,21 @@ export async function start(deps: ServerDeps = {}) {
   //
   // CASCADE_SANDBOX=off still forces host, so existing scripts and CI keep working.
   const forcedHost = process.env.CASCADE_SANDBOX === 'off'
-  const preferred = forcedHost ? 'host' : ((await deps.config?.setting<RuntimeMode>('runtimeMode')) ?? DEFAULT_RUNTIME_MODE)
-  // Only ASK Docker when Docker was chosen — probing it in host mode costs a subprocess on every launch and
-  // tells us nothing we would act on.
+  // ADR-070 step 5: CASCADE_RUNTIME=wsl|docker|host overrides the persisted choice — the opt-in for the
+  // WSL runtime until the Settings UI grows the third option (step 7).
+  const envMode = process.env.CASCADE_RUNTIME
+  const envPreferred = envMode === 'host' || envMode === 'docker' || envMode === 'wsl' ? (envMode as RuntimeMode) : undefined
+  const preferred = forcedHost ? 'host' : (envPreferred ?? (await deps.config?.setting<RuntimeMode>('runtimeMode')) ?? DEFAULT_RUNTIME_MODE)
+  // Only PROBE the runtime that was chosen — probing the others costs subprocesses on every launch and
+  // tells us nothing we would act on. (wslRuntimeUsable imports + verifies the distro on first use.)
   const dockerReady = preferred === 'docker' && (await dockerAvailable())
-  let runtimeMode: RuntimeMode = dockerReady ? 'docker' : 'host'
+  const wslReady = preferred === 'wsl' && wslRuntimeUsable()
+  let runtimeMode: RuntimeMode = dockerReady ? 'docker' : wslReady ? 'wsl' : 'host'
   let requestedMode: RuntimeMode = preferred
-  if (preferred === 'docker' && !dockerReady) {
-    // Fall back rather than fail: the user asked for isolation and Docker is not answering, but refusing to
+  if (preferred !== 'host' && runtimeMode === 'host') {
+    // Fall back rather than fail: the user asked for isolation and it is not answering, but refusing to
     // start would leave them with no app at all. Say so; the UI surfaces it beside the setting.
-    console.warn('Runtime is set to "docker" but Docker is not available — falling back to host mode.')
+    console.warn(`Runtime is set to "${preferred}" but it is not available — falling back to host mode.`)
   }
   // Sweep sandbox containers orphaned by a previous run (a `--rm` sandbox stays alive via `tail -f`, so a
   // hard-killed server leaves them behind). Safe: project dirs are bind-mounted; the next exec recreates one.
@@ -1114,9 +1121,26 @@ export async function start(deps: ServerDeps = {}) {
   // Console pane and no problems panel — the whole product minus the parts that need somewhere to run.
   // Reads the CURRENT mode on every call, so a live switch takes effect on the next open() without
   // rebuilding the manager.
-  const sandboxFor = (dir: string) => (runtimeMode === 'docker' ? new DockerSandbox(dir) : new HostSandbox(dir))
+  const sandboxFor = (dir: string) => (runtimeMode === 'docker' ? new DockerSandbox(dir) : runtimeMode === 'wsl' ? new WslSandbox(dir) : new HostSandbox(dir))
   // Retained under its old name for the many `hasDocker` reads below; it means "the isolated runtime".
   const hasDocker = runtimeMode === 'docker'
+
+  // ADR-070 step 7: the honest runtime facts the Settings UI needs. Computed once at boot (both are
+  // machine-fixed or cheap): whether WSL can be OFFERED (no distro import — that waits for selection), and
+  // whether HOST mode actually confines commands via a local backend (the Windows write-fence, macOS
+  // Seatbelt, Linux bwrap) — so "host" no longer implies "no isolation" on those machines.
+  const wslCanOffer = process.platform === 'win32' && wslOfferable()
+  const hostBackend = selectLocalBackend()
+  const hostClaims = localBackendClaims()
+  const hostConfinement = hostClaims.enforcement ? { backend: hostBackend, enforcement: hostClaims.enforcement } : undefined
+  const runtimeInfoOf = (mode: RuntimeMode, requested: RuntimeMode, dockerAvailable: boolean): RuntimeInfo => ({
+    mode,
+    requested,
+    dockerAvailable,
+    forcedHost,
+    wslAvailable: wslCanOffer,
+    ...(hostConfinement ? { hostConfinement } : {}),
+  })
 
   /** Apply a runtime change and persist it. The CALLER has already torn down the sandboxes that were
    *  built for the old runtime — this only decides what the next one will be, and records the choice so
@@ -1124,15 +1148,17 @@ export async function start(deps: ServerDeps = {}) {
    *  between the moment the app started and the moment someone asks for it. */
   const applyRuntimeMode = async (mode: RuntimeMode): Promise<RuntimeInfo> => {
     requestedMode = forcedHost ? 'host' : mode
-    const ready = requestedMode === 'docker' && (await dockerAvailable())
-    runtimeMode = ready ? 'docker' : 'host'
+    // Re-probe the requested runtime — availability is exactly what changes between boot and the ask.
+    if (requestedMode === 'wsl') resetWslCache()
+    const ready = (requestedMode === 'docker' && (await dockerAvailable())) || (requestedMode === 'wsl' && wslRuntimeUsable())
+    runtimeMode = ready ? requestedMode : 'host'
     // Sweep in BOTH directions. Entering Docker clears containers orphaned by an earlier run; LEAVING it
     // matters just as much — a container from before this process started was never cached here, so
     // invalidateSandboxes cannot dispose it, and opting out of Docker would silently leave it running
     // (measured: a container still publishing its port after the switch to host).
     await sweepSandboxContainers().catch(() => 0)
     await deps.config?.setSetting('runtimeMode', requestedMode)
-    return { mode: runtimeMode, requested: requestedMode, dockerAvailable: ready || (await dockerAvailable()), forcedHost }
+    return runtimeInfoOf(runtimeMode, requestedMode, ready || (await dockerAvailable()))
   }
 
   // ADR-081: both registries now read through the injected ConfigStore. AWAITED here — every getter they
@@ -1179,11 +1205,11 @@ export async function start(deps: ServerDeps = {}) {
     handleConnection(ws, manager, preview, previewProxy, PREVIEW_PORT, versions, chatStore, {
       // A terminal exists in BOTH runtimes now, so this no longer gates it — see `runtime` below for
       // what actually differs. Kept as the isolation flag it always was.
-      sandbox: runtimeMode === 'docker',
+      sandbox: runtimeMode !== 'host', // the isolation flag — docker AND wsl both isolate
       model: MODEL,
       // Fresh per connection: the mode can have changed since boot, and a stale badge is a lie about
       // whether the user's commands are isolated.
-      runtime: { mode: runtimeMode, requested: requestedMode, dockerAvailable: dockerReady, forcedHost },
+      runtime: runtimeInfoOf(runtimeMode, requestedMode, dockerReady),
       setRuntimeMode: applyRuntimeMode,
     }, deps.traces),
   )
@@ -1223,11 +1249,12 @@ export async function start(deps: ServerDeps = {}) {
   console.log(
     // Report the ACTIVE model (restored selection, or the env default) — not the env vars, which are only
     // the first-run seed. A boot line that names a model you aren't running is worse than none.
-    `Cascade server listening on ws://${HOST}:${PORT}  (provider: ${manager.currentProvider}, model: ${manager.currentModel}${restored ? ' [restored selection]' : ''}, projects: ${PROJECTS_ROOT}, sandbox: ${hasDocker ? 'docker' : 'host'})`,
+    `Cascade server listening on ws://${HOST}:${PORT}  (provider: ${manager.currentProvider}, model: ${manager.currentModel}${restored ? ' [restored selection]' : ''}, projects: ${PROJECTS_ROOT}, sandbox: ${runtimeMode})`,
   )
   // Host mode is now a CHOICE, so it is not a warning — it is the default, and the app is fully featured in
   // it (preview, Console, problems all work). State the trade once, plainly, rather than nagging.
-  if (runtimeMode === 'host') console.log('Runtime: host — agent commands run directly on this machine (no isolation). Switch to Docker in Settings for per-project sandboxing.')
+  if (runtimeMode === 'host') console.log('Runtime: host — agent commands run directly on this machine (no isolation). Switch to Docker in Settings — or set CASCADE_RUNTIME=wsl on Windows — for per-project sandboxing.')
+  if (runtimeMode === 'wsl') console.log('Runtime: wsl — agent commands run inside the cascade-sandbox WSL2 VM; only each project dir is reachable from inside.')
 }
 
 // No self-start: `main.ts` is the entry point (ADR-081 §6). Starting here too would give you a server

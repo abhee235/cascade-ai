@@ -22,6 +22,8 @@ import { join } from 'node:path'
 import type { ExecOptions, ExecResult } from '@cascade/core'
 import { devServerRefusal } from './dockerSandbox.js'
 import { type ProjectRuntime, stripAnsi } from './projectRuntime.js'
+import { confineHostCommand, localBackendClaims } from './sandboxBackends.js'
+import { ensureProjectToolchainConfig, installProjectToolchains, toolchainEnv } from './toolchains.js'
 
 /** Where a detached dev server's output goes. Inside the project so it travels with it, and so a user can
  *  open it; `.cascade/` is already this project's scratch area. */
@@ -84,13 +86,32 @@ export class HostSandbox implements ProjectRuntime {
 		this.root = projectDir
 	}
 
+	/** ADR-070 step 4: the selected local backend's honest claims (Seatbelt/bwrap ⇒ 'full' + its denial
+	 *  dialect; 'none' — Windows today — ⇒ no claim), surfaced through the core seam so Bash's denial
+	 *  classifier speaks this host's dialect. Getters because selection is probed lazily, once. */
+	get enforcement(): 'full' | 'partial' | undefined {
+		return localBackendClaims().enforcement
+	}
+	get denialSignatures(): readonly string[] | undefined {
+		return localBackendClaims().denialSignatures
+	}
+
 	async exec(command: string, opts: ExecOptions = {}): Promise<ExecResult> {
 		// The SAME refusal Docker mode has had all along, and host mode was missing — which is exactly how a
 		// desktop trace ended with the model starting its own dev server via `start /b` and hanging the turn:
 		// the Preview owns the dev server in BOTH runtimes, and a second one binds a port nothing is watching.
 		const refusal = devServerRefusal(command)
 		if (refusal) return { output: refusal, exitCode: 1 }
-		return run(command, opts.cwd ?? this.projectDir, opts)
+		// ADR-070 step 4/6: wrap the MODEL's command in the platform's confinement (Seatbelt/bwrap, or the
+		// Windows write-fence) per the call's policy. Passthrough when no policy / danger-full-access / no
+		// usable backend — so an unconfigured host path is byte-identical, and product-owned commands
+		// (installDependencies, startDev, stopDev's taskkill) which call run() directly are deliberately
+		// NOT confined: they are ours, not the model's.
+		const confined = confineHostCommand(command, opts.policy)
+		// The fence uses argv form: spawn its runner from runnerCwd (where `tsx` resolves), NOT the project
+		// workspace — the runner sets the CHILD's cwd to the workspace itself via its --workspace flag.
+		if (confined.argv) return run(confined.command, confined.runnerCwd ?? this.projectDir, { ...opts, env: confined.env }, confined.argv)
+		return run(confined.command, opts.cwd ?? this.projectDir, opts)
 	}
 
 	/**
@@ -125,6 +146,11 @@ export class HostSandbox implements ProjectRuntime {
 	}
 
 	async installDependencies(onData?: (chunk: string) => void): Promise<boolean> {
+		// ADR-070 step 3: declare + provision the project's toolchains FIRST, so the npm that installs is
+		// the project's pinned one (from the Cascade prefix), not whatever the host happens to have. Both
+		// are best-effort no-ops without mise — the host path must keep working on a bare machine.
+		ensureProjectToolchainConfig(this.projectDir)
+		await installProjectToolchains(this.projectDir, onData)
 		const res = await run('npm install --no-audit --no-fund', this.projectDir, { onData })
 		return res.exitCode === 0
 	}
@@ -154,7 +180,8 @@ export class HostSandbox implements ProjectRuntime {
 		// for one port and the loser would silently drift to 5174 — the exact failure Docker mode hits.
 		const child = spawn(npm(), ['run', 'dev', '--', '--host', '--port', String(port)], {
 			cwd: this.projectDir,
-			env: { ...process.env, ...env },
+			// ADR-070: mise shims + bundled Node first, so the dev server runs on the project's toolchain too.
+			env: { ...process.env, ...toolchainEnv(), ...env },
 			stdio: ['ignore', out, out],
 			detached: !isWindows, // POSIX: its own process group, so we can kill the whole tree
 			shell: isWindows, // Windows needs a shell to resolve npm.cmd
@@ -330,8 +357,9 @@ function isListening(port: number): Promise<boolean> {
 	})
 }
 
-/** Ask the OS for an unused port by binding 0 and reading what it gave us. */
-function freePort(): Promise<number> {
+/** Ask the OS for an unused port by binding 0 and reading what it gave us. Exported for WslSandbox,
+ *  whose preview port is a HOST port too (WSL2 localhostForwarding serves it on the same number). */
+export function freePort(): Promise<number> {
 	return new Promise((resolve, reject) => {
 		const srv = createServer()
 		srv.once('error', reject)
@@ -355,11 +383,19 @@ function freePort(): Promise<number> {
  * On abort, the tree is killed on Windows: the `signal` option kills only the direct cmd.exe wrapper, and
  * the grandchild it spawned survives holding its port — the same reason stopDev kills with /T.
  */
-function run(command: string, cwd: string, opts: { signal?: AbortSignal; onData?: (s: string) => void }): Promise<ExecResult> {
+function run(command: string, cwd: string, opts: { signal?: AbortSignal; onData?: (s: string) => void; env?: Record<string, string> }, argv?: string[]): Promise<ExecResult> {
 	return new Promise((resolve) => {
 		if (!existsSync(cwd)) return resolve({ output: `cwd does not exist: ${cwd}`, exitCode: 1 })
-		// Git Bash when available — node spawns a non-cmd shell string as `bash.exe -c <command>` — cmd otherwise.
-		const child = spawn(command, { cwd, shell: hostBash ?? true, windowsHide: true, signal: opts.signal })
+		// ADR-070 step 6: an ARGV-form backend (the write-fence) spawns its runner directly with NO shell,
+		// so the model's command — the runner's final argv element — is never re-parsed by a shell.
+		// Otherwise: Git Bash when available (node spawns a non-cmd shell string as `bash.exe -c <command>`),
+		// cmd otherwise. ADR-070 step 3/Part D: mise shims + bundled Node prepended (empty spread when
+		// neither exists — byte-identical env), so every agent command resolves node/python/etc. through
+		// the project's toolchain; `opts.env` carries backend-specific extras (ELECTRON_RUN_AS_NODE).
+		const env = { ...process.env, ...toolchainEnv(), ...(opts.env ?? {}) }
+		const child = argv
+			? spawn(argv[0], argv.slice(1), { cwd, shell: false, windowsHide: true, signal: opts.signal, env })
+			: spawn(command, { cwd, shell: hostBash ?? true, windowsHide: true, signal: opts.signal, env })
 		let output = ''
 		let settled = false
 		const finish = (r: ExecResult) => {

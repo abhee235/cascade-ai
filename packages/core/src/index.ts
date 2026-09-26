@@ -55,7 +55,13 @@ export { streamWithRecovery, completeWithRecovery, classifyError, RecoveryError 
 export type { ErrorKind, RecoveryOptions } from './llm/resilience'
 // Sandbox (Phase 13.3): the generic execution seam. Core defines the shape; a frontend/wrapper injects an
 // implementation (the server's Docker sandbox). Absent ⇒ tools run on the host.
-export type { Sandbox, ExecOptions, ExecResult } from './sandbox/sandbox'
+export type { Sandbox, ExecOptions, ExecResult, SandboxEnforcement } from './sandbox/sandbox'
+// ADR-070: the sandbox policy vocabulary (modes, resolution ladder, writable-roots derivation).
+export { SANDBOX_MODES, canonicalPath, resolveSandboxMode, isConfined, writableRoots, renderSandboxPolicy } from './sandbox/policy'
+export type { SandboxMode, SandboxPolicy } from './sandbox/policy'
+// ADR-070 step 2: the escalation vocabulary (ladder table, markers, pairing validation, fences).
+export { WIDER_MODES, ESCALATION_TARGETS, parseEscalation, sandboxDenialMarker, escalationHintMarker, denialText, fileWriteFence } from './sandbox/escalation'
+export type { EscalationAsk } from './sandbox/escalation'
 // Skills + named agents (ADR-055/056): loaders + the child-instructions builder are public so a wrapper
 // can run a persona as its own TOP-LEVEL session (the server's plan stage) — not only as a subagent.
 export { loadSkills } from './skills/skills'

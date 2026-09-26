@@ -350,7 +350,10 @@ function extractVariants(raw: string): Record<string, string[]> {
  *  (plain union props, not cva variants) existed only inside hand-written examples, so a model reading
  *  the reference could not discover them. */
 function extractProps(raw: string): { name: string; type: string; doc?: string }[] {
-	const src = stripComments(raw)
+	// Normalise CRLF FIRST. The per-prop regex below matches to end of line, but a dot never matches a
+	// carriage return and the end anchor does not see one either — so on a Windows checkout EVERY prop line
+	// failed to parse and this reference regenerated with NO Props lines at all, for every block.
+	const src = stripComments(raw).replace(/\r\n/g, '\n')
 	// `[^{]*` so `interface XProps extends VariantProps<typeof …>` still matches — the exact rot this
 	// function exists to kill (NavBar's brand/links/actions were undocumented because of `\s*`).
 	const m = /export interface \w+Props[^{]*{([\s\S]*?)\n}/.exec(src)

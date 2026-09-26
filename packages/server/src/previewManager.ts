@@ -59,8 +59,10 @@ export class PreviewManager {
 			const hmrPort = this.hmrClientPort ?? hostPort
 			// CHOKIDAR_USEPOLLING makes Vite see edits across a Windows→Linux Docker bind mount, where inotify
 			// events do not cross. It costs CPU, so the host runtime — which has real file events — omits it.
+			// The WSL runtime's drvfs mount has the identical blindness (a Windows-side edit emits no inotify
+			// inside the VM), so it polls too.
 			const env: Record<string, string> = { VITE_HMR_CLIENT_PORT: String(hmrPort) }
-			if (runtime.kind === 'docker') env.CHOKIDAR_USEPOLLING = 'true'
+			if (runtime.kind === 'docker' || runtime.kind === 'wsl') env.CHOKIDAR_USEPOLLING = 'true'
 			await runtime.startDev(env)
 
 			const url = `http://localhost:${hostPort}` // direct url; wsServer rewrites it to the proxy origin
@@ -71,7 +73,9 @@ export class PreviewManager {
 			// it. The log states where it really bound, so follow it rather than declaring failure over a flag
 			// the project was free to ignore. Under Docker the same drift is fatal by construction — the
 			// container publishes exactly one port, so anywhere else is reachable from nowhere.
-			if (runtime.kind === 'host') {
+			// WSL drifts like the host: localhostForwarding serves whatever port Vite actually bound, so a
+			// drifted port is still reachable — follow the log's truth rather than declaring failure.
+			if (runtime.kind === 'host' || runtime.kind === 'wsl') {
 				const actual = parseDevPort(await runtime.devLog(40).catch(() => ''))
 				if (actual && actual !== hostPort) {
 					const actualUrl = `http://localhost:${actual}`
