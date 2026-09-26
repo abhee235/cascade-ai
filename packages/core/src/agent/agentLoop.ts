@@ -9,7 +9,7 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ActivityEvent, ContentBlock, Message } from '../protocol'
-import type { ModelProvider } from '../llm/provider'
+import type { ModelProvider, ToolSchema } from '../llm/provider'
 import type { ToolContext } from '../tools/Tool'
 import type { PermissionController } from '../permissions/gate'
 import { NoopTracer, type Tracer } from '../observability/tracer'
@@ -20,6 +20,7 @@ import { compactIfNeeded, estimateTokens, measureWireOverhead, type CompactDeps 
 import { streamWithRecovery, type RecoveryOptions } from '../llm/resilience'
 import type { ToolUse } from '../tools/runTool'
 import { scheduleTools } from '../tools/scheduler'
+import { withoutEscalationFields } from '../sandbox/escalation'
 import { buildTodoReminder, shouldRemindTodos, type TodoReminderConfig } from './todoReminder'
 import { buildStalledVerifyNudge, buildVerifyNudge, foldVerifyState, isFilteredVerify, isVerifyCommand, STALLED_VERIFY_TURNS } from './verifyGate'
 import { buildDelegateNudgeText, foldReadPressure, READ_PRESSURE_FRACTION, sawSubagent } from './delegateNudge'
@@ -188,6 +189,14 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   // ~6k chars (~1.5k tok); 32k → ~24k chars; big windows hit the 50k ceiling → unchanged (no-overfitting rule).
   const readCapChars = deps.compact ? Math.min(50_000, Math.max(6_000, deps.compact.plan.effectiveWindow)) : undefined
   const ctx: ToolContext = { cwd: deps.cwd, abortSignal: deps.signal, permission: deps.permission, tracer, registry, archival: deps.archival, depth, sandbox: deps.sandbox, sandboxPolicy, pathScope: deps.pathScope, readFileState: deps.readFileState, todoStore: deps.todoStore, ask: deps.ask, hooks: deps.hooks, readCapChars }
+  // ADR-082: what we ADVERTISE this turn. The sandbox-escalation fields are hidden until a real denial has
+  // happened (ctx.sandboxDenialSeen, set by the scheduler) — an optional field the model can see is a field
+  // it fills, measured at 35/35 no-op asks in one build. Recomputed per turn, so the lever appears the turn
+  // AFTER the first denial and the overhead estimate below can never drift from what actually goes on the wire.
+  const advertise = (): ToolSchema[] => {
+    const schemas = registry.schemas(tier, execPlatform)
+    return ctx.sandboxDenialSeen ? schemas : withoutEscalationFields(schemas)
+  }
   // Subagent delegation (ADR-017): inject a spawn closure (avoids an import cycle). Absent at the depth cap.
   // The child runs a NESTED runAgentLoop with its OWN messages + a filtered tool set (never Subagent → no
   // recursion; read-only subset for `explore`). Only its final text returns — its steps stay in its context.
@@ -352,7 +361,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     // FLOOR; once the backend has reported a real prompt size, the MEASURED overhead (real − estimate,
     // which also captures our estimate's own error) takes over — self-correcting at the margin.
     const systemNow = buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext, skillsSection: deps.skillsSection, contextFiles: deps.contextFiles, sandboxPolicy })
-    const staticOverhead = Math.ceil((systemNow.length + JSON.stringify(registry.schemas(tier, execPlatform)).length) / 4) + 256
+    const staticOverhead = Math.ceil((systemNow.length + JSON.stringify(advertise()).length) / 4) + 256
     const overheadTokens = Math.max(staticOverhead, wireOverhead ?? 0)
 
     // Compaction (ADR-012): BEFORE each model call, if history nears the window, mask old tool output and/or
@@ -413,7 +422,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     // a (reactive) compaction then retries; abort/fatal surface. `make` re-reads `messages` each attempt, so
     // an overflow-compaction is reflected on the retry. System is rebuilt too (memory may have changed).
     const makeStream = () =>
-      deps.provider.stream({ messages, model: deps.model, ...deps.modelLimits, ...deps.sampling, system: buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext, skillsSection: deps.skillsSection, contextFiles: deps.contextFiles, sandboxPolicy }), tools: registry.schemas(tier, execPlatform) }, deps.signal)
+      deps.provider.stream({ messages, model: deps.model, ...deps.modelLimits, ...deps.sampling, system: buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext, skillsSection: deps.skillsSection, contextFiles: deps.contextFiles, sandboxPolicy }), tools: advertise() }, deps.signal)
     for await (const ev of streamWithRecovery(makeStream, {
       ...deps.recovery,
       signal: deps.signal,

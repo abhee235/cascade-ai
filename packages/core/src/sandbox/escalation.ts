@@ -31,7 +31,7 @@ export const escalationFields = {
     .enum(ESCALATION_TARGETS)
     .optional()
     .describe(
-      'ONLY after a [sandbox: file access denied…] result: retry the identical call once with the NARROWEST wider file-policy mode that suffices. Requires justification; the user is asked to approve, and the grant applies to this one call.',
+      'ONLY after a [sandbox: file access denied…] result: retry the identical call once with the NARROWEST wider file-policy mode that suffices. Requires justification; the user is asked to approve, and the grant applies to this one call. Set on any other call it is simply IGNORED (the call runs under the current policy) — never set it pre-emptively.',
     ),
   justification: z
     .string()
@@ -45,14 +45,38 @@ export interface EscalationAsk {
   justification: string
 }
 
-/** Parse + validate the escalation arguments off one tool input. Returns `undefined` when no escalation
- *  was requested, `{ error }` for every malformed or non-widening ask (verbatim texts — pinned by tests;
- *  a non-widening ask NEVER reaches a human), or `{ ask }` when the request is valid and only approval
- *  remains. Pure: the scheduler owns the prompt; this only judges. */
+/** The prefix every sandbox denial text starts with (see sandboxDenialMarker). The scheduler watches tool
+ *  results for it to learn that a REAL denial happened this session — the only thing that grounds an
+ *  escalation prompt. */
+export const SANDBOX_DENIAL_PREFIX = '[sandbox: file access denied'
+
+/** Session facts the judge needs beyond the policy: has any sandbox denial actually occurred yet? */
+export interface EscalationContext {
+  denialSeen?: boolean
+}
+
+/**
+ * Parse + judge the escalation arguments off one tool input. Four outcomes:
+ *   - `undefined` — no escalation fields (the common case costs nothing);
+ *   - `{ error }`  — a MALFORMED pairing (verbatim texts, pinned by tests) — a model error, bounced;
+ *   - `{ noop }`   — well-formed but not an escalation this session can honor: the mode is the current
+ *                    one or narrower, no confined policy is active, or NO DENIAL HAS OCCURRED YET. The
+ *                    call simply runs under the current policy; the note teaches the rule. This is a
+ *                    no-op and never a failure, because failing the call is what manufactures
+ *                    escalations: measured 2026-09-13 (gpt-5.6-luna, plan stage) — a pre-emptive ask
+ *                    for the mode it already had was bounced as an error, the Write was DISCARDED, the
+ *                    model concluded it needed more and asked for danger-full-access, and the run parked
+ *                    on an approval prompt that a reflexive click would have turned into a full sandbox
+ *                    bypass. "Only after a denial" is enforced HERE, mechanically — description text
+ *                    alone measurably does not hold, on frontier models as on weak ones (ADR-049);
+ *   - `{ ask }`    — strictly wider AND grounded in a real denial: the one case that reaches a human.
+ * Pure: the scheduler owns the prompt and the session facts; this only judges.
+ */
 export function parseEscalation(
   input: unknown,
   policy: SandboxPolicy | undefined,
-): { error: string } | { ask: EscalationAsk } | undefined {
+  session: EscalationContext = {},
+): { error: string } | { noop: string } | { ask: EscalationAsk } | undefined {
   const i = (input ?? {}) as Record<string, unknown>
   const mode = typeof i.sandbox_permissions === 'string' ? i.sandbox_permissions : undefined
   const justification = typeof i.justification === 'string' ? i.justification : undefined
@@ -67,10 +91,13 @@ export function parseEscalation(
     return { error: 'invalid justification: expected a non-empty sentence' }
   }
   if (policy === undefined || !isConfined(policy.mode)) {
-    return { error: 'sandbox escalation is not applicable: no confined sandbox policy is active for this session' }
+    return { noop: 'sandbox_permissions ignored — no confined sandbox policy is active for this session, so the call runs unrestricted anyway' }
   }
   if (!WIDER_MODES[policy.mode].includes(mode as SandboxMode)) {
-    return { error: `sandbox escalation to "${mode}" is not strictly wider than this call's current "${policy.mode}" mode` }
+    return { noop: `sandbox_permissions ignored — this call already runs under "${policy.mode}", which is not narrower than "${mode}"; the fields are only for retrying a call the sandbox DENIED` }
+  }
+  if (!session.denialSeen) {
+    return { noop: `sandbox_permissions ignored — no sandbox denial has occurred in this session; the call runs under "${policy.mode}". Escalate only by retrying the exact call that got a ${SANDBOX_DENIAL_PREFIX}…] result` }
   }
   return { ask: { mode: mode as SandboxMode, justification: justification as string } }
 }
@@ -80,6 +107,26 @@ export function parseEscalation(
 export function stripEscalationFields<T>(input: T): T {
   const { sandbox_permissions: _p, justification: _j, ...rest } = (input ?? {}) as Record<string, unknown>
   return rest as T
+}
+
+/** Remove the escalation fields from ADVERTISED tool schemas (ADR-082 Part A, second half).
+ *
+ *  The judge already ignores an ungrounded ask — but an optional field the model can SEE is a field it
+ *  fills. Measured 2026-09-15 (gpt-5.6-luna, full Northline build): 35 of 35 Write/Edit/Bash calls carried
+ *  `sandbox_permissions`, every single one a no-op, and the "ignored" note came back 34 times without ever
+ *  changing the behaviour. Explaining a rule in a field description does not hold — on frontier models as
+ *  on weak ones (ADR-049). So the lever is not shown until a denial has actually occurred.
+ *
+ *  Cost accounting: the schema changes at most ONCE per session, only when a real denial happens (one
+ *  KV-cache break at the moment the model is already re-reading a failure), and runs that never touch the
+ *  fence — the overwhelming majority — never pay for the fields at all. */
+export function withoutEscalationFields<T extends { parameters: Record<string, unknown> }>(schemas: T[]): T[] {
+  return schemas.map((s) => {
+    const props = s.parameters?.properties as Record<string, unknown> | undefined
+    if (!props || (!('sandbox_permissions' in props) && !('justification' in props))) return s
+    const { sandbox_permissions: _p, justification: _j, ...rest } = props
+    return { ...s, parameters: { ...s.parameters, properties: rest } }
+  })
 }
 
 /** The model-facing denial marker — ONE vocabulary across every enforcing family, so the model

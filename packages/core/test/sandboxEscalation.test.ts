@@ -1,11 +1,15 @@
-// sandboxEscalation.test.ts — ADR-070 step 2: denial markers, escalation choreography, one-call grants.
+// sandboxEscalation.test.ts — ADR-070 step 2 + ADR-082: denial markers, GROUNDED escalation choreography,
+// one-call grants. An escalation prompt is reachable only for a strictly wider ask AFTER a real denial this
+// session; every other well-formed ask is a NO-OP (the call runs under the current policy, with a note).
 import { describe, it, expect, vi } from 'vitest'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { escalationHintMarker, parseEscalation, sandboxDenialMarker } from '../src/sandbox/escalation'
+import { escalationHintMarker, parseEscalation, sandboxDenialMarker, withoutEscalationFields } from '../src/sandbox/escalation'
 import { scheduleTools } from '../src/tools/scheduler'
+import { schemaOf } from '../src/tools/toolRegistry'
 import { BashTool } from '../src/tools/builtins/Bash'
+import { ReadTool } from '../src/tools/builtins/Read'
 import { WriteTool } from '../src/tools/builtins/Write'
 import type { ToolContext } from '../src/tools/Tool'
 import type { ActivityEvent, ContentBlock } from '../src/protocol'
@@ -17,6 +21,7 @@ const signal = new AbortController().signal
 
 const wsWrite: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: '/workspace' }
 const readOnly: SandboxPolicy = { mode: 'read-only', workspaceRoot: '/workspace' }
+const denied = { denialSeen: true }
 
 /** A fake sandbox that records each exec's command + options and returns a scripted result. */
 function fakeSandbox(result = { output: '', exitCode: 0 }): Sandbox & { calls: { command: string; opts?: ExecOptions }[] } {
@@ -57,6 +62,16 @@ async function run(toolUses: { id: string; name: string; input: unknown }[], ctx
 }
 
 const resultText = (b: ContentBlock) => (b.type === 'tool_result' ? b.content : '')
+const bashUse = (id: string, input: unknown) => [{ id, name: 'Bash', input }]
+
+/** Ground a session: one un-escalated mutating call under read-only produces the real denial that makes a
+ *  later strictly-wider ask a genuine escalation. Returns the same ctx, now carrying sandboxDenialSeen. */
+async function primeDenial(ctx: ToolContext): Promise<ToolContext> {
+  const { blocks } = await run(bashUse('prime', { command: 'touch primed.txt' }), ctx)
+  expect(resultText(blocks[0])).toContain(sandboxDenialMarker('read-only'))
+  expect(ctx.sandboxDenialSeen).toBe(true)
+  return ctx
+}
 
 describe('marker texts — pinned verbatim (the one vocabulary every family teaches)', () => {
   it('denial marker', () => {
@@ -70,40 +85,45 @@ describe('marker texts — pinned verbatim (the one vocabulary every family teac
   })
 })
 
-describe('parseEscalation — malformed pairings rejected, non-widening never valid', () => {
+describe('parseEscalation — malformed pairings rejected; everything else is a no-op unless grounded + wider', () => {
   it('no escalation fields → undefined (the common case costs nothing)', () => {
     expect(parseEscalation({ command: 'ls' }, wsWrite)).toBeUndefined()
   })
   it('sandbox_permissions without justification', () => {
-    expect(parseEscalation({ sandbox_permissions: 'danger-full-access' }, wsWrite)).toEqual({
+    expect(parseEscalation({ sandbox_permissions: 'danger-full-access' }, wsWrite, denied)).toEqual({
       error: 'invalid escalation: sandbox_permissions requires a justification',
     })
   })
   it('justification without sandbox_permissions', () => {
-    expect(parseEscalation({ justification: 'because' }, wsWrite)).toEqual({
+    expect(parseEscalation({ justification: 'because' }, wsWrite, denied)).toEqual({
       error: 'invalid escalation: justification is only valid together with sandbox_permissions',
     })
   })
   it('blank justification', () => {
-    expect(parseEscalation({ sandbox_permissions: 'danger-full-access', justification: '  ' }, wsWrite)).toEqual({
+    expect(parseEscalation({ sandbox_permissions: 'danger-full-access', justification: '  ' }, wsWrite, denied)).toEqual({
       error: 'invalid justification: expected a non-empty sentence',
     })
   })
-  it('no confined policy active', () => {
-    expect(parseEscalation({ sandbox_permissions: 'workspace-write', justification: 'x' }, undefined)).toMatchObject({
-      error: expect.stringContaining('not applicable'),
+  it('no confined policy active → no-op (the call runs unrestricted anyway)', () => {
+    expect(parseEscalation({ sandbox_permissions: 'workspace-write', justification: 'x' }, undefined, denied)).toMatchObject({
+      noop: expect.stringContaining('no confined sandbox policy'),
     })
-    expect(parseEscalation({ sandbox_permissions: 'workspace-write', justification: 'x' }, { mode: 'danger-full-access', workspaceRoot: '/w' })).toMatchObject({
-      error: expect.stringContaining('not applicable'),
-    })
-  })
-  it('non-widening request', () => {
-    expect(parseEscalation({ sandbox_permissions: 'workspace-write', justification: 'x' }, wsWrite)).toEqual({
-      error: 'sandbox escalation to "workspace-write" is not strictly wider than this call\'s current "workspace-write" mode',
+    expect(parseEscalation({ sandbox_permissions: 'workspace-write', justification: 'x' }, { mode: 'danger-full-access', workspaceRoot: '/w' }, denied)).toMatchObject({
+      noop: expect.stringContaining('no confined sandbox policy'),
     })
   })
-  it('a strictly wider request is a valid ask', () => {
-    expect(parseEscalation({ sandbox_permissions: 'workspace-write', justification: 'need to write' }, readOnly)).toEqual({
+  it('the mode already held → no-op, not an error (the measured luna case)', () => {
+    expect(parseEscalation({ sandbox_permissions: 'workspace-write', justification: 'x' }, wsWrite, denied)).toMatchObject({
+      noop: expect.stringContaining('already runs under "workspace-write"'),
+    })
+  })
+  it('a strictly wider ask with NO prior denial → no-op that teaches the grounding rule', () => {
+    expect(parseEscalation({ sandbox_permissions: 'workspace-write', justification: 'need to write' }, readOnly)).toMatchObject({
+      noop: expect.stringContaining('no sandbox denial has occurred'),
+    })
+  })
+  it('a strictly wider ask AFTER a denial is the one valid ask', () => {
+    expect(parseEscalation({ sandbox_permissions: 'workspace-write', justification: 'need to write' }, readOnly, denied)).toEqual({
       ask: { mode: 'workspace-write', justification: 'need to write' },
     })
   })
@@ -152,27 +172,52 @@ describe('denial classification (sandbox stderr speaks the backend dialect)', ()
   })
 })
 
-describe('scheduler escalation choreography (the one-call grant)', () => {
-  const bashUse = (input: unknown) => [{ id: 't1', name: 'Bash', input }]
+describe('scheduler — no-op asks run the call; only grounded + wider asks reach the user (ADR-082)', () => {
+  it('the measured luna sequence: a pre-emptive same-mode ask on a Write RUNS the write, never prompts, and the note teaches the rule', async () => {
+    const perm = fakePerm('allow')
+    const ctx: ToolContext = { cwd, abortSignal: signal, permission: perm, sandboxPolicy: wsWrite }
+    const { blocks } = await run(
+      [{ id: 'w1', name: 'Write', input: { file_path: 'PLAN.md', content: '# plan', sandbox_permissions: 'workspace-write', justification: 'Create the required root PLAN.md contract for the builder.' } }],
+      ctx,
+    )
+    expect(perm.request).not.toHaveBeenCalled()
+    expect(existsSync(join(cwd, 'PLAN.md'))).toBe(true) // the call ran — the fields were a no-op, not a failure
+    expect(readFileSync(join(cwd, 'PLAN.md'), 'utf8')).toBe('# plan')
+    expect(resultText(blocks[0])).toContain('sandbox_permissions ignored')
+    expect(resultText(blocks[0])).toContain('already runs under "workspace-write"')
+  })
 
-  it('a non-widening ask errors immediately and NEVER prompts the user', async () => {
+  it('an UNSOLICITED strictly-wider ask (no denial yet) is a no-op: the call runs under the current policy and no one is prompted', async () => {
+    const perm = fakePerm('allow')
+    const sandbox = fakeSandbox()
+    const ctx: ToolContext = { cwd, abortSignal: signal, permission: perm, sandbox, sandboxPolicy: readOnly }
+    const { blocks } = await run(bashUse('t0', { command: 'echo hi', sandbox_permissions: 'danger-full-access', justification: 'x' }), ctx)
+    expect(perm.request).not.toHaveBeenCalled()
+    expect(sandbox.calls).toHaveLength(1)
+    expect(sandbox.calls[0].opts?.policy?.mode).toBe('read-only') // NOT widened
+    expect(resultText(blocks[0])).toContain('no sandbox denial has occurred')
+  })
+
+  it('a same-mode ask errors on nothing and runs the command under the current policy', async () => {
     const perm = fakePerm('allow')
     const sandbox = fakeSandbox()
     const { blocks } = await run(
-      bashUse({ command: 'touch x', sandbox_permissions: 'workspace-write', justification: 'x' }),
+      bashUse('t1', { command: 'touch x', sandbox_permissions: 'workspace-write', justification: 'x' }),
       { cwd, abortSignal: signal, permission: perm, sandbox, sandboxPolicy: wsWrite },
     )
-    expect(resultText(blocks[0])).toContain('not strictly wider')
     expect(perm.request).not.toHaveBeenCalled()
-    expect(sandbox.calls).toHaveLength(0)
+    expect(sandbox.calls).toHaveLength(1)
+    expect(sandbox.calls[0].command).toBe('touch x')
+    expect(resultText(blocks[0])).toContain('sandbox_permissions ignored')
   })
 
-  it('an approved escalation runs the call ONCE under the widened policy, input stripped', async () => {
+  it('a grounded, approved escalation runs the call ONCE under the widened policy, input stripped', async () => {
     const perm = fakePerm('allow')
     const sandbox = fakeSandbox()
+    const ctx = await primeDenial({ cwd, abortSignal: signal, permission: perm, sandbox, sandboxPolicy: readOnly })
     const { events, blocks } = await run(
-      bashUse({ command: 'touch x.txt', sandbox_permissions: 'workspace-write', justification: 'create the file the task needs' }),
-      { cwd, abortSignal: signal, permission: perm, sandbox, sandboxPolicy: readOnly },
+      bashUse('t2', { command: 'touch x.txt', sandbox_permissions: 'workspace-write', justification: 'create the file the task needs' }),
+      ctx,
     )
     expect(perm.request).toHaveBeenCalledTimes(1)
     const ask = events.find((e) => e.type === 'permission')
@@ -186,20 +231,16 @@ describe('scheduler escalation choreography (the one-call grant)', () => {
   it('a denied escalation blocks the call and tells the model not to retry', async () => {
     const perm = fakePerm('deny')
     const sandbox = fakeSandbox()
-    const { blocks } = await run(
-      bashUse({ command: 'touch x', sandbox_permissions: 'workspace-write', justification: 'need it' }),
-      { cwd, abortSignal: signal, permission: perm, sandbox, sandboxPolicy: readOnly },
-    )
+    const ctx = await primeDenial({ cwd, abortSignal: signal, permission: perm, sandbox, sandboxPolicy: readOnly })
+    const { blocks } = await run(bashUse('t3', { command: 'touch x', sandbox_permissions: 'workspace-write', justification: 'need it' }), ctx)
     expect(resultText(blocks[0])).toContain('rejected escalating')
     expect(sandbox.calls).toHaveLength(0)
   })
 
   it('fail-closed: no approval channel ⇒ no widening, the call never runs', async () => {
     const sandbox = fakeSandbox()
-    const { blocks } = await run(
-      bashUse({ command: 'touch x', sandbox_permissions: 'workspace-write', justification: 'need it' }),
-      { cwd, abortSignal: signal, sandbox, sandboxPolicy: readOnly },
-    )
+    const ctx = await primeDenial({ cwd, abortSignal: signal, sandbox, sandboxPolicy: readOnly })
+    const { blocks } = await run(bashUse('t4', { command: 'touch x', sandbox_permissions: 'workspace-write', justification: 'need it' }), ctx)
     expect(resultText(blocks[0])).toContain('no approval channel is composed')
     expect(sandbox.calls).toHaveLength(0)
   })
@@ -207,11 +248,42 @@ describe('scheduler escalation choreography (the one-call grant)', () => {
   it('the widening lasts exactly one call — the next un-escalated call is fenced again', async () => {
     const perm = fakePerm('allow')
     const sandbox = fakeSandbox()
-    const ctx: ToolContext = { cwd, abortSignal: signal, permission: perm, sandbox, sandboxPolicy: readOnly }
-    await run(bashUse({ command: 'touch x.txt', sandbox_permissions: 'workspace-write', justification: 'create it' }), ctx)
+    const ctx = await primeDenial({ cwd, abortSignal: signal, permission: perm, sandbox, sandboxPolicy: readOnly })
+    await run(bashUse('t5', { command: 'touch x.txt', sandbox_permissions: 'workspace-write', justification: 'create it' }), ctx)
     expect(sandbox.calls).toHaveLength(1)
-    const { blocks } = await run(bashUse({ command: 'touch y.txt' }), ctx)
+    const { blocks } = await run(bashUse('t6', { command: 'touch y.txt' }), ctx)
     expect(resultText(blocks[0])).toContain(sandboxDenialMarker('read-only'))
     expect(sandbox.calls).toHaveLength(1) // still one — the second call never ran
+  })
+})
+
+describe('withoutEscalationFields — the lever is not SHOWN until a denial happens (ADR-082)', () => {
+  it('the real Bash/Write schemas carry the fields, so hiding them is not a no-op', () => {
+    // Guards the premise: if the fields ever stop being advertised by default, this test fails loudly
+    // rather than letting the gating quietly protect nothing.
+    for (const tool of [BashTool, WriteTool]) {
+      const props = (schemaOf(tool).properties ?? {}) as Record<string, unknown>
+      expect(Object.keys(props)).toContain('sandbox_permissions')
+      expect(Object.keys(props)).toContain('justification')
+    }
+  })
+
+  it('strips both fields while leaving every other property intact', () => {
+    const [bash] = withoutEscalationFields([{ name: 'Bash', description: '', parameters: schemaOf(BashTool) }])
+    const props = (bash!.parameters.properties ?? {}) as Record<string, unknown>
+    expect(Object.keys(props)).not.toContain('sandbox_permissions')
+    expect(Object.keys(props)).not.toContain('justification')
+    expect(Object.keys(props)).toContain('command') // the tool itself is untouched
+  })
+
+  it('never mutates the caller’s schema (the registry hands out shared objects)', () => {
+    const parameters = schemaOf(BashTool)
+    withoutEscalationFields([{ name: 'Bash', description: '', parameters }])
+    expect(Object.keys(parameters.properties as Record<string, unknown>)).toContain('sandbox_permissions')
+  })
+
+  it('returns a schema with no escalation fields UNCHANGED by identity (costs nothing per turn)', () => {
+    const schema = { name: 'Read', description: '', parameters: schemaOf(ReadTool) }
+    expect(withoutEscalationFields([schema])[0]).toBe(schema)
   })
 })

@@ -203,3 +203,40 @@ describe('thinking-only terminal salvage (dokar-9B forensics)', () => {
     }
   })
 })
+
+describe('ADR-082 — the escalation lever is ADVERTISED only after a real denial', () => {
+  // sandboxEscalation.test.ts pins withoutEscalationFields in isolation; this pins the WIRING — what the
+  // model can actually see. Motivation, measured 2026-09-15 on a full build: 35 of 35 Write/Edit/Bash calls
+  // carried a no-op `sandbox_permissions`, purely because the field was visible on every schema from turn 1.
+  it('turn 1 hides sandbox_permissions; the turn AFTER a denial offers it', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'cascade-'))
+    try {
+      const provider = createFakeProvider([
+        // turn 1: a plain write under a read-only policy — the in-process fence denies it (no sandbox needed).
+        [toolUse('c1', 'Write', { file_path: 'a.txt', content: 'x' }), done('tool_use')],
+        [textDelta('Understood — that path is read-only.'), done('end_turn')],
+      ])
+      const messages: Message[] = [{ role: 'user', content: 'write a.txt' }]
+      const events = await collect(
+        runAgentLoop(messages, { ...deps(provider, dir), sandboxPolicy: { mode: 'read-only' as const, workspaceRoot: dir } }),
+      )
+      // The denial really happened — without this the assertions below could pass vacuously.
+      expect(events.some((e) => e.type === 'toolResult' && !e.ok)).toBe(true)
+
+      const props = (call: any, tool: string): string[] =>
+        Object.keys(call.tools.find((t: any) => t.name === tool)?.parameters?.properties ?? {})
+
+      // Turn 1: as far as the model can see, the lever does not exist — on ANY enforcing tool.
+      expect(props(provider.calls[0], 'Write')).not.toContain('sandbox_permissions')
+      expect(props(provider.calls[0], 'Write')).not.toContain('justification')
+      expect(props(provider.calls[0], 'Bash')).not.toContain('sandbox_permissions')
+      expect(props(provider.calls[0], 'Write')).toContain('content') // the tool itself is untouched
+      // Turn 2, after the denial: the sanctioned retry is offered, paired field and all.
+      expect(props(provider.calls[1], 'Write')).toContain('sandbox_permissions')
+      expect(props(provider.calls[1], 'Write')).toContain('justification')
+      expect(props(provider.calls[1], 'Bash')).toContain('sandbox_permissions')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})

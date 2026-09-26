@@ -12,7 +12,7 @@ import { executeTool, type ToolUse } from './runTool'
 import { describeInvalidInput, normalizeInput } from './inputNormalizer'
 import { checkPermission } from '../permissions/gate'
 import { splitCommandSegments } from '../permissions/bashClassifier'
-import { parseEscalation, stripEscalationFields } from '../sandbox/escalation'
+import { parseEscalation, SANDBOX_DENIAL_PREFIX, stripEscalationFields } from '../sandbox/escalation'
 import type { SandboxPolicy } from '../sandbox/policy'
 import { formatAnswers } from './builtins/AskUserQuestion'
 import { runHooks } from '../hooks/hookRunner'
@@ -109,6 +109,10 @@ export async function* scheduleTools(
   // never read the escalation fields themselves (they're stripped after approval), so no tool can widen
   // from its own arguments: the only path to a wider policy runs through this map.
   const widened = new Map<string, SandboxPolicy>()
+  // ADR-082: escalation asks that were judged a NO-OP (same/narrower mode, unconfined, or no prior denial)
+  // run normally with the fields stripped; the judge's note rides the tool result so the model learns the
+  // rule at the decision point instead of being taught by a failed call.
+  const noopNotes = new Map<string, string>()
 
   for (const batch of partition(toolUses, registry)) {
     // ── 1. GATE every tool first. Reads auto-allow instantly (no await); a write in 'default' mode
@@ -176,8 +180,13 @@ export async function* scheduleTools(
       //    consumed fields are stripped so the tool executes a clean input. Fail-closed: no approval
       //    channel ⇒ no widening, ever. `allow-always` is deliberately treated as allow-ONCE here —
       //    a standing "always widen the sandbox" rule must never be learnable from one prompt. ──
-      const esc = parseEscalation(tu.input, ctx.sandboxPolicy)
-      if (esc) {
+      const esc = parseEscalation(tu.input, ctx.sandboxPolicy, { denialSeen: ctx.sandboxDenialSeen })
+      if (esc && 'noop' in esc) {
+        // Not an escalation this session can honor — strip the consumed fields and let the call proceed
+        // under the CURRENT policy through the normal gate below (ADR-082: a no-op, never a failure).
+        tu.input = stripEscalationFields(tu.input)
+        noopNotes.set(tu.id, esc.noop)
+      } else if (esc) {
         const fail = (content: string) => {
           byId.set(tu.id, { type: 'tool_result', tool_use_id: tu.id, content, isError: true })
           tracer.event({ t: 'tool_result', id: tu.id, name: tu.name, ok: false, ms: 0, content })
@@ -306,6 +315,15 @@ export async function* scheduleTools(
     const ms = Date.now() - started
     for (const tu of toRun) {
       let block = settled.get(tu.id)!
+      // ADR-082: a REAL denial happened — from here on a strictly wider ask may reach the user. Recorded on
+      // the session ctx (not the per-call copy) so it persists across this session's steps.
+      if (block.type === 'tool_result' && block.content.includes(SANDBOX_DENIAL_PREFIX)) ctx.sandboxDenialSeen = true
+      // …and a judged no-op ask gets its teaching note appended, so the model stops sending the fields.
+      const noop = noopNotes.get(tu.id)
+      if (noop && block.type === 'tool_result') {
+        block = { ...block, content: `${block.content}\n[sandbox: ${noop}]` }
+        settled.set(tu.id, block)
+      }
       // ── ADR-036: PostToolUse hooks — the feedback channel. A hook exiting 2 gets its stderr APPENDED to
       //    the tool_result so THE MODEL sees it (e.g. a lint hook making the model fix its own edit). ──
       if (ctx.hooks && block.type === 'tool_result') {
