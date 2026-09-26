@@ -4,7 +4,8 @@
 // knows nothing about versions. The agent edits files in the bind-mounted dir, so host git sees the changes.
 
 import { execFileSync } from 'node:child_process'
-import { resolve } from 'node:path'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import type { Version } from '@cascade/app-protocol'
 
 const US = '\x1f' // unit separator — safe field delimiter for `git log --format`
@@ -31,6 +32,27 @@ export class VersionManager {
     }
   }
 
+  /** Keep CASCADE's own metadata out of the USER's project history. `.cascade/` holds the forensic traces
+   *  (measured 2026-09-25: a single builder trace at 14 MB), dev.log and todos.json — none of it is the
+   *  user's work, yet `git add -A` below was committing all of it into every checkpoint, so each turn wrote
+   *  multi-megabyte blobs into a repo the user may later push. Idempotent and best-effort: append the ignore
+   *  rule when absent, and drop anything already tracked from the INDEX only — files on disk are untouched,
+   *  so a running build's open trace keeps writing normally. Never throws: housekeeping must not be able to
+   *  cost the user a checkpoint. */
+  private ensureCascadeIgnored(dir: string): void {
+    try {
+      const gitignore = join(dir, '.gitignore')
+      const body = existsSync(gitignore) ? readFileSync(gitignore, 'utf8') : ''
+      if (!/^\.cascade\/?\s*$/m.test(body)) {
+        writeFileSync(gitignore, `${body}${body && !body.endsWith('\n') ? '\n' : ''}.cascade/\n`)
+      }
+      // Only touch the index when something is actually tracked — keeps the common path a single cheap read.
+      if (git(dir, ['ls-files', '.cascade']).trim()) git(dir, ['rm', '-r', '--cached', '-q', '--ignore-unmatch', '.cascade'])
+    } catch {
+      /* housekeeping is never worth failing a checkpoint over */
+    }
+  }
+
   /** Commit the current working tree as a checkpoint (no-op if nothing changed). Returns true if it committed. */
   checkpoint(dir: string, message: string): boolean {
     try {
@@ -44,6 +66,7 @@ export class VersionManager {
         }
         if (!this.ownsRepo(dir)) return false
       }
+      this.ensureCascadeIgnored(dir) // before `add -A` — that is what was sweeping traces into history
       git(dir, ['add', '-A'])
       if (!git(dir, ['status', '--porcelain']).trim()) return false // nothing changed
       const subject = (message.replace(/\s+/g, ' ').trim() || 'Checkpoint').slice(0, 72)

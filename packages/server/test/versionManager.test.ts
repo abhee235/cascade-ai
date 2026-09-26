@@ -3,7 +3,7 @@
 // the developer's main-repo work-in-progress, and a restore would have hard-reset it. Every op must refuse
 // to touch a parent repo.
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
@@ -67,5 +67,42 @@ describe('VersionManager parent-repo guard', () => {
     expect(vm.checkpoint(orphan, 'second')).toBe(true)
     const history = vm.list(orphan)
     expect(history.map((v) => v.summary)).toEqual(['second', 'first'])
+  })
+})
+
+// Measured 2026-09-25: `.cascade/` was never ignored, so `git add -A` swept Cascade's own forensic traces
+// into the USER's project history — one builder trace was 14 MB, committed again on every turn.
+describe('checkpoints keep Cascade metadata out of the user history', () => {
+  const vm = new VersionManager()
+
+  it('drops an ALREADY-tracked trace from the index while leaving it on disk for the live build', () => {
+    const proj = mkdtempSync(join(root, 'proj-'))
+    git(proj, ['init', '-q'])
+    mkdirSync(join(proj, '.cascade', 'traces'), { recursive: true })
+    writeFileSync(join(proj, '.cascade', 'traces', 'builder.jsonl'), '{"trace":"huge"}\n')
+    writeFileSync(join(proj, 'App.tsx'), 'export const App = () => null')
+    git(proj, ['add', '-A']) // the state every existing project is already in
+    git(proj, ['commit', '-q', '-m', 'baseline with trace'])
+    expect(git(proj, ['ls-files', '.cascade']).trim()).not.toBe('')
+
+    writeFileSync(join(proj, 'App.tsx'), 'export const App = () => <div />')
+    expect(vm.checkpoint(proj, 'second turn')).toBe(true)
+
+    expect(git(proj, ['ls-files', '.cascade']).trim()).toBe('') // untracked…
+    expect(git(proj, ['ls-tree', '-r', '--name-only', 'HEAD'])).not.toContain('.cascade/')
+    expect(existsSync(join(proj, '.cascade', 'traces', 'builder.jsonl'))).toBe(true) // …but NOT deleted
+  })
+
+  it('appends the rule once and preserves an existing .gitignore', () => {
+    const proj = mkdtempSync(join(root, 'proj2-'))
+    git(proj, ['init', '-q'])
+    writeFileSync(join(proj, '.gitignore'), 'node_modules\ndist\n')
+    writeFileSync(join(proj, 'App.tsx'), 'x')
+    vm.checkpoint(proj, 'first')
+    vm.checkpoint(proj, 'second') // must not duplicate the rule
+    const gitignore = readFileSync(join(proj, '.gitignore'), 'utf8')
+    expect(gitignore).toContain('node_modules')
+    expect(gitignore).toContain('dist')
+    expect(gitignore.match(/^\.cascade\/$/gm)).toHaveLength(1)
   })
 })

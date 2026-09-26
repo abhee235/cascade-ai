@@ -1,11 +1,11 @@
 // winFence.test.ts — ADR-070 step 6: the write-fence's pure parts (SID, runner argv, backend wiring).
-import { describe, expect, it } from 'vitest'
-import { mkdtempSync } from 'node:fs'
+import { afterEach, describe, expect, it } from 'vitest'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { SandboxPolicy } from '@cascade/core'
 import { tempWriteSid, workspaceWriteSid } from '../src/winFenceSid.js'
-import { buildChildCommandLine, parseRunnerArgs } from '../src/winFenceRunner.js'
+import { buildChildCommandLine, parseRunnerArgs, redirectChildWrites } from '../src/winFenceRunner.js'
 import { confineHostCommand, resetBackendCache, selectLocalBackend } from '../src/sandboxBackends.js'
 
 const ws = mkdtempSync(join(tmpdir(), 'winfence-'))
@@ -81,5 +81,33 @@ describe('confineHostCommand — the fence is argv-form, partial, with a runner-
 	})
 	it('danger-full-access is never confined', () => {
 		expect(confineHostCommand('rm -rf /', { mode: 'danger-full-access', workspaceRoot: ws }, { platform: 'win32', probeWinFence: () => true }).backend).toBe('none')
+	})
+})
+
+describe('redirectChildWrites — %TEMP% AND the npm cache must land inside the granted tree', () => {
+	// Regression, measured 2026-09-25 under the REAL fence: npm caches to %LOCALAPPDATA%\npm-cache, outside
+	// the workspace ACE, so `npm install` — the first act of every build — died with
+	//   npm error code EPERM … path C:\…\npm-cache\_cacache\tmp\f67bfc73
+	// and the model escalated to danger-full-access purely to obtain a cache directory. Redirecting %TEMP%
+	// alone was never enough; the cache is a separate variable. (Same bug the WSL rung had as EROFS.)
+	const saved = { TMP: process.env.TMP, TEMP: process.env.TEMP, npm_config_cache: process.env.npm_config_cache }
+	afterEach(() => {
+		Object.assign(process.env, saved)
+	})
+
+	it('redirects TMP, TEMP and npm_config_cache into the workspace-private temp dir', () => {
+		const dir = mkdtempSync(join(tmpdir(), 'fence-env-'))
+		const tempDir = join(dir, '.cascade', 'tmp')
+		const vars = redirectChildWrites({ mode: 'workspace-write', tempDir })!
+		expect(vars.TMP).toBe(tempDir)
+		expect(vars.TEMP).toBe(tempDir)
+		expect(vars.npm_config_cache).toBe(join(tempDir, 'npm-cache'))
+		expect(existsSync(vars.npm_config_cache)).toBe(true) // must EXIST — npm fails on the first write otherwise
+		expect(process.env.npm_config_cache).toBe(vars.npm_config_cache) // the spawned child inherits this
+		rmSync(dir, { recursive: true, force: true })
+	})
+
+	it('read-only redirects nothing — a mode that forbids writes forbids cache writes too', () => {
+		expect(redirectChildWrites({ mode: 'read-only', tempDir: join(tmpdir(), 'unused') })).toBeUndefined()
 	})
 })
