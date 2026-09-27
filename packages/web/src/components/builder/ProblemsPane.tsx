@@ -37,7 +37,7 @@ export function ProblemsPane() {
               <div key={`r${i}`} className="flex items-start gap-2 px-3 py-1 text-xs">
                 <Flame className="mt-0.5 h-3 w-3 shrink-0 text-orange-500" />
                 <span className="min-w-0">
-                  <span className="mr-1 rounded bg-orange-500/15 px-1 text-[10px] uppercase text-orange-600">{e.kind}</span>
+                  <span className="mr-1 rounded bg-orange-500/15 px-1 text-xs uppercase text-orange-600">{e.kind}</span>
                   <span className="whitespace-pre-wrap text-foreground">{e.message}</span>
                   {e.file && <span className="ml-1 font-mono text-muted-foreground/70">{e.file}</span>}
                 </span>
@@ -51,7 +51,7 @@ export function ProblemsPane() {
                 className="flex w-full items-start gap-2 px-3 py-1 text-left text-xs hover:bg-accent/50"
                 title={`Open ${p.file}`}
               >
-                <CircleAlert className="mt-0.5 h-3 w-3 shrink-0 text-red-500" />
+                <CircleAlert className="mt-0.5 h-3 w-3 shrink-0 text-danger" />
                 <span className="min-w-0">
                   <span className="text-foreground">{p.message}</span>{' '}
                   <span className="font-mono text-muted-foreground/70">

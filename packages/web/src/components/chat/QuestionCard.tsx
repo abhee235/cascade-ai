@@ -26,7 +26,7 @@ export function QuestionCard({ item }: { item: Extract<Item, { kind: 'question' 
           <div key={qi} className={qi > 0 ? 'mt-2' : ''}>
             <span className="text-xs mb-4 text-muted-foreground">{q.header}</span>
             <div className="flex items-start gap-1.5">
-              <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-green-500" />
+              <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" />
               {/* a resolved plan shows only its outcome (Approve/…), not the whole plan text again */}
               {isRich(q.question) ? (
                 <span className="font-medium">{item.answered![q.question] || '—'}</span>
@@ -73,7 +73,7 @@ export function QuestionCard({ item }: { item: Extract<Item, { kind: 'question' 
         const sel = picked[qi] ?? []
         return (
           <div key={qi} className={qi > 0 ? 'mt-4 border-t border-border pt-3' : ''}>
-            <span className="rounded bg-accent px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">{q.header}</span>
+            <span className="rounded bg-accent px-1.5 py-0.5 text-xs font-medium text-muted-foreground">{q.header}</span>
             {isRich(q.question) ? (
               <div className="mt-2 mb-4 max-h-[46vh] overflow-y-auto rounded-lg border border-border bg-muted/30 px-3 py-2">
                 <div className="prose prose-sm dark:prose-invert max-w-none">

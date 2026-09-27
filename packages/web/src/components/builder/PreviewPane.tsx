@@ -95,7 +95,7 @@ export function PreviewPane() {
     return (
       <Center>
         <div className="max-w-md text-center">
-          <AlertTriangle className="mx-auto h-7 w-7 text-yellow-500" />
+          <AlertTriangle className="mx-auto h-7 w-7 text-warning" />
           <p className="mt-2 text-sm">Couldn't start the preview.</p>
           {/* The REASON, when the server knows it (e.g. the dev server bound a port the container doesn't
               publish). Without this the pane said only "unreachable" and the cause stayed invisible. */}

@@ -291,6 +291,11 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
       onClick={toggleSidebar}
       title="Toggle Sidebar"
       className={cn(
+        // ADR-084 Phase 2 — DELIBERATELY left at w-4 (16px wide), the one accepted SC 2.5.8 exception in
+        // this UI. Widening it to w-6 was tried and reverted: the rail is `z-20` over the sidebar's right
+        // edge, exactly where each row's "Delete project" button sits (`right-1`), so the wider rail
+        // swallowed those clicks — the audit's hit-area probe caught 12 controls per page becoming
+        // unreachable. A 16×1000 drag handle is trivially acquirable; a stolen delete button is not.
         "absolute inset-y-0 z-20 hidden w-4 -translate-x-1/2 transition-all ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-sidebar-border sm:flex",
         "in-data-[side=left]:cursor-w-resize in-data-[side=right]:cursor-e-resize",
         "[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize",
@@ -427,8 +432,11 @@ function SidebarGroupAction({
       data-sidebar="group-action"
       className={cn(
         "absolute top-3.5 right-3 flex aspect-square w-5 items-center justify-center rounded-md p-0 text-sidebar-foreground ring-sidebar-ring outline-hidden transition-transform hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
-        // Increases the hit area of the button on mobile.
-        "after:absolute after:-inset-2 md:after:hidden",
+        // ADR-084 Phase 2: expand the HIT AREA at every width, not just mobile. Upstream hid this behind
+        // `md:after:hidden`, which left a 20×20 target on desktop — below the 24×24 floor of WCAG 2.2
+        // SC 2.5.8, and the most-repeated control in the app (one "Delete project" per recent project).
+        // The `after` overlay grows the target to 36×36 without changing a pixel of what is painted.
+        "after:absolute after:-inset-2",
         "group-data-[collapsible=icon]:hidden",
         className
       )}
@@ -562,8 +570,11 @@ function SidebarMenuAction({
       data-sidebar="menu-action"
       className={cn(
         "absolute top-1.5 right-1 flex aspect-square w-5 items-center justify-center rounded-md p-0 text-sidebar-foreground ring-sidebar-ring outline-hidden transition-transform peer-hover/menu-button:text-sidebar-accent-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
-        // Increases the hit area of the button on mobile.
-        "after:absolute after:-inset-2 md:after:hidden",
+        // ADR-084 Phase 2: expand the HIT AREA at every width, not just mobile. Upstream hid this behind
+        // `md:after:hidden`, which left a 20×20 target on desktop — below the 24×24 floor of WCAG 2.2
+        // SC 2.5.8, and the most-repeated control in the app (one "Delete project" per recent project).
+        // The `after` overlay grows the target to 36×36 without changing a pixel of what is painted.
+        "after:absolute after:-inset-2",
         "peer-data-[size=sm]/menu-button:top-1",
         "peer-data-[size=default]/menu-button:top-1.5",
         "peer-data-[size=lg]/menu-button:top-2.5",

@@ -42,6 +42,15 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  /* ADR-084 Phase 1 — SEMANTIC STATUS. Status text was written with raw Tailwind utilities
+     (text-emerald-500 / text-red-500 / text-yellow-500), which never passed a contrast check: measured on
+     this background they are 2.54, 3.76 and 1.92 against a 4.5 requirement — i.e. the failure indicator
+     was the least readable text in the app. These shades are measured (see the ratio on each line).
+     The light/dark split is FORCED, not stylistic: AA needs text luminance <= 0.1833 on the light ground
+     and >= 0.1887 on the dark one, so no single value can serve both. */
+  --success: #15803d; /* 5.02:1 */
+  --warning: #b45309; /* 5.02:1 */
+  --danger: #b91c1c; /* 6.47:1 */
 }
 
 .dark {
@@ -76,6 +85,10 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+  /* ADR-084 Phase 1 — the dark ground needs the LIGHT shades (see the note in :root). */
+  --success: #4ade80; /* 11.36:1 */
+  --warning: #fbbf24; /* 11.86:1 */
+  --danger: #f87171; /* 7.16:1 */
 }
 
 /* Map tokens → Tailwind utilities (bg-background, text-foreground, border-border, …). */
@@ -115,6 +128,11 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  /* ADR-084 Phase 1: gives Tailwind `text-success` / `text-warning` / `text-danger`, so status stops
+     reaching for the raw palette and follows the theme automatically. */
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
   --font-sans: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'Geist Mono', ui-monospace, 'Cascadia Code', Menlo, monospace;
 }
@@ -415,4 +433,27 @@ body {
 .param-slider:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
+}
+
+/* ADR-084 Phase 6 — a GLOBAL reduced-motion policy.
+   The two blocks above already neutralise this app's bespoke keyframes (the transcript card-in and the
+   thinking-block reveal), but nothing covered Tailwind's `transition-*` utilities, which are used on most
+   interactive surfaces. This closes that gap for everything.
+
+   `animate-spin` is DELIBERATELY preserved: it is the only indicator that a turn is still running, so
+   stopping it would remove information rather than motion. Reduced motion means less decoration, not less
+   meaning — the spinner is slowed rather than frozen. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+  .animate-spin {
+    animation-duration: 1.5s !important;
+    animation-iteration-count: infinite !important;
+  }
 }

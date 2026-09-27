@@ -43,7 +43,7 @@ export function ConsolePane() {
             <div className="text-muted-foreground">Waiting for output…</div>
           ) : (
             logs.map((l, i) => (
-              <div key={i} className={cn('whitespace-pre-wrap break-all', isError(l) && 'text-red-500')}>
+              <div key={i} className={cn('whitespace-pre-wrap break-all', isError(l) && 'text-danger')}>
                 {l || ' '}
               </div>
             ))

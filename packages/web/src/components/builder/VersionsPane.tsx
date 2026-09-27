@@ -29,7 +29,7 @@ export function VersionsPane() {
             <div className="text-xs text-muted-foreground">{relativeTime(v.createdAt)}</div>
           </div>
           {i === 0 ? (
-            <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">current</span>
+            <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">current</span>
           ) : (
             <Button
               variant="outline"

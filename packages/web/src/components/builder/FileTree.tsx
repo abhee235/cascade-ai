@@ -50,7 +50,7 @@ function EditInput({ initial }: { initial: string }) {
         className="w-full rounded border border-ring bg-background px-1 py-0.5 text-[13px] outline-none"
         placeholder="name…"
       />
-      <div className="mt-0.5 text-[10px] text-muted-foreground/70">Enter to save · Esc to cancel</div>
+      <div className="mt-0.5 text-xs text-muted-foreground/70">Enter to save · Esc to cancel</div>
     </div>
   )
 }
@@ -205,7 +205,7 @@ export function FileTree({
     <Ctx.Provider value={ctx}>
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border px-2">
-          <span title={label} className="flex-1 truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label || 'Explorer'}</span>
+          <span title={label} className="flex-1 truncate text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label || 'Explorer'}</span>
           <button title={`New file${targetDir ? ` in ${targetDir}/` : ''}`} onClick={() => beginCreate(targetDir, 'file')} className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground">
             <FilePlusCorner className="h-4 w-4" />
           </button>

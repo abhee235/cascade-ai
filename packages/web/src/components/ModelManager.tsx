@@ -365,7 +365,7 @@ function CommandBlock({ command }: { command: string }) {
 			<pre className="overflow-x-auto whitespace-pre-wrap rounded-md border border-border bg-muted/50 px-3 py-2 pr-16 font-mono text-xs leading-relaxed">{command}</pre>
 			<button
 				type="button"
-				className="absolute right-1.5 top-1.5 rounded border border-border bg-background px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+				className="absolute right-1.5 top-1.5 rounded border border-border bg-background px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"
 				onClick={() => {
 					void navigator.clipboard?.writeText(command)
 					setCopied(true)
@@ -526,7 +526,7 @@ function AddModelPane(props: { onAdded: (provider: string, model: string) => voi
 							    silently truncates past it (measured: a remote box at 32k squeezed generation to zero while Cascade
 							    planned against 131k). Surface that at setup time, not seven turns into a build. */}
 							{cApi === 'openai' && cCtx.trim() && (
-								<span className="rounded-md bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-600 dark:text-amber-400">
+								<span className="rounded-md bg-amber-500/10 px-2.5 py-1.5 text-xs text-warning">
 									⚠ The OpenAI-compatible API cannot enforce a context window — your server must itself be configured for ≥ {Number(cCtx).toLocaleString()} tokens, or it will silently truncate. (For a remote Ollama, pick Server type: Ollama — its native API enforces the window per request.)
 								</span>
 							)}

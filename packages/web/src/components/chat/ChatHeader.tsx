@@ -45,7 +45,7 @@ export function ChatHeader() {
         </button>
         {open && (
           <div role="menu" className="absolute left-0 top-full z-30 mt-1 max-h-80 w-72 overflow-auto rounded-md border border-border bg-popover p-1 shadow-lg">
-            <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Chats</div>
+            <div className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Chats</div>
             {chats.map((c) => (
               <div
                 key={c.id}
@@ -71,7 +71,7 @@ export function ChatHeader() {
                   type="button"
                   title="Delete chat"
                   onClick={() => deleteChat(c.id)}
-                  className="px-2 py-1.5 opacity-0 transition-opacity hover:text-red-500 focus-visible:opacity-100 group-hover:opacity-100"
+                  className="px-2 py-1.5 opacity-0 transition-opacity hover:text-danger focus-visible:opacity-100 group-hover:opacity-100"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>

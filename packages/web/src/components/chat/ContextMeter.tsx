@@ -31,7 +31,7 @@ export function ContextMeter() {
 		>
 			<div className={cn('h-0.5 transition-[width] duration-500', tone)} style={{ width: `${pct}%` }} />
 			{/* The numbers stay out of the way until you ask for them — hovering the line is the ask. */}
-			<span className="pointer-events-none absolute -top-4 right-0 text-[10px] tabular-nums text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
+			<span className="pointer-events-none absolute -top-4 right-0 text-xs tabular-nums text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
 				{fmt(used)}/{fmt(win)} · {Math.round(pct)}%
 			</span>
 		</div>

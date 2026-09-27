@@ -87,7 +87,7 @@ function TerminalSessions() {
                   e.stopPropagation()
                   closeTerminal(tid)
                 }}
-                className="opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100"
+                className="opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -112,13 +112,13 @@ export function BottomPanel() {
             type="button"
             onClick={() => setBottomTab(t.id)}
             className={cn(
-              'relative px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide transition-colors',
+              'relative px-2.5 py-1 text-xs font-medium uppercase tracking-wide transition-colors',
               bottomTab === t.id ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
             )}
           >
             {t.label}
             {t.id === 'problems' && problemCount > 0 && (
-              <span className="ml-1 rounded-full bg-red-500/15 px-1 py-0.5 text-[10px] text-red-500">{problemCount}</span>
+              <span className="ml-1 rounded-full bg-red-500/15 px-1 py-0.5 text-xs text-danger">{problemCount}</span>
             )}
             {bottomTab === t.id && <span className="absolute inset-x-1 -bottom-px h-0.5 bg-foreground" />}
           </button>

@@ -41,7 +41,7 @@ export function SpanKindToken({ kind }: { kind: string }) {
   const c = spanKindColor(kind)
   return (
     <span
-      className="inline-flex h-[18px] shrink-0 items-center rounded-full border px-1.5 text-[10px] font-semibold leading-none"
+      className="inline-flex h-[18px] shrink-0 items-center rounded-full border px-1.5 text-xs font-semibold leading-none"
       style={{ backgroundColor: tint(c, 22), borderColor: tint(c, 55), color: `color-mix(in srgb, ${c} 78%, var(--foreground))` }}
     >
       {kind.toLowerCase()}

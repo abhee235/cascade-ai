@@ -106,7 +106,10 @@ export function NavSidebar() {
                   <SidebarMenuItem key={p.id}>
                     <SidebarMenuButton tooltip={p.name} isActive={page === 'project' && activeId === p.id} onClick={() => openProjectPage(p.id)}>
                       <Folder strokeWidth={1.75} />
-                      <span className="truncate">{p.name}</span>
+                      {/* ADR-084 Phase 5: the rail is narrow and prompt-derived names collide — two
+                          projects both truncate to "Build 'Northline Supply', a …". Until the names
+                          themselves carry a differentiator, the full name must at least be recoverable. */}
+                      <span className="truncate" title={p.name}>{p.name}</span>
                       {act && (
                         <span
                           className={cn('ml-auto mr-1 h-2 w-2 shrink-0 rounded-full', act === 'awaiting' ? 'bg-amber-500' : 'animate-pulse bg-blue-500')}

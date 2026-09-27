@@ -41,6 +41,9 @@ export function HomePage() {
               go()
             }
           }}
+          // ADR-084 Phase 2: a stable accessible name. The placeholder swaps with connection state, so it
+          // cannot be the name — and a placeholder is not an accessible name in the first place.
+          aria-label="Describe the app to build"
           placeholder={connected ? 'Ask Cascade to build…' : 'connecting to server…'}
           className="min-h-20 resize-none border-0 bg-transparent text-base shadow-none focus-visible:ring-0 dark:bg-transparent"
         />
