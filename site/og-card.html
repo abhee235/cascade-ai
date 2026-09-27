@@ -1,0 +1,119 @@
+<!doctype html>
+<!-- Source for public/assets/og-cover.png (1200x630 link-preview card).
+     Lives in site/, NOT site/public/, so it is outside the assets directory and never published.
+     Regenerate:  node og-card.mjs     (screenshots this file at exactly 1200x630)
+     Tokens below are copied from index.html's :root so the card cannot drift from the site. -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..800&family=Geist+Mono:wght@400..600&display=swap" rel="stylesheet" />
+<style>
+:root {
+	--bg: #060607;
+	--text: #f4f4f5;
+	--text-2: #a1a1aa;
+	--accent: #2dd4bf;
+	--accent-2: #38bdf8;
+	--grad: linear-gradient(100deg, #7dd3fc 0%, #38bdf8 30%, #2dd4bf 65%, #5eead4 100%);
+	--font: 'Geist', system-ui, -apple-system, 'Segoe UI', sans-serif;
+	--mono: 'Geist Mono', ui-monospace, Consolas, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1200px; height: 630px; }
+body {
+	background: var(--bg);
+	color: var(--text);
+	font-family: var(--font);
+	display: flex;
+	flex-direction: column;
+	justify-content: space-between;
+	padding: 78px 88px;
+	position: relative;
+	overflow: hidden;
+}
+/* Ambient glow, bottom-right — the same visual signature as the site hero, kept far from the type so it
+   never competes with it. */
+body::after {
+	content: '';
+	position: absolute;
+	right: -220px; bottom: -320px;
+	width: 900px; height: 900px;
+	background: radial-gradient(circle, rgba(45, 212, 191, 0.20) 0%, rgba(56, 189, 248, 0.10) 38%, transparent 68%);
+	pointer-events: none;
+}
+/* Hairline grid, very faint, to read as a builder tool rather than a generic marketing card. */
+body::before {
+	content: '';
+	position: absolute; inset: 0;
+	background-image: linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px),
+	                  linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px);
+	background-size: 64px 64px;
+	pointer-events: none;
+}
+.eyebrow { display: flex; align-items: center; gap: 16px; position: relative; z-index: 1; }
+.mark { width: 44px; height: 44px; display: block; }
+.site {
+	font-family: var(--mono);
+	font-size: 25px;
+	font-weight: 500;
+	letter-spacing: .02em;
+	color: var(--text-2);
+}
+.body { position: relative; z-index: 1; }
+h1 {
+	font-size: 112px;
+	font-weight: 700;
+	letter-spacing: -.035em;
+	line-height: .96;
+	background: var(--grad);
+	-webkit-background-clip: text;
+	background-clip: text;
+	-webkit-text-fill-color: transparent;
+	/* A gradient clipped to text has no fallback colour if the clip fails; keep a solid behind it. */
+	color: var(--accent);
+	margin-bottom: 22px;
+}
+.tag { font-size: 37px; font-weight: 400; line-height: 1.32; color: var(--text); letter-spacing: -.012em; max-width: 21ch; }
+.tag b { font-weight: 600; }
+.meta {
+	display: flex; gap: 12px; align-items: center;
+	position: relative; z-index: 1;
+	font-family: var(--mono); font-size: 21px; color: var(--text-2);
+}
+.chip {
+	border: 1px solid rgba(255,255,255,.14);
+	border-radius: 999px;
+	padding: 9px 20px;
+	background: rgba(255,255,255,.035);
+}
+.chip.on { border-color: rgba(45,212,191,.42); color: var(--accent); background: rgba(45,212,191,.09); }
+</style>
+</head>
+<body>
+	<div class="eyebrow">
+		<svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+			<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+				<stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#2dd4bf"/>
+			</linearGradient></defs>
+			<rect x="3" y="3" width="7" height="19" rx="3.5" fill="url(#g)"/>
+			<rect x="12.5" y="8" width="7" height="19" rx="3.5" fill="url(#g)" opacity=".75"/>
+			<rect x="22" y="13" width="7" height="16" rx="3.5" fill="url(#g)" opacity=".5"/>
+		</svg>
+		<span class="site">appbuilder.sh</span>
+	</div>
+
+	<div class="body">
+		<h1>Cascade</h1>
+		<p class="tag">Build real apps from a prompt &mdash; <b>entirely on your machine.</b></p>
+	</div>
+
+	<div class="meta">
+		<span class="chip on">Local-first</span>
+		<span class="chip">Your own models</span>
+		<span class="chip">Sandboxed</span>
+		<span class="chip">Open source</span>
+	</div>
+</body>
+</html>

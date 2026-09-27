@@ -3,11 +3,46 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Cascade — The local-first AI app builder</title>
+<!-- Brand + domain are FRONT-LOADED on purpose. A browser tab shows only the first ~15-20 characters, so a
+     trailing "| appbuilder.sh" is the one position where the association can never be seen. Google already
+     prints the domain above the title in results, so a trailing copy is redundant there too. 51 chars keeps
+     it inside the ~60-char search-result budget while the descriptor still survives. -->
+<title>Cascade · appbuilder.sh — local-first AI app builder</title>
 <meta name="description" content="Cascade is a free, open-source AI app builder that runs entirely on your machine. Powered by your own Ollama models, sandboxed in Docker, with a live preview. No cloud. No API keys. No lock-in." />
+<link rel="canonical" href="https://appbuilder.sh/" />
+<!-- Matches the site's --bg token. Tints mobile browser chrome so the page does not open framed in white. -->
+<meta name="theme-color" content="#060607" />
+
+<!-- Open Graph. og:site_name is what actually carries "Cascade belongs to appbuilder.sh" into link previews
+     on Slack, Discord, iMessage and LinkedIn — the product name stays the headline, the domain becomes the
+     publisher line underneath it. og:url is canonical even before the zone is live, so the workers.dev
+     preview URL never becomes the indexed one. -->
+<meta property="og:site_name" content="appbuilder.sh" />
+<meta property="og:url" content="https://appbuilder.sh/" />
 <meta property="og:title" content="Cascade — The local-first AI app builder" />
 <meta property="og:description" content="Build real apps from a prompt, entirely on your machine. Open source, Ollama-native, sandboxed, live preview." />
 <meta property="og:type" content="website" />
+<meta property="og:image" content="https://appbuilder.sh/assets/og-cover.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="Cascade on appbuilder.sh — the local-first AI app builder." />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Cascade — The local-first AI app builder" />
+<meta name="twitter:description" content="Build real apps from a prompt, entirely on your machine. Open source, Ollama-native, sandboxed, live preview." />
+<meta name="twitter:image" content="https://appbuilder.sh/assets/og-cover.png" />
+
+<!-- The machine-readable half of the same claim: Cascade is an application, appbuilder.sh is the site that
+     publishes it. This is what lets a search engine show "appbuilder.sh" as the site name rather than
+     guessing one from the URL. -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    { "@type": "WebSite", "@id": "https://appbuilder.sh/#website", "url": "https://appbuilder.sh/", "name": "appbuilder.sh", "description": "Local-first tools for building apps with your own models." },
+    { "@type": "SoftwareApplication", "name": "Cascade", "applicationCategory": "DeveloperApplication", "operatingSystem": "Windows, macOS, Linux", "url": "https://appbuilder.sh/", "isPartOf": { "@id": "https://appbuilder.sh/#website" }, "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" } }
+  ]
+}
+</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2338bdf8'/%3E%3Cstop offset='1' stop-color='%232dd4bf'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='3' y='3' width='7' height='19' rx='3.5' fill='url(%23g)'/%3E%3Crect x='12.5' y='8' width='7' height='19' rx='3.5' fill='url(%23g)' opacity='.75'/%3E%3Crect x='22' y='13' width='7' height='16' rx='3.5' fill='url(%23g)' opacity='.5'/%3E%3C/svg%3E" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
