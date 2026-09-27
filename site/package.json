@@ -1,0 +1,15 @@
+{
+  "name": "cascade-site",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Cascade marketing site. Static — no build step; wrangler only uploads site/ to Cloudflare.",
+  "//": "Deliberately NOT a workspace of the root monorepo (its workspaces glob is packages/*). Cloudflare Builds runs with Root directory = site, so install/deploy here must not pull in the 9 monorepo packages (Electron, VS Code extension, vitest...) to publish one HTML file.",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "check": "wrangler deploy --dry-run"
+  },
+  "devDependencies": {
+    "wrangler": "4.142.0"
+  }
+}

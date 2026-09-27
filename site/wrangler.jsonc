@@ -1,15 +1,24 @@
 // Cascade marketing site → Cloudflare Workers (static assets).
 //
-//   cd site && npx wrangler deploy          # deploy
-//   cd site && npx wrangler dev             # preview on a local worker
+//   cd site && npm ci && npm run deploy     # deploy
+//   cd site && npm run dev                  # preview on a local worker
+//   cd site && npm run check                # validate config without deploying
 //
 // Workers Static Assets, not Pages: Cloudflare now points new static projects here, and it keeps one
 // deploy surface if the site ever needs a handler (redirects, a download endpoint, analytics). There is no
 // `main`, so this is assets-only and no JS runs per request — the files are served from the edge cache.
 //
-// Requires (never commit these — GitHub repo Settings → Secrets, or shell env for a manual deploy):
-//   CLOUDFLARE_API_TOKEN   scoped to Workers Scripts:Edit (+ Workers Routes:Edit if you enable `routes`)
-//   CLOUDFLARE_ACCOUNT_ID
+// ── Cloudflare Builds settings this file ASSUMES (dashboard → Settings → Build) ──────────────────────────
+//   Root directory   site          ← NOT "/" . The repo root is `cascade-monorepo` (npm workspaces,
+//                                   9 packages). Measured 2026-09-27: with "/" the build ran
+//                                   `npm clean-install` (1102 packages, incl. Electron) then
+//                                   `npm run build --workspaces`, which failed twice — @cascade/desktop on
+//                                   esbuild's missing ".node" loader, then @cascade/web with
+//                                   "JavaScript heap out of memory" (exit 134). wrangler was never
+//                                   reached. Running wrangler at the workspace root fails on its own too:
+//                                   "application detection logic has been run in the root of a workspace".
+//   Build command    (empty)      ← this site is pre-built HTML; there is nothing to compile.
+//   Deploy command   npx wrangler deploy
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   // MUST match the existing Worker service in the dashboard. Anything else silently creates a SECOND
@@ -21,7 +30,15 @@
   "workers_dev": true,
 
   "assets": {
-    "directory": "./",
+    // ./public, NOT ./ — everything under the assets directory is published at https://<host>/<path>, so
+    // the directory boundary IS the exclusion mechanism. package.json, package-lock.json, node_modules/,
+    // .wrangler/ and this file all sit in site/ and are therefore unpublishable by construction.
+    //
+    // A `.assetsignore` file was tried first and measured INERT on wrangler 4.142.0 with directory "./":
+    // `index.html` → 1983 files read, no ignore file at all → 1982. The 1-file delta was .assetsignore
+    // counting ITSELF, i.e. it excluded nothing and would have shipped 1700 node_modules files to the edge.
+    // Do not reintroduce it as a safety net; it provides none. Expected count here: 19 files.
+    "directory": "./public",
     // "404-page" serves /404.html when present and a plain 404 otherwise. Deliberately NOT
     // "single-page-application": that returns index.html with HTTP 200 for every unknown path, so typos and
     // dead links would look like the homepage to users AND to crawlers, which is an SEO own-goal on a

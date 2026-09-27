@@ -1,8 +1,0 @@
-# Files under site/ that must NOT be uploaded as public assets.
-# The assets directory is site/ itself, so anything here is served at https://<host>/<path> by default.
-wrangler.jsonc
-.assetsignore
-
-# Wrangler's LOCAL emulation state (KV/D1/R2/cache) from `wrangler dev`. Measured 2026-09-27: without this
-# line those files are read as assets and would be published to the edge.
-.wrangler
