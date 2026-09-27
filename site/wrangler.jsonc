@@ -1,0 +1,43 @@
+// Cascade marketing site → Cloudflare Workers (static assets).
+//
+//   cd site && npx wrangler deploy          # deploy
+//   cd site && npx wrangler dev             # preview on a local worker
+//
+// Workers Static Assets, not Pages: Cloudflare now points new static projects here, and it keeps one
+// deploy surface if the site ever needs a handler (redirects, a download endpoint, analytics). There is no
+// `main`, so this is assets-only and no JS runs per request — the files are served from the edge cache.
+//
+// Requires (never commit these — GitHub repo Settings → Secrets, or shell env for a manual deploy):
+//   CLOUDFLARE_API_TOKEN   scoped to Workers Scripts:Edit (+ Workers Routes:Edit if you enable `routes`)
+//   CLOUDFLARE_ACCOUNT_ID
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // MUST match the existing Worker service in the dashboard. Anything else silently creates a SECOND
+  // worker and deploys to it, leaving the real one untouched and the custom domain pointed at nothing.
+  "name": "cascade",
+  "compatibility_date": "2026-09-27",
+
+  // Gives an immediate <name>.<subdomain>.workers.dev URL to test against before any custom domain exists.
+  "workers_dev": true,
+
+  "assets": {
+    "directory": "./",
+    // "404-page" serves /404.html when present and a plain 404 otherwise. Deliberately NOT
+    // "single-page-application": that returns index.html with HTTP 200 for every unknown path, so typos and
+    // dead links would look like the homepage to users AND to crawlers, which is an SEO own-goal on a
+    // marketing site.
+    "not_found_handling": "404-page"
+  },
+
+  "observability": { "enabled": true }
+
+  // ── Custom domain ────────────────────────────────────────────────────────────────────────────────────
+  // Uncomment ONLY after the zone is active in this Cloudflare account (Add a site → update the registrar's
+  // nameservers). Deploying with a route for a zone Cloudflare does not manage fails the whole deploy.
+  // `custom_domain: true` makes Cloudflare create and manage the DNS record and certificate for you.
+  //
+  // "routes": [
+  //   { "pattern": "appbuilder.sh", "custom_domain": true },
+  //   { "pattern": "www.appbuilder.sh", "custom_domain": true }
+  // ]
+}
