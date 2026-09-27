@@ -22,7 +22,7 @@ describe('model registry seeding', () => {
 		const seeded = enabledModels().length
 		expect(seeded).toBeGreaterThan(1)
 
-		addEnabledModel('openai', 'gpt-5.6-luna') // the user touches one model
+		addEnabledModel('openai', 'gpt-6-luna') // the user touches one (seeded) model
 		await settle()
 
 		await initModelRegistry(store) // "restart"

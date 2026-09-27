@@ -12,6 +12,14 @@ describe('limitsFor (ADR-067)', () => {
 		expect(l.topK).toBe(false)
 	})
 
+	it('resolves gpt-6-luna (the default OpenAI model) to its official ceilings', () => {
+		const l = limitsFor('openai', 'gpt-6-luna')
+		expect(l.contextMax).toBe(1_050_000)
+		expect(l.outputMax).toBe(128_000)
+		expect(l.tempMax).toBe(1) // a reasoning model
+		expect(recommendedMaxOutputTokens(1_050_000, 'openai', 'gpt-6-luna')).toBe(16_384)
+	})
+
 	it('fixes temperature at 1 for reasoning models (o-series / gpt-5)', () => {
 		expect(limitsFor('openai', 'o3').tempMax).toBe(1)
 		expect(limitsFor('openai', 'gpt-5.6-luna').tempMax).toBe(1) // gpt-5 family

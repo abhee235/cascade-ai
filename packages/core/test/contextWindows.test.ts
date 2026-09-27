@@ -29,6 +29,11 @@ describe('contextWindowForModel — hosted NIM coder models', () => {
     expect(contextWindowForModel('llama3:8b')).toBe(8_192) // local base llama3 stays conservative
   })
 
+  it('sizes gpt-6-luna at its 1.05M window, not the gpt-5 400k rule or the 8k default', () => {
+    expect(contextWindowForModel('gpt-6-luna')).toBe(1_050_000)
+    expect(contextWindowForModel('gpt-5.6-luna')).toBe(400_000) // unchanged: the generic gpt-5 rule
+  })
+
   it('returns undefined for a model it has never heard of (caller uses the override / default)', () => {
     expect(contextWindowForModel('some-unknown/model-x')).toBeUndefined()
   })

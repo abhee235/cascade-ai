@@ -41,11 +41,11 @@ const OLLAMA_ROWS = [
 ]
 const OPENAI_ROWS = [
 	{ name: 'gpt-4o-mini', contextWindow: 128000, capabilities: ['tools','vision'] },
-	{ name: 'gpt-5.6-luna', contextWindow: 1048576, capabilities: ['tools','vision'] },
+	{ name: 'gpt-6-luna', contextWindow: 1050000, capabilities: ['tools','vision'] },
 	{ name: 'o3', contextWindow: 200000, capabilities: ['tools','vision'] },
 ]
 const state = { provider: 'ollama', model: 'qwen36-agentic:latest', utility: 'qwen3:4b',
-	enabled: [ { provider: 'ollama', model: 'qwen36-agentic:latest', contextWindow: 131072 }, { provider: 'openai', model: 'gpt-5.6-luna', contextWindow: 1048576 } ] }
+	enabled: [ { provider: 'ollama', model: 'qwen36-agentic:latest', contextWindow: 131072 }, { provider: 'openai', model: 'gpt-6-luna', contextWindow: 1050000 } ] }
 const providers = () => [
 	{ id: 'ollama', configured: true },
 	{ id: 'openai', configured: true },
