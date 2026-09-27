@@ -46,15 +46,24 @@
     "not_found_handling": "404-page"
   },
 
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
 
-  // ── Custom domain ────────────────────────────────────────────────────────────────────────────────────
-  // Uncomment ONLY after the zone is active in this Cloudflare account (Add a site → update the registrar's
-  // nameservers). Deploying with a route for a zone Cloudflare does not manage fails the whole deploy.
-  // `custom_domain: true` makes Cloudflare create and manage the DNS record and certificate for you.
+  // ── Custom domain ─────────────────────────────────────────────────────────────────
+  // Zone went active 2026-09-27. The apex was first attached by hand in the dashboard; this block is what
+  // makes that reproducible, so a fresh account can be rebuilt from the repo alone.
   //
-  // "routes": [
-  //   { "pattern": "appbuilder.sh", "custom_domain": true },
-  //   { "pattern": "www.appbuilder.sh", "custom_domain": true }
-  // ]
+  // `custom_domain: true` means Cloudflare creates and owns the DNS record AND the TLS certificate for the
+  // hostname. Do not also hand-create an A/CNAME for these names; a conflicting record is the usual reason
+  // a custom domain silently fails to attach.
+  //
+  // www is listed because without it the name does not resolve at all (measured: ENOTFOUND), which reads as
+  // a broken site to anyone who types it. It serves the same Worker; a zone-level Redirect Rule sends it to
+  // the apex before the Worker is reached, so the duplicate never actually gets served. See site/README.md.
+  //
+  // CAUTION: with `routes` present, wrangler treats this list as authoritative. Removing a hostname here
+  // detaches it on the next deploy — edit deliberately.
+  "routes": [
+    { "pattern": "appbuilder.sh", "custom_domain": true },
+    { "pattern": "www.appbuilder.sh", "custom_domain": true }
+  ]
 }

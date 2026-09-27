@@ -68,8 +68,24 @@ card in a fallback face.
 `og:image` must be an absolute URL per the OG spec, so it points at `https://appbuilder.sh/...` and will
 404 in link previews until the domain is live. That resolves itself when the zone is pointed.
 
-## Custom domain
+## Domain
 
-The `routes` block in `wrangler.jsonc` is commented out. Uncomment it only after the zone is active in this
-Cloudflare account (Add a site, then update the registrar's nameservers) — deploying a route for a zone
-Cloudflare does not manage fails the entire deploy.
+Live at **https://appbuilder.sh** (zone active 2026-09-27). Both the apex and `www` are declared as
+`custom_domain` routes in `wrangler.jsonc`, so Cloudflare owns their DNS records and certificates and the
+setup can be rebuilt from this repo alone. Never hand-create an A/CNAME for either name — a conflicting
+record is the usual reason a custom domain silently fails to attach.
+
+`cascade.<subdomain>.workers.dev` stays enabled as a staging URL. It is indexable, but every page sets
+`rel=canonical` to the apex, so it will not compete in search. Set `workers_dev: false` to retire it.
+
+### Two zone-level settings this repo cannot configure
+
+Both live in the Cloudflare dashboard, not in `wrangler.jsonc`:
+
+1. **SSL/TLS → Edge Certificates → Always Use HTTPS: On.** Measured 2026-09-27: `http://appbuilder.sh`
+   answered `200` with the page body instead of `301`-ing to HTTPS. Until this is on, the first request from
+   anyone who types the bare domain travels in cleartext.
+2. **Rules → Redirect Rules:** `www.appbuilder.sh/*` → `https://appbuilder.sh/$1`, status 301. Redirect
+   Rules run before the Worker, so www never reaches it and the apex stays the single served origin.
+   Without this both hostnames serve identical content; canonical keeps search engines straight, but a
+   redirect is the correct fix.
