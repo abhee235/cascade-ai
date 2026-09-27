@@ -56,7 +56,9 @@
 	--line-strong: rgba(255, 255, 255, 0.14);
 	--text: #f4f4f5;
 	--text-2: #a1a1aa;
-	--text-3: #62626b;
+	/* #62626b measured 3.36:1 on --bg, below the 4.5 AA floor, and it carries the hero's "No sign-up.
+	   No telemetry." line. #76767f is the first shade on the same ramp that clears it, at 4.50:1. */
+	--text-3: #76767f;
 	--accent: #2dd4bf;
 	--accent-2: #38bdf8;
 	--accent-soft: rgba(45, 212, 191, 0.12);
@@ -78,7 +80,15 @@
 	--section-gap: clamp(144px, 11.5vw, 360px);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-html { background: var(--bg); }
+html {
+	background: var(--bg);
+	/* overflow-x on <body> ALONE is inert here. The CSS overflow-propagation rule only lifts body's value
+	   up to the viewport while <html> is `visible`, and the smooth-scroll setup defeats that. Measured
+	   2026-09-28 at a 375px viewport: the page panned 131px sideways (scrollWidth 506 vs 375). `clip`
+	   rather than `hidden` on purpose — `hidden` on <html> makes it a scroll container, which silently
+	   breaks position: sticky/pinned ScrollTrigger inside. Verified after: scrollWidth 375, pan 0. */
+	overflow-x: clip;
+}
 html.lenis, html.lenis body { height: auto; }
 .lenis.lenis-smooth { scroll-behavior: auto !important; }
 body {
@@ -126,7 +136,54 @@ nav.scrolled {
 .nav-links a { font-size: 14px; color: var(--text-2); transition: color 0.2s; }
 .nav-links a:hover { color: var(--text); }
 .nav-cta { margin-left: auto; display: flex; align-items: center; gap: 10px; }
-@media (max-width: 760px) { .nav-links { display: none; } }
+/* A "coming soon" marker is not an action: no link, no pointer, no press animation. It keeps the button
+   geometry so the CTA row stays balanced, but reads as a label. */
+.is-soon { cursor: default; opacity: 0.72; }
+.is-soon:active { transform: none; }
+
+/* ── Mobile menu ────────────────────────────────────────────────────────────────────────────────
+   Below 760px .nav-links is hidden, and until now nothing replaced it — the section links simply
+   vanished on a page that is ~23 screens tall on a phone. <details> gives a disclosure that works
+   with zero JS (the script at the bottom only dismisses it after a jump), is keyboard operable and
+   announces its expanded state for free. */
+.nav-menu { display: none; position: relative; }
+.nav-menu > summary {
+	list-style: none; cursor: pointer;
+	display: flex; align-items: center; justify-content: center;
+	width: 44px; height: 44px; border-radius: 10px;
+	border: 1px solid var(--line-strong); background: rgba(255,255,255,0.04); color: var(--text);
+}
+.nav-menu > summary::-webkit-details-marker { display: none; }
+.nav-menu > summary:hover { background: rgba(255,255,255,0.09); }
+.nav-menu[open] > summary { background: rgba(255,255,255,0.09); border-color: rgba(255,255,255,0.24); }
+.nav-menu > summary svg { width: 18px; height: 18px; }
+.nav-menu-panel {
+	position: absolute; right: 0; top: calc(100% + 10px); min-width: 210px;
+	display: flex; flex-direction: column; gap: 2px; padding: 8px;
+	border: 1px solid var(--line-strong); border-radius: 14px;
+	background: rgba(14, 14, 17, 0.98);
+	backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+	box-shadow: 0 18px 44px -12px rgba(0, 0, 0, 0.72);
+}
+.nav-menu-panel a {
+	padding: 11px 12px; border-radius: 9px;
+	font-size: 15px; color: var(--text-2); transition: background 0.15s, color 0.15s;
+}
+.nav-menu-panel a:hover, .nav-menu-panel a:focus-visible { background: rgba(255,255,255,0.07); color: var(--text); }
+
+@media (max-width: 760px) {
+	.nav-links { display: none; }
+	.nav-menu { display: block; }
+	/* The GitHub button moves into the menu. Without this the nav row measured 352px of content inside a
+	   327px box, which is why the Download button sat flush against the right edge with a 0px gutter
+	   while the logo had 24px on the left. */
+	.nav-cta > .btn-ghost { display: none; }
+	.nav-inner { gap: 12px; }
+}
+
+/* "OPEN SOURCE" was breaking across two lines inside its own pill at 375px, which reads as broken. */
+.badge { flex-wrap: wrap; justify-content: center; }
+.badge .pill { white-space: nowrap; }
 
 /* ───────────────────────────── buttons ───────────────────────────── */
 .btn {
@@ -1122,11 +1179,20 @@ footer .wrap:last-of-type { padding-bottom: 60px; }
 			<a href="#opensource">Open source</a>
 		</div>
 		<div class="nav-cta">
-			<a class="btn btn-ghost" href="https://github.com/" target="_blank" rel="noopener">
+			<a class="btn btn-ghost" href="https://github.com/abhee235/cascade" target="_blank" rel="noopener">
 				<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
 				GitHub
 			</a>
 			<a class="btn btn-primary" href="#download">Download</a>
+			<details class="nav-menu">
+				<summary aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></summary>
+				<div class="nav-menu-panel">
+					<a href="#features">Features</a>
+					<a href="#how">How it works</a>
+					<a href="#opensource">Open source</a>
+					<a href="https://github.com/abhee235/cascade" target="_blank" rel="noopener">GitHub</a>
+				</div>
+			</details>
 		</div>
 	</div>
 </nav>
@@ -1154,10 +1220,10 @@ footer .wrap:last-of-type { padding-bottom: 60px; }
 		</p>
 		<div class="hero-ctas">
 			<a class="btn btn-primary btn-lg" href="#download">
-				<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.55 10.5 4.5v7H3v-5.95ZM3 18.45V12.5h7.5v7L3 18.45ZM11.5 4.36 21 3v8.5h-9.5v-7.14ZM21 12.5V21l-9.5-1.36V12.5H21Z"/></svg>
-				Download for Windows
+				<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+				Get Cascade
 			</a>
-			<a class="btn btn-ghost btn-lg" href="https://github.com/" target="_blank" rel="noopener">
+			<a class="btn btn-ghost btn-lg" href="https://github.com/abhee235/cascade" target="_blank" rel="noopener">
 				<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></svg>
 				Star on GitHub
 			</a>
@@ -1760,7 +1826,7 @@ footer .wrap:last-of-type { padding-bottom: 60px; }
 				<div class="art plats">
 					<div class="plat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3.5 9h17M3.5 15h17M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>Web builder</div>
 					<div class="plat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 6-6 6 6 6M16 6l6 6-6 6"/></svg>VS Code extension</div>
-					<div class="plat"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.55 10.5 4.5v7H3v-5.95ZM3 18.45V12.5h7.5v7L3 18.45ZM11.5 4.36 21 3v8.5h-9.5v-7.14ZM21 12.5V21l-9.5-1.36V12.5H21Z"/></svg>Windows app<span class="soon">Soon</span></div>
+					<div class="plat"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Windows app<span class="soon">Soon</span></div>
 				</div>
 			</div>
 		</div>
@@ -1851,14 +1917,14 @@ footer .wrap:last-of-type { padding-bottom: 60px; }
 	<h2 class="rv">Your machine is enough.</h2>
 	<p class="section-sub rv">Run the web builder today from source — the native Windows app is on its way. No sign-up, no keys.</p>
 	<div class="hero-ctas rv">
-		<a class="btn btn-primary btn-lg" href="https://github.com/" target="_blank" rel="noopener">
-			<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.55 10.5 4.5v7H3v-5.95ZM3 18.45V12.5h7.5v7L3 18.45ZM11.5 4.36 21 3v8.5h-9.5v-7.14ZM21 12.5V21l-9.5-1.36V12.5H21Z"/></svg>
-			Download for Windows — soon
-		</a>
-		<a class="btn btn-ghost btn-lg" href="https://github.com/" target="_blank" rel="noopener">
+		<a class="btn btn-primary btn-lg" href="https://github.com/abhee235/cascade" target="_blank" rel="noopener">
 			<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
 			Run from source
 		</a>
+		<span class="btn btn-ghost btn-lg is-soon" role="note">
+			<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+			Native Windows app — coming soon
+		</span>
 	</div>
 	<p class="hero-note rv">Works with Ollama + Docker Desktop &middot; Windows, macOS &amp; Linux from source</p>
 	</div>
@@ -1886,14 +1952,8 @@ footer .wrap:last-of-type { padding-bottom: 60px; }
 				</a>
 				<p class="foot-note">The local-first AI app builder. Open source, Ollama-native, sandboxed — your machine is enough.</p>
 				<div class="foot-social">
-					<a href="https://github.com/" target="_blank" rel="noopener" aria-label="GitHub">
+					<a href="https://github.com/abhee235/cascade" target="_blank" rel="noopener" aria-label="GitHub">
 						<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
-					</a>
-					<a href="https://github.com/" target="_blank" rel="noopener" aria-label="X">
-						<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.9 2H22l-7.1 8.1L23.2 22h-6.5l-5.1-6.7L5.8 22H2.7l7.6-8.7L1.2 2h6.7l4.6 6.1L18.9 2Zm-1.1 18h1.7L7.3 3.7H5.5L17.8 20Z"/></svg>
-					</a>
-					<a href="https://github.com/" target="_blank" rel="noopener" aria-label="Discord">
-						<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.3 4.5A19 19 0 0 0 15.6 3l-.2.5c1.6.4 2.9 1 4.2 1.8a15.9 15.9 0 0 0-11.2 0C9.7 4.5 11 3.9 12.6 3.5L12.4 3a19 19 0 0 0-4.7 1.5C4.4 9.3 3.5 14 4 18.6a19 19 0 0 0 5.7 2.9l1.2-1.9c-.6-.3-1.3-.6-1.9-1l.5-.4a13.6 13.6 0 0 0 11.2 0l.5.4c-.6.4-1.2.7-1.9 1l1.2 1.9a19 19 0 0 0 5.7-2.9c.6-5.4-.9-10-3.9-14.1ZM9.7 15.9c-1.1 0-2-1-2-2.3s.9-2.3 2-2.3 2 1 2 2.3-.9 2.3-2 2.3Zm4.6 0c-1.1 0-2-1-2-2.3s.9-2.3 2-2.3 2 1 2 2.3-.9 2.3-2 2.3Z"/></svg>
 					</a>
 				</div>
 			</div>
@@ -1905,9 +1965,9 @@ footer .wrap:last-of-type { padding-bottom: 60px; }
 				</div>
 				<div class="foot-col">
 					<b>Open source</b>
-					<a href="https://github.com/" target="_blank" rel="noopener">GitHub</a>
-					<a href="https://github.com/" target="_blank" rel="noopener">Roadmap</a>
-					<a href="https://github.com/" target="_blank" rel="noopener">Contributing</a>
+					<a href="https://github.com/abhee235/cascade" target="_blank" rel="noopener">GitHub</a>
+					<a href="https://github.com/abhee235/cascade/issues" target="_blank" rel="noopener">Roadmap</a>
+					<a href="https://github.com/abhee235/cascade" target="_blank" rel="noopener">Contributing</a>
 				</div>
 				<div class="foot-col">
 					<b>Ecosystem</b>
@@ -1919,8 +1979,8 @@ footer .wrap:last-of-type { padding-bottom: 60px; }
 		<div class="foot-base">
 			<span>© 2026 Cascade. Apache-2.0 licensed.</span>
 			<span class="fb-links">
-				<a href="https://github.com/" target="_blank" rel="noopener">License</a>
-				<a href="https://github.com/" target="_blank" rel="noopener">Changelog</a>
+				<a href="https://github.com/abhee235/cascade" target="_blank" rel="noopener">License</a>
+				<a href="https://github.com/abhee235/cascade/releases" target="_blank" rel="noopener">Changelog</a>
 				<span>Not affiliated with Ollama.</span>
 			</span>
 		</div>
@@ -2172,6 +2232,14 @@ function initCinematic() {
 
 if (hasGsap && wide && !reduced) initCinematic()
 else initFallback()
+
+/* <details> has no built-in dismiss: without this the menu stays open behind the page after a jump. */
+const navMenu = document.querySelector('.nav-menu')
+if (navMenu) {
+	navMenu.querySelectorAll('a').forEach((a) => a.addEventListener('click', () => { navMenu.open = false }))
+	document.addEventListener('click', (e) => { if (navMenu.open && !navMenu.contains(e.target)) navMenu.open = false })
+	document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && navMenu.open) { navMenu.open = false; navMenu.querySelector('summary').focus() } })
+}
 </script>
 </body>
 </html>
