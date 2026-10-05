@@ -1,0 +1,133 @@
+/* THEME SEED: cascade-shop — the ADR-085 P0 oracle's "B" theme for builder-shop.
+
+   SOURCE: arm 3 of the 2026-09-27 design experiment (hosted model + ui-ux-pro-max, free design), file
+   src/themes/cascade-shop.css, finished by hand to the template's contract v2. Its identity is kept as is:
+   mint paper, deep-green ink, one loud orange CTA, Rubik display over Nunito Sans, 12 px radius, tight rhythm.
+
+   TRANSLATED to the template's role semantics (the frozen kit and blocks render these roles):
+   - Arm 3 used --accent as its CTA (55 bg-accent CTAs). In the template --primary IS the CTA (default Button,
+     CTA band, checked states) and --accent is the hover/selection wash (≈60 hover/focus uses in ui/). So the
+     CTA orange moves to --primary, and --accent takes arm 3's own neutral wash (it mapped
+     --sidebar-accent to --muted itself).
+   - Arm 3's brand green stays where the template shows a brand hue: --secondary, --ring, --chart-1.
+   - --primary is TEXT in the template too (Section eyebrows, links: text-primary), so it must read at 4.5:1
+     as text AND carry its button label. Arm 3's #ea580c is 3.4:1 as text on mint, so the CTA takes the next
+     orange that does both: #c2410c with WHITE text (5.2:1) — the white label arm 3's own brief specified.
+     Dark mode: #fb923c with black text.
+   - Removed (no contract role yet): --well (→ --muted), --ink / --on-ink / --on-ink-muted (the dark block
+     bands wait for P1's inverse surface), --font-display-family (P1's --font-display).
+   - .dark is NEW (arm 3 shipped none): the same identity on deep emerald, contrast-checked.
+   Every other value is arm 3's, unchanged. Fonts: OFL 1.1, bundled (see ../assets/fonts/LICENSE-*.txt). */
+
+@font-face {
+	font-family: 'Nunito Sans Variable';
+	font-style: normal;
+	font-weight: 200 1000;
+	font-display: swap;
+	src: url('../assets/fonts/nunito-sans-var-latin.woff2') format('woff2-variations');
+}
+
+@font-face {
+	font-family: 'Rubik Variable';
+	font-style: normal;
+	font-weight: 300 900;
+	font-display: swap;
+	src: url('../assets/fonts/rubik-var-latin.woff2') format('woff2-variations');
+}
+
+:root {
+	--preset: 'cascade-shop';
+	--radius: 0.75rem;
+
+	--section-y: 3rem;
+	--section-y-lg: 4.5rem;
+	--hero-y: 4rem;
+	--nav-h: 4.5rem;
+
+	--background: #ecfdf5;
+	--foreground: #064e3b;
+	--card: #ffffff;
+	--card-foreground: #064e3b;
+	--popover: #ffffff;
+	--popover-foreground: #064e3b;
+
+	/* THE CTA — arm 3's urgency orange, one step deeper so it reads as text too (5.1:1 on mint), white label. */
+	--primary: #c2410c;
+	--primary-foreground: #ffffff;
+	--secondary: #10b981;
+	--secondary-foreground: #0f172a;
+	--muted: #e8f1f3;
+	--muted-foreground: #475569;
+
+	/* The wash for hovers, selection and quiet chips — arm 3's own neutral, never the CTA. */
+	--accent: #e8f1f3;
+	--accent-foreground: #064e3b;
+
+	--destructive: #dc2626;
+	--destructive-foreground: #ffffff;
+
+	--border: #a7f3d0;
+	--input: #6b8f82;
+	--ring: #059669;
+
+	--chart-1: #059669;
+	--chart-2: #ea580c;
+	--chart-3: #10b981;
+	--chart-4: #064e3b;
+	--chart-5: #475569;
+
+	--sidebar: var(--card);
+	--sidebar-foreground: var(--card-foreground);
+	--sidebar-primary: var(--primary);
+	--sidebar-primary-foreground: var(--primary-foreground);
+	--sidebar-accent: var(--muted);
+	--sidebar-accent-foreground: var(--foreground);
+	--sidebar-border: var(--border);
+	--sidebar-ring: var(--ring);
+
+	--font-sans: 'Nunito Sans Variable', ui-sans-serif, system-ui, sans-serif;
+	--font-serif: 'Rubik Variable', ui-sans-serif, system-ui, sans-serif;
+	--font-mono: 'Geist Mono Variable', ui-monospace, Consolas, monospace;
+
+	--shadow-color: #064e3b;
+	--shadow-opacity: 0.08;
+
+	--tracking-display: -0.025em;
+	--leading-display: 1.05;
+}
+
+.dark {
+	/* Deep emerald paper, mint ink; the CTA brightens to an orange that reads as text on every dark surface. */
+	--background: #022c22;
+	--foreground: #ecfdf5;
+	--card: #053b2f;
+	--card-foreground: #ecfdf5;
+	--popover: #053b2f;
+	--popover-foreground: #ecfdf5;
+
+	--primary: #fb923c;
+	--primary-foreground: #000000;
+	--secondary: #34d399;
+	--secondary-foreground: #022c22;
+	--muted: #0a4336;
+	--muted-foreground: #a7c4b9;
+
+	--accent: #0a4336;
+	--accent-foreground: #ecfdf5;
+
+	--destructive: #f87171;
+	--destructive-foreground: #000000;
+
+	--border: #135c48;
+	--input: #4f8d7a;
+	--ring: #34d399;
+
+	--chart-1: #34d399;
+	--chart-2: #f97316;
+	--chart-3: #6ee7b7;
+	--chart-4: #a7f3d0;
+	--chart-5: #94a3b8;
+
+	--shadow-color: #000000;
+	--shadow-opacity: 0.35;
+}

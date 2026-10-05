@@ -1,0 +1,10 @@
+{
+	"id": "ferrite",
+	"scenario": "builder-landing",
+	"about": "ADR-085 P0 oracle seed: arm 3's landing theme (hosted model + ui-ux-pro-max, 2026-09-27) finished to the template contract. B = theme + fonts; C = B + DESIGN.md.",
+	"source": "ADR-083 A/B arm 3, landing workdir src/themes/ferrite.css (a local review folder, not in the repo)",
+	"theme": "theme.css",
+	"fonts": ["fonts/ibm-plex-sans-var-latin.woff2", "fonts/jetbrains-mono-var-latin.woff2", "fonts/LICENSE-ibm-plex-sans.txt", "fonts/LICENSE-jetbrains-mono.txt"],
+	"fontSource": "@fontsource-variable/ibm-plex-sans@5.3.0 and @fontsource-variable/jetbrains-mono@5.3.0 (npm via jsDelivr), latin wght subset, OFL-1.1",
+	"brief": "DESIGN.md"
+}
