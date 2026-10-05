@@ -20,10 +20,12 @@ describe('Bash — a detached child must not hang the turn', () => {
 		'returns promptly when the command spawns a process that OUTLIVES the shell and holds the pipes',
 		async () => {
 			// A grandchild that keeps stdout open for 60s while the shell itself exits immediately — the
-			// portable shape of `start /b …` / `nohup … &`.
+			// portable shape of `start /b …` / `nohup … &`. No `=>` on Windows: cmd.exe has no `\"` escape,
+			// so a nested quote leaves the arrow's `>` unquoted — a redirect that writes a file named `{}`
+			// and leaves node a broken script, so no grandchild ever outlives the shell.
 			const cmd =
 				process.platform === 'win32'
-					? 'start /b cmd /c "node -e \\"setTimeout(()=>{},60000)\\""'
+					? 'start /b node -e "setTimeout(function(){},60000)"'
 					: 'node -e "setTimeout(()=>{},60000)" & disown 2>/dev/null || node -e "setTimeout(()=>{},60000)" &'
 			const t0 = Date.now()
 			const r = await run(cmd, 5000)
