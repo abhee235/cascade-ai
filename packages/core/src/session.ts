@@ -503,8 +503,15 @@ export function createSession(opts: SessionOptions): CascadeSession {
       // the REPLACEMENT session, and the live-turn re-attach streamed the unkillable orphan back after every
       // refresh. A disposed session must have nothing running.
       inFlight?.abort()
-      await curate([...messages]) // session-end curation (awaitable) before teardown
-      await hub?.dispose() // close MCP subprocesses — no zombies (Phase 9 pitfall)
+      try {
+        await curate([...messages]) // session-end curation (awaitable) before teardown
+      } finally {
+        // Teardown runs even when curation throws (its archival search/write are unguarded). The tools the caller
+        // handed this session are this session's to release (Tool.dispose); allSettled — one failing must not
+        // keep the others open — and first, so a failing hub dispose cannot skip them.
+        await Promise.allSettled((opts.extraTools ?? []).map(async (t) => t.dispose?.()))
+        await hub?.dispose() // close MCP subprocesses — no zombies (Phase 9 pitfall)
+      }
     },
 
     mcpStatuses: () => hub?.statuses() ?? [],

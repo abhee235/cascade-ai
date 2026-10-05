@@ -187,11 +187,13 @@ export interface BrowserToolDeps {
 	launch?: () => Promise<{ page: PageLike; close: () => Promise<void> }>
 }
 
-/** Build the per-session Browser tool. One lazy page per session, closed via [Symbol.asyncDispose]-less
- *  best-effort (the process-level browser closes with the server; sessions are long-lived anyway). */
+/** Build the per-session Browser tool. One lazy page per session, closed when the session is disposed
+ *  (core Tool.dispose). It used to stay open "because sessions are long-lived": every model switch and
+ *  project close left one headless Edge behind, and the bench process never exited (ADR-086 P0). */
 export function createBrowserTool(deps: BrowserToolDeps): Tool {
 	let session: { page: PageLike; close: () => Promise<void> } | undefined
 	let opened = false
+	let disposed = false
 	let screenshots = 0
 	const vision = deps.vision !== false
 
@@ -206,6 +208,7 @@ export function createBrowserTool(deps: BrowserToolDeps): Tool {
 		isConcurrencySafe: () => false, // one page, sequential ops
 
 		async call(input) {
+			if (disposed) return { content: 'This session has ended; its browser is closed.', isError: true }
 			try {
 				const port = await deps.sandbox.getHostPort()
 				const origin = `http://localhost:${port}`
@@ -223,6 +226,13 @@ export function createBrowserTool(deps: BrowserToolDeps): Tool {
 						}
 					}
 					session ??= await (deps.launch ?? launchPage)()
+					if (disposed) {
+						// The session ended while the browser launched (a model switch disposes mid-turn): dispose()
+						// found nothing to close, so this call closes what it just opened.
+						await session.close().catch(() => {})
+						session = undefined
+						return { content: 'This session has ended; its browser is closed.', isError: true }
+					}
 					await session.page.goto(origin + (input.path ?? '/'), { waitUntil: 'domcontentloaded', timeout: 15_000 })
 					await new Promise((r) => setTimeout(r, 800)) // let the app paint
 					opened = true
@@ -317,12 +327,22 @@ ${cut}` }
 				screenshots++
 				const buf = await session.page.screenshot({ type: 'jpeg', quality: 70 })
 				return {
-					content: `Screenshot of ${session.page.url()} attached (${Math.round(buf.length / 1024)}KB, ${screenshots}/${MAX_SCREENSHOTS}). LOOK at it: does the page match the design checklist (blocks composed, token colors, real imagery, one primary CTA)? Name problems concretely and fix them.`,
+					content: `Screenshot of ${session.page.url()} attached (${Math.round(buf.length / 1024)}KB, ${screenshots}/${MAX_SCREENSHOTS}). LOOK at it: does the page match the design checklist (designed bands in an even rhythm, the name set as a wordmark, token colors, real imagery, one primary CTA)? Name problems concretely and fix them.`,
 					images: [`data:image/jpeg;base64,${buf.toString('base64')}`],
 				}
 			} catch (e) {
 				return { content: `Browser ${input.op} failed: ${e instanceof Error ? e.message : String(e)}`, isError: true }
 			}
+		},
+
+		// Called by session.dispose(). Idempotent. The dev server is not ours to stop: it is the project's
+		// preview, owned by the runtime (ProjectManager disposes it with the project; the bench after each run).
+		async dispose() {
+			disposed = true
+			opened = false
+			const s = session
+			session = undefined
+			await s?.close().catch(() => {})
 		},
 	}
 	return tool as Tool
