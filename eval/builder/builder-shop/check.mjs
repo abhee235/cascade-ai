@@ -10,12 +10,13 @@
 import { spawnSync } from 'node:child_process'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { runDesignLint } from '../_lib/designLint.mjs'
+import { presetFromPlan, runDesignLint } from '../_lib/designLint.mjs'
 import { noResidue } from '../_lib/residue.mjs'
+import { productBuild } from '../_lib/productBuild.mjs'
 
-const build = spawnSync(process.execPath, [join('node_modules', 'vite', 'bin', 'vite.js'), 'build'], { encoding: 'utf8', timeout: 180_000 })
+const build = productBuild(180_000)
 if (build.status !== 0) {
-	console.error('vite build FAILED:\n' + (build.stderr || build.stdout).slice(-1500))
+	console.error("npm run build FAILED (the product's own check: typecheck + bundle):\n" + (build.stdout + build.stderr).slice(-1500))
 	process.exit(1)
 }
 const bundle = readdirSync(join('dist', 'assets'))
@@ -45,7 +46,9 @@ if (literalPrices < 4 && priceFields < 6) {
 	process.exit(1)
 }
 // Design-system v2: objective design assertions (tokens-only colors, block assembly, real imagery).
-if (runDesignLint(bundle, { blocks: ['navbar', 'media-card', 'empty-state'], preset: 'premium', quality: process.env.EVAL_BAR === 'quality' }) > 0) process.exit(1)
+// ADR-085 P0 re-baseline (EVAL-BASELINE.md): the preset PLAN.md records, not a hard-coded `premium`, and
+// either card block — the brief names no look, so the plan's choice (or a seeded theme) is the contract.
+if (runDesignLint(bundle, { blocks: ['navbar', 'product-card|media-card', 'empty-state'], preset: presetFromPlan(), quality: process.env.EVAL_BAR === 'quality' }) > 0) process.exit(1)
 // Design-overhaul P1: no template residue (demo branding, unreplaced placeholders, unwired entry).
 if (noResidue(process.cwd()) > 0) process.exit(1)
 console.log('builder-shop check passed')

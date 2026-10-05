@@ -7,6 +7,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isBlankStart } from './designLint.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const CONTRACT_PATH = resolve(HERE, '..', '..', '..', 'packages', 'server', 'templates', 'react', 'residue.json')
@@ -30,6 +31,7 @@ function* walk(dir) {
 
 /** Assert the project at `projectDir` carries no HARD residue. Prints one line per hit; returns hit count. */
 export function noResidue(projectDir) {
+	if (isBlankStart(projectDir)) return 0 // ADR-086: a blank project never had template residue to remove
 	const contract = JSON.parse(readFileSync(CONTRACT_PATH, 'utf8'))
 	let failures = 0
 	const fail = (msg) => {

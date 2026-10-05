@@ -2,7 +2,7 @@
 // v2). Shared by scenario checks (this dir has no scenario.json, so the runner never treats it as a
 // scenario). Same character as the existing checks: exact-substring/regex facts about dist output —
 // no taste judgments, so the measurement can't be overfitted to a screenshot.
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 /** All built JS, joined (the existing idiom — Tailwind class names and data-attrs survive minification). */
@@ -29,9 +29,12 @@ export function noRawColors(bundle) {
 	return null
 }
 
-/** Pages must be assembled from blocks — each block stamps data-block="<name>" on its root. */
+/** Pages must be assembled from blocks — each block stamps data-block="<name>" on its root. A name may list
+ *  alternatives, `product-card|media-card`: either block satisfies it (ADR-085 P0 re-baseline — P4a adds
+ *  ProductCard, and a shop that composes it instead of MediaCard is correct work). */
 export function usesBlocks(bundle, names) {
-	const missing = names.filter((n) => !bundle.includes(`data-block="${n}"`) && !bundle.includes(`"data-block":"${n}"`))
+	const has = (n) => bundle.includes(`data-block="${n}"`) || bundle.includes(`"data-block":"${n}"`)
+	const missing = names.filter((n) => !n.split('|').some(has))
 	if (missing.length > 0) return `page not assembled from blocks — missing: ${missing.join(', ')} (import from @/components/blocks)`
 	return null
 }
@@ -58,6 +61,16 @@ export function noEmojiAsImage(bundle) {
 export function tokenBaseline(bundle) {
 	if (!bundle.includes('bg-background') || !bundle.includes('text-muted-foreground')) return 'token utilities absent from bundle — is this the right build?'
 	return null
+}
+
+/** The preset the PLAN chose — what a scenario asserts when its brief names no look (ADR-085 P0 re-baseline,
+ *  recorded in EVAL-BASELINE.md). The plan is the contract: a fixture that hard-codes `premium` fails correct
+ *  work from a subject preset (P3) or a seeded theme (the P0 oracle). No PLAN.md, or one naming no preset,
+ *  asserts only that SOME preset is active ('*'). Planners write `preset: x`, `preset: \`x\``, `**preset:** x`. */
+export function presetFromPlan(file = 'PLAN.md') {
+	if (!existsSync(file)) return '*'
+	const m = readFileSync(file, 'utf8').match(/\bpreset:[\s`'"*]*([\w-]+)/)
+	return m ? m[1] : '*'
 }
 
 /** The ACTIVE PRESET, asserted from built CSS: every preset declares `--preset:'<name>'` (contract v2).
@@ -112,10 +125,26 @@ export function photoDistinct(files = readSrc()) {
 // the bar instead of meeting it. So it stays PROSE (design skill §4) + screenshot review — the repo's
 // standing rule that an unassertable rule never becomes a lint.
 
+/** ADR-086: was the project created BLANK (the "None" start, stamped in `.cascade/template.json`)? A blank
+ *  project has no blocks, presets, token names or template residue to assert — its checks are the functional
+ *  ones plus the one imagery rule that holds everywhere. React projects (stamped or not) answer false. */
+export function isBlankStart(dir = '.') {
+	try {
+		return JSON.parse(readFileSync(join(dir, '.cascade', 'template.json'), 'utf8')).template === 'none'
+	} catch {
+		return false
+	}
+}
+
 /** Run a set of lint fns; print each failure; return count.
  *  `preset` asserts the active theme; `quality: true` adds the source-side judgment checks (the 35B bar —
  *  the 9B integrity floor runs without them; see the eval bar split). */
 export function runDesignLint(bundle, { blocks = [], preset, quality = false, imagery = true } = {}) {
+	if (isBlankStart()) {
+		const f = noEmojiAsImage(bundle) // the house kit is absent by design; only the universal rule applies
+		if (f) console.error(`design-lint: ${f}`)
+		return f ? 1 : 0
+	}
 	const failures = [
 		tokenBaseline(bundle),
 		noRawColors(bundle),

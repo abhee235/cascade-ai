@@ -456,3 +456,28 @@ The "8× dead-air prize" hypothesis is DEAD, killed by measurement:
   stays 131072 (the compaction-free window is free at the margin).
 Turn latency on this box is the honest 36B-on-this-GPU envelope: ~35 tok/s generation, cache-assisted
 prefill. Remaining levers are model/quant/hardware choices, not harness work.
+
+## Re-baseline — ADR-085 P0: bench parity and the shop fixture (2026-09-27, declared, no run)
+
+Builder numbers from before this date are not comparable with numbers after it, for two reasons. Neither is a
+measured rung; both are recorded here so no comparison across them happens silently.
+
+1. **Bench parity** (`builderSession.ts`, ADR-085 P0 task 1). The bench builds the builder session with the
+   product's own function, so the template arms now get what the product always had: Browser (vision from
+   `hasVision()`), ImageSearch, the template's AI_RULES.md, the excluded tools (AskUserQuestion, Lsp), the
+   `'auto'` output cap and a sandboxed planner. The only allowed differences: `autoMemory: false` and the
+   scenario's `maxTurns` (pinned by `packages/server/test/builderSession.test.ts`).
+2. **The shop fixture** (`builder-shop` and `builder-shop-iterate` check.mjs). `preset: 'premium'` became
+   `presetFromPlan()` — the preset PLAN.md records, or `'*'` (any preset) when there is no plan or it names
+   none — and the `media-card` block became `product-card|media-card`. A hard-coded premium failed correct
+   work from a subject preset (P3) or a seeded theme (the P0 oracle); P4a adds ProductCard. Effect: the check
+   now measures plan fidelity — a run whose PLAN names a preset the build does not apply FAILS where it used
+   to pass. `--verify`: both scenarios sound (seed fails, solution passes). builder-landing already asserted
+   `'*'` and is unchanged.
+
+Note for every Qwen MoE comparison: the bench's default `--temperature 0` is greedy decoding, which Qwen's
+card forbids for these MoEs. Measured 2026-08-20: greedy plus a Modelfile presence_penalty of 1.5 made a
+Qwen 3.6 MoE announce its next step and stop, with zero-write rounds, while the 9B passed the same fixtures.
+`qwen36-agentic:latest` pins temperature 0.6 / presence_penalty 0.5, but a request's temperature overrides
+the Modelfile, so the 09-27 design arm 6 ran greedy. From ADR-085's oracle on, Qwen runs pass the model's own
+tune: `--temperature 0.6 --ollama-options '{"presence_penalty":0.5}'`.
