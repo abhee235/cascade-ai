@@ -51,12 +51,12 @@ function Logo({ src, alt, className }: { src?: string; alt: string; className?: 
 function StatusChip({ status, disabled }: { status?: McpServerInfo['status']; disabled?: boolean }) {
   if (disabled) return <span className="inline-flex items-center gap-1 text-sm text-muted-foreground/50"><Power className="h-3 w-3" /> off</span>
   const m = {
-    ready: { icon: Check, cls: 'text-emerald-500', label: 'connected' },
+    ready: { icon: Check, cls: 'text-success', label: 'connected' },
     connecting: { icon: Loader2, cls: 'text-blue-500 animate-spin', label: 'connecting' },
-    failed: { icon: AlertTriangle, cls: 'text-red-500', label: 'error' },
+    failed: { icon: AlertTriangle, cls: 'text-danger', label: 'error' },
   } as const
   const v = m[status as keyof typeof m]
-  if (!v) return <span className="inline-flex items-center gap-1 text-sm text-emerald-500"><Check className="h-3 w-3" /> added</span>
+  if (!v) return <span className="inline-flex items-center gap-1 text-sm text-success"><Check className="h-3 w-3" /> added</span>
   return <span className={cn('inline-flex items-center gap-1 text-sm', v.cls)}><v.icon className="h-3 w-3" /> {v.label}</span>
 }
 
@@ -130,7 +130,7 @@ export function McpPage() {
           <>
             <div className="relative mt-4">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input placeholder="Search connectors…" value={query} onChange={(e) => setQuery(e.target.value)} className="pl-9" />
+              <Input aria-label="Search connectors" placeholder="Search connectors…" value={query} onChange={(e) => setQuery(e.target.value)} className="pl-9" />
             </div>
 
             <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -171,8 +171,8 @@ export function McpPage() {
                           </div>
                           <div className="truncate font-mono text-sm text-muted-foreground">{s.url}{s.hasKey ? '  · key set' : ''}</div>
                         </div>
-                        <Button variant="ghost" size="icon-sm" title={s.disabled ? 'Enable' : 'Disable'} onClick={() => toggleMcpServer(s.name, !s.disabled)}><Power className={cn('h-4 w-4', !s.disabled && 'text-emerald-500')} /></Button>
-                        <Button variant="ghost" size="icon-sm" title="Remove" onClick={() => removeMcpServer(s.name)}><Trash2 className="h-4 w-4 text-muted-foreground hover:text-red-500" /></Button>
+                        <Button variant="ghost" size="icon-sm" title={s.disabled ? 'Enable' : 'Disable'} onClick={() => toggleMcpServer(s.name, !s.disabled)}><Power className={cn('h-4 w-4', !s.disabled && 'text-success')} /></Button>
+                        <Button variant="ghost" size="icon-sm" title="Remove" onClick={() => removeMcpServer(s.name)}><Trash2 className="h-4 w-4 text-muted-foreground hover:text-danger" /></Button>
                       </div>
                     ))}
                 </div>
@@ -209,7 +209,7 @@ export function McpPage() {
               </DialogHeader>
 
               <p className="text-sm text-muted-foreground">{editing.description}</p>
-              {exists && live?.status === 'failed' && live.error && <p className="rounded bg-red-500/10 px-2 py-1 text-sm text-red-500">{live.error}</p>}
+              {exists && live?.status === 'failed' && live.error && <p className="rounded bg-red-500/10 px-2 py-1 text-sm text-danger">{live.error}</p>}
               {exists && live?.status === 'ready' && <p className="text-sm text-muted-foreground">{live.toolCount ?? 0} tools available.</p>}
 
               <div className="space-y-3">
@@ -234,7 +234,7 @@ export function McpPage() {
                 {exists && (
                   <div className="mr-auto flex gap-2">
                     <Button variant="secondary" size="sm" onClick={() => toggleMcpServer(editing.name, !live?.disabled)}>{live?.disabled ? 'Enable' : 'Disable'}</Button>
-                    <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-500" onClick={() => { removeMcpServer(editing.name); setEditing(null) }}>Disconnect</Button>
+                    <Button variant="ghost" size="sm" className="text-danger hover:text-danger" onClick={() => { removeMcpServer(editing.name); setEditing(null) }}>Disconnect</Button>
                   </div>
                 )}
                 <Button onClick={save} disabled={needsKeyFirst} className="gap-1.5">

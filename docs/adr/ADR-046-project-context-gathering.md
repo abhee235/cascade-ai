@@ -5,10 +5,10 @@
 ## Context
 
 A strong model discovers a project's shape on its own; a **weak** one burns turns on `ls`/Glob and — worse —
-**hallucinates paths** it never verified, one of the top weak-model failure modes. Mature coding agents close this by
-prepending a memoized system context to each conversation: a **git status** snapshot (branch, `status
---short` truncated at 2 k, `log --oneline -n5`, explicitly labelled "won't update") plus the project's
-instruction file.
+**hallucinates paths** it never verified, one of the top weak-model failure modes. Mature coding agents close
+this by prepending a memoized system context to each conversation: a **git status** snapshot (branch, `status
+--short` truncated at 2 k, `log --oneline -n5`, explicitly labelled as a snapshot that won't update) plus the
+project's own **instruction file**.
 
 Cascade already injects its own instruction file (`CASCADE.md`) via `loadMemory` (ADR-015). The genuinely
 missing pieces were the **directory tree** and the **git status** — and cross-tool recognition of **other

@@ -16,7 +16,7 @@ Checked **before each model call** in the loop:
 2. **Phase A — observation masking** (cheap, no LLM): replace large `tool_result`s in the OLDER region with
    `[output masked — N chars]`. Often enough on its own (matches summarization on SWE-bench at ~half cost).
 3. **Phase B — partial summarize** (only if still over): split `[older | recent]` at the keepRecent boundary;
-   summarize `older` with the **9-section** structured prompt (TEXT-ONLY); emit `[summaryMessage, ...recent]`.
+   summarize `older` with the structured summary prompt (TEXT-ONLY); emit `[summaryMessage, ...recent]`.
    The loop continues from the summary; the raw history is swapped **in place** (`messages.splice`), so the
    JSONL trace + transcript are untouched — you literally watch the next `model_request` shrink.
 4. **Coupled curation** (`onDiscard`): before `older` is summarized away, harvest durable facts from it into

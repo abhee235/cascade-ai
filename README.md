@@ -94,9 +94,10 @@ npm test        # vitest (FakeLLM; no Ollama/Docker needed). Docker/live tests a
 
 ## Deliberate design choices
 
-- **Activity-first UI** — show a live "what it's doing" timeline while working; render the final answer whole
-  (no token-by-token prose). *(ADR-013)*
-- **Lazy MCP** — connect MCP servers on first use, not at startup. *(ADR-014)*
+- **Streamed output + activity view** — prose and thinking stream token by token, alongside a live "what it's
+  doing" timeline of tool calls. *(ADR-013)*
+- **Background MCP** — MCP servers connect in the background at startup and never block it; a server that
+  failed is retried on first use. *(ADR-014)*
 
 ---
 

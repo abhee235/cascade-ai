@@ -13,7 +13,7 @@ never in the loop.
 3. **Plain-text deltas only** (base/small models): no tool_calls, no JSON mode. **Prompt-based ReAct** —
    describe tools in the system prompt, instruct a parseable marker (e.g. `<tool_call>{…}</tool_call>`),
    parse the text yourself, run, feed back, loop. Least reliable (mis-format/hallucinate) → needs
-   forgiving parsing + retries + firm maxTurns. This predates native function calling (early LangChain).
+   forgiving parsing + retries + firm maxTurns. This predates native function calling (early agent frameworks).
 
 ## Why our architecture absorbs all three
 The loop only consumes **`tool_use` StreamEvents** — it doesn't know if they came from native

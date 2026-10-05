@@ -48,7 +48,7 @@ is a failed pass — every line must name something you actually saw on a specif
   each match its label (a "Ratatouille" card must not show a noodle bowl)? Repeats usually mean the grid was
   mapped through `photoFor` (only ~2 photos/category) — the fix is `<Photo web="<subject>" seed={item.id}>`
   per item. Flag it as an imagery line with that fix.
-- **Composed from blocks** — real NavBar/Hero/Section/MediaCard, not unstyled text or hand-rolled boxes.
+- **Designed bands** — real NavBar/Hero/Section/MediaCard from the patterns, the name set as a wordmark, an even rhythm between bands — not unstyled text or hand-rolled boxes.
 - **Token colors only** — no raw white/black boxes, no default-blue links, no off-theme hex.
 - **Consistency across siblings** — badges/cards share one style, height, radius, shadow (drift is the tell).
 - **One primary CTA per screen; designed EmptyState** where a list can be empty (not blank space).

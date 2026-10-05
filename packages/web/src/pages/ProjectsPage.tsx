@@ -22,7 +22,7 @@ export function ProjectsPage() {
         <div className="mt-5 flex items-center gap-3">
           <div className="relative max-w-md flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search projects…" className="pl-9" />
+            <Input aria-label="Search projects" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search projects…" className="pl-9" />
           </div>
           <Button className="ml-auto gap-1.5" onClick={() => navigate('home')}>
             <Plus className="h-4 w-4" /> New project
@@ -53,6 +53,9 @@ export function ProjectsPage() {
                     </div>
                     <DropdownMenu>
                       <DropdownMenuTrigger
+                        // ADR-084 Phase 2: an icon-only trigger repeated per card — 56 unnamed controls on
+                        // this page alone. Name it per project so the list is navigable by screen reader.
+                        aria-label={`Actions for ${p.name}`}
                         onClick={(e) => e.stopPropagation()}
                         className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 data-[state=open]:bg-accent data-[state=open]:opacity-100"
                       >

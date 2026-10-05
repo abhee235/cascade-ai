@@ -10,11 +10,13 @@ whenToUse: ALWAYS load before the FIRST file write of any session, and again bef
 ```
 src/
   App.tsx               ← composition root ONLY: view switching + top-level state. Keep under 100 lines.
-  components/ui/        ← the shadcn/ui kit (READ-ONLY — never edit or recreate these)
-  components/blocks/    ← the page-section blocks: NavBar, Hero, MediaCard… (READ-ONLY — compose via props)
+  components/ui/        ← the shadcn/ui kit — edit a component in place when the app needs it (same API); never recreate one
+  components/blocks/    ← the page-section PATTERNS: NavBar, Hero, Section, MediaCard, Logo… — use one as it is,
+                          edit it in place, or adapt a copy (keep its data-block stamp and tokens)
   components/           ← YOUR view-level components, one per file: CatalogView.tsx, CartView.tsx, CheckoutForm.tsx…
-                          NEVER re-implement a block here: page header → <NavBar>, product/listing card →
-                          <MediaCard>, empty message → <EmptyState> (import from @/components/blocks)
+                          Start from the block for each job — site header → <NavBar>, brand → <Logo>, product/
+                          listing card → <MediaCard>, empty message → <EmptyState> — and adapt it; never write a
+                          look-alike from scratch
   lib/                  ← pure logic: types.ts, data.ts (seed data), photos.ts (bundled imagery),
                           storage.ts (the PERSISTENCE SEAM — ALL collection data goes through
                           createStore; never touch localStorage for a collection directly in a view)
@@ -68,7 +70,7 @@ names from the generated blocks/photos reference, never from memory.
 Feature progress:
 - [ ] 1. Skills read (this one + the matching recipe for the feature)
 - [ ] 2. Types + seed data updated (lib/types.ts, lib/data.ts)
-- [ ] 3. Components built/extended (small files, composed FROM blocks + kit — no hand-rolled cards/headers/empty states)
+- [ ] 3. Components built/extended (small files, started FROM the block patterns + kit, adapted — no look-alikes from scratch)
 - [ ] 4. Wired into App's view switch
 - [ ] 5. `npm run build` passes
 ```

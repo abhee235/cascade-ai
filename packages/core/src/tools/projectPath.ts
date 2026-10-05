@@ -45,7 +45,7 @@ function isInside(root: string, abs: string): boolean {
  *  - anything still outside the project         → throws ProjectPathError (the host is never touched)
  *  `sandboxRoot` is the path the project is mounted at inside the sandbox (e.g. '/workspace'); pass
  *  `ctx.sandbox?.root`. */
-/** How a frontend confines file paths (ADR-033 + the 2026-07-28 parity change):
+/** How a frontend confines file paths (ADR-033 + the 2026-07-28 path-policy change):
  *  - 'jail'   (DEFAULT): a path outside the project is REFUSED by the tool. Required by the sandboxed web
  *    builder — its project dir is model-writable and it runs `bypass`, so the gate would never object.
  *  - 'prompt' (the VS Code extension): outside paths RESOLVE, and the permission gate

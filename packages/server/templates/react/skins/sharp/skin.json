@@ -1,5 +1,5 @@
 {
-	"$comment": "SKIN PACK (design-overhaul P5): alternate IMPLEMENTATIONS of the same block interfaces \u2014 structure changes, props never do (skins/parity.check.ts enforces it at the type level). Applied only via the Restyle tool; this directory is never copied into projects (templateCopyFilter) and never edited by the model (frozen paths). 'blocks' lists exactly the files this skin ships; unlisted blocks stay base.",
+	"$comment": "SKIN PACK (design-overhaul P5): alternate IMPLEMENTATIONS of the same block interfaces \u2014 structure changes, props never do (skins/parity.check.ts enforces it at the type level). Applied only via the Restyle tool, and only to blocks a project has not edited (ADR-086 P1); this directory is never copied into projects (templateCopyFilter), so the model never sees or edits it. 'blocks' lists exactly the files this skin ships; unlisted blocks stay base.",
 	"id": "sharp",
 	"description": "Flat, dense, editorial-industrial: square corners, 2px rules, no shadows or gradients, uppercase labels, horizontal media cards",
 	"blocks": [

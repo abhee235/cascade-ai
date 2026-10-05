@@ -102,18 +102,18 @@ function SpanRow({ node, depth, ancestorLines, selectedSpanId, onSelect, traceSt
           <span className="truncate font-medium">{span.name}</span>
           <SpanKindToken kind={span.kind} />
           {(tokens || outTokens) && (
-            <span className="shrink-0 rounded bg-muted/50 px-1 py-0.5 font-mono text-[10px] text-muted-foreground" title="input → output tokens">
+            <span className="shrink-0 rounded bg-muted/50 px-1 py-0.5 font-mono text-xs text-muted-foreground" title="input → output tokens">
               {formatTokens(tokens)}→{formatTokens(outTokens)}
             </span>
           )}
-          {hidden > 0 && <span className="shrink-0 rounded bg-muted/50 px-1 py-0.5 text-[10px] text-muted-foreground">+{hidden}</span>}
+          {hidden > 0 && <span className="shrink-0 rounded bg-muted/50 px-1 py-0.5 text-xs text-muted-foreground">+{hidden}</span>}
         </span>
 
         {/* Fixed chrome is charged against the NAME, which is the column you actually read. 150px here
             plus the badges left "llm turn 12" rendering as "ll…". */}
         <span className="flex w-[124px] shrink-0 items-center gap-2">
           <StatusDot status={span.status} running={running} />
-          <span className="w-11 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground">{running ? '…' : formatDuration(durationOf(span))}</span>
+          <span className="w-11 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground">{running ? '…' : formatDuration(durationOf(span))}</span>
           <span className="min-w-0 flex-1">
             <TimelineBar span={span} traceStart={traceStart} traceMs={traceMs} />
           </span>

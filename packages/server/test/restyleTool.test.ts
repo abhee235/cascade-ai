@@ -1,7 +1,7 @@
-// Restyle (design-overhaul P5): presets swap TOKENS, skins swap STRUCTURE, and the whole feature rides on
-// two invariants — a skin block's interface is identical to base (parity), and the audit treats any
-// shipped variant as pristine (else a restyle teaches the model to undo the user's restyle). Tests here
-// cover the mechanics against the REAL template, not fixtures: the react template is the product.
+// Restyle (design-overhaul P5): presets swap TOKENS, skins swap STRUCTURE, and the feature rides on two
+// invariants — a skin block's interface is identical to base (parity), and any shipped variant counts as
+// untouched, while an edited block is the project's own and a swap never overwrites it (ADR-086 P1). Tests
+// here cover the mechanics against the REAL template, not fixtures: the react template is the product.
 
 import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, cpSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -9,7 +9,6 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { activePreset, applySkin, listPresets, listSkins, setPreset, templateFilePath } from '../src/templates.js'
 import { createRestyleTool } from '../src/restyleTool.js'
-import { createTemplateAuditTool } from '../src/auditTool.js'
 
 const dirs: string[] = []
 afterEach(() => {
@@ -73,22 +72,35 @@ describe('skins — certified structure swaps', () => {
 	})
 })
 
-describe('the audit ↔ restyle contract', () => {
-	const audit = async (dir: string) => String((await createTemplateAuditTool({ projectDir: dir, templateId: 'react' })!.call({} as never, {} as never)).content)
+describe('a restyle never erases an edit (ADR-086 P1 — blocks are editable)', () => {
+	const block = (dir: string, name: string) => join(dir, 'src', 'components', 'blocks', `${name}.tsx`)
 
-	it('a skin-swapped block is NOT an edit — any shipped variant counts as pristine', async () => {
+	it('swaps the untouched blocks, leaves an edited one exactly as it is, and names it', () => {
 		const dir = project()
-		applySkin(dir, 'react', 'sharp')
-		expect(await audit(dir)).not.toContain('EDITED')
+		const mine = readFileSync(block(dir, 'Hero'), 'utf8').replace('max-w-xl', 'max-w-2xl')
+		writeFileSync(block(dir, 'Hero'), mine)
+		const log = applySkin(dir, 'react', 'sharp')
+		expect(readFileSync(block(dir, 'Hero'), 'utf8')).toBe(mine)
+		expect(log).toContain('edited in this project: Hero')
+		expect(readFileSync(block(dir, 'MediaCard'), 'utf8')).toContain('SKIN: sharp')
 	})
 
-	it('a hand-edited block is still flagged, and the fix points at Restyle', async () => {
+	it('a skin-swapped block is not an edit — the next swap moves it on', () => {
 		const dir = project()
-		const hero = join(dir, 'src', 'components', 'blocks', 'Hero.tsx')
-		writeFileSync(hero, readFileSync(hero, 'utf8').replace('max-w-xl', 'max-w-2xl'))
-		const out = await audit(dir)
-		expect(out).toContain('EDITED')
-		expect(out).toContain('Restyle')
+		applySkin(dir, 'react', 'sharp')
+		applySkin(dir, 'react', 'soft')
+		expect(readFileSync(block(dir, 'Hero'), 'utf8')).toContain('SKIN: soft')
+		applySkin(dir, 'react', 'base')
+		expect(readFileSync(block(dir, 'Hero'), 'utf8')).toBe(readFileSync(templateFilePath('react', 'src/components/blocks/Hero.tsx'), 'utf8'))
+	})
+
+	it('deleting an edited block and running Restyle again takes the new version', () => {
+		const dir = project()
+		writeFileSync(block(dir, 'Hero'), readFileSync(block(dir, 'Hero'), 'utf8').replace('max-w-xl', 'max-w-2xl'))
+		applySkin(dir, 'react', 'sharp')
+		rmSync(block(dir, 'Hero'))
+		applySkin(dir, 'react', 'sharp', ['Hero'])
+		expect(readFileSync(block(dir, 'Hero'), 'utf8')).toContain('SKIN: sharp')
 	})
 })
 

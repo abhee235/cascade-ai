@@ -3,7 +3,7 @@
 // follows; the server reads it and passes it into the session as generic `extraInstructions` (core stays
 // headless — it only sees a string).
 
-import { cpSync, existsSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resourceDir } from './resources.js'
@@ -19,11 +19,33 @@ export interface TemplateInfo {
 
 const REGISTRY: TemplateInfo[] = [
   { id: 'react', name: 'React', description: 'Vite + React + TypeScript + Tailwind CSS' },
+  // ADR-086: the BLANK start — no scaffold, no kit, no theme. The builder picks the stack and designs from
+  // the prompt (and any attached images, which the planner reads first). Listed second: React stays default.
+  { id: 'none', name: 'None — design from scratch', description: 'A blank project: the model picks the stack and designs freely' },
 ]
 
-/** Available templates whose files actually exist on disk. */
+/** Available starts: templates whose files exist on disk, plus the blank start (which has no files). */
 export function listTemplates(): TemplateInfo[] {
-  return REGISTRY.filter((t) => existsSync(join(TEMPLATES_DIR, t.id)))
+  return REGISTRY.filter((t) => t.id === 'none' || existsSync(join(TEMPLATES_DIR, t.id)))
+}
+
+/** Which start a project was created from (ADR-086). It decides the builder profile of every later session. */
+export type ProjectStart = 'react' | 'none'
+const START_FILE = join('.cascade', 'template.json')
+
+/** Stamp the start at creation. `.cascade/` is Cascade's own state, not the user's app. */
+export function stampStart(projectDir: string, start: ProjectStart): void {
+  mkdirSync(join(projectDir, '.cascade'), { recursive: true })
+  writeFileSync(join(projectDir, START_FILE), `${JSON.stringify({ template: start }, null, 2)}\n`)
+}
+
+/** The stamped start. A project with no stamp predates it — and React was the only start there was. */
+export function projectStart(projectDir: string): ProjectStart {
+  try {
+    return JSON.parse(readFileSync(join(projectDir, START_FILE), 'utf8')).template === 'none' ? 'none' : 'react'
+  } catch {
+    return 'react'
+  }
 }
 
 // ── Residue contract (design-overhaul P1): what must be GONE before a generated app is "done" ─────────────
@@ -96,8 +118,8 @@ export function readResidueContract(templateId: string): ResidueContract | undef
  * filter, one scaffold: the bench cannot drift from what users actually get.
  */
 /** Absolute path to a file inside a template's pristine source — the ground truth a generated project's
- *  copy is compared against (see the audit's frozen-layer check). Read from TEMPLATES_DIR, which is
- *  outside the model's Read jail, so a project can never doctor its own reference copy. */
+ *  copy is compared against (untouched vs edited: the design checks, Restyle). Read from TEMPLATES_DIR,
+ *  which is outside the model's Read jail, so a project can never doctor its own reference copy. */
 export function templateFilePath(templateId: string, relPath: string): string {
   return join(TEMPLATES_DIR, templateId, relPath)
 }
@@ -206,6 +228,9 @@ export function applyPack(projectDir: string, templateId: string, packId: string
 /** Ensure a project's vite.config carries the M9 visual-edit loc-stamp; if not (older projects predate it),
  *  copy in the current template's config. Safe because every Cascade project uses the same React template. */
 export function ensureVisualEditConfig(projectDir: string): void {
+  // ADR-086: a blank-start project OWNS its build config (the model wrote it, maybe for another Vite stack).
+  // Backfilling would overwrite it with the React template's; its own config carries the loc-stamp instead.
+  if (projectStart(projectDir) === 'none') return
   const cfg = join(projectDir, 'vite.config.ts')
   if (!existsSync(cfg)) return
   if (readFileSync(cfg, 'utf8').includes('data-cascade-loc')) return
@@ -221,9 +246,9 @@ export function readAiRules(projectDir: string): string {
 
 // ── Restyle (design-overhaul P5): presets change TOKENS, skins change STRUCTURE ───────────────────────────
 // Both live outside the project (and the model's Read/Write jail): skins under templates/<id>/skins/, the
-// pristine base blocks under templates/<id>/src/components/blocks. The Restyle tool is the ONLY writer —
-// the same asymmetry as the frozen-path guard, and its complement: the model can never hand-edit a block,
-// but it can swap certified implementations wholesale. The freeze is what makes the swap safe.
+// pristine base blocks under templates/<id>/src/components/blocks. ADR-086 P1 opened the blocks (they are
+// patterns the model adapts), so a swap touches only the blocks a project left untouched — an edited block
+// is the project's own now, and a restyle must never erase it.
 
 export interface SkinInfo {
   id: string
@@ -265,6 +290,17 @@ export function shippedVariantPaths(templateId: string, rel: string): string[] {
   return out
 }
 
+/** ADR-086 P1: the texts a template ships for a project path (base, plus every skin's copy of a block) — the
+ *  design checks' ground truth for an untouched vs an edited kit or block file. Undefined when it ships none. */
+export function shippedTexts(templateId: string): (rel: string) => string[] | undefined {
+  return (rel) => {
+    const texts = shippedVariantPaths(templateId, rel)
+      .filter((p) => existsSync(p))
+      .map((p) => readFileSync(p, 'utf8'))
+    return texts.length ? texts : undefined
+  }
+}
+
 /** The preset a project has active, parsed from the one @import line in src/index.css. */
 export function activePreset(projectDir: string): string | undefined {
   try {
@@ -301,6 +337,8 @@ export function setPreset(projectDir: string, preset: string): string {
  * - `skinId: 'base'` restores the template's pristine blocks — for the listed `components`, or ALL of them.
  * - A named skin first restores base for EVERY block file (skins never half-stack), then overlays the
  *   skin's blocks — unless `components` narrows it, which swaps just those and leaves the rest alone.
+ * - ADR-086 P1: blocks are editable, so a swap never overwrites one the project EDITED (a file matching no
+ *   shipped version): it is left as it is and named — it keeps its markup and still follows the tokens.
  * Returns the changelog of files written.
  */
 export function applySkin(projectDir: string, templateId: string, skinId: string, components?: string[]): string {
@@ -308,19 +346,35 @@ export function applySkin(projectDir: string, templateId: string, skinId: string
   const destDir = join(projectDir, 'src', 'components', 'blocks')
   const allBase = readdirSync(baseDir).filter((f) => f.endsWith('.tsx'))
   const norm = (c: string) => (c.endsWith('.tsx') ? c : `${c}.tsx`)
+  const lf = (s: string) => s.replace(/\r\n/g, '\n')
+  const edited = (file: string) => {
+    const dest = join(destDir, file)
+    if (!existsSync(dest)) return false // missing: nothing to lose, write it
+    const now = lf(readFileSync(dest, 'utf8'))
+    return !shippedVariantPaths(templateId, `src/components/blocks/${file}`).some((p) => existsSync(p) && lf(readFileSync(p, 'utf8')) === now)
+  }
 
   const written: string[] = []
+  const kept: string[] = []
   const copy = (fromDir: string, file: string) => {
+    if (edited(file)) {
+      if (!kept.includes(file)) kept.push(file)
+      return
+    }
     cpSync(join(fromDir, file), join(destDir, file))
     written.push(file)
   }
+  const keptNote = () =>
+    kept.length
+      ? ` Left as they are — edited in this project: ${kept.map((f) => f.replace('.tsx', '')).join(', ')}. They keep their markup and still follow the preset's tokens; to take the new version of one, delete its file and run Restyle again.`
+      : ''
 
   if (skinId === 'base') {
     for (const c of components?.map(norm) ?? allBase) {
       if (!allBase.includes(c)) throw new Error(`No base block "${c}" — the template ships: ${allBase.map((f) => f.replace('.tsx', '')).join(', ')}`)
       copy(baseDir, c)
     }
-    return `Restored the stock look for: ${written.map((f) => f.replace('.tsx', '')).join(', ')}.`
+    return `Restored the stock look for: ${written.map((f) => f.replace('.tsx', '')).join(', ') || '(none)'}.${keptNote()}`
   }
 
   const skin = listSkins(templateId).find((s) => s.id === skinId)
@@ -336,6 +390,6 @@ export function applySkin(projectDir: string, templateId: string, skinId: string
   for (const c of wanted) copy(join(skinsDir(templateId), skinId, 'blocks'), c)
   return (
     `Applied skin "${skinId}"${components ? ` to ${wanted.map((f) => f.replace('.tsx', '')).join(', ')}` : ''} — ` +
-    `${written.length} block file(s) replaced. Blocks the skin does not cover render the stock look.`
+    `${written.length} block file(s) replaced. Blocks the skin does not cover render the stock look.${keptNote()}`
   )
 }

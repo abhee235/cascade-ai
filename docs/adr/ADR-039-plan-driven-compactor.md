@@ -107,7 +107,7 @@ window (override → `contextWindowForModel` → default) and calls `planCompact
   executor's `CHEAP_LAYERS` table; adding another is local.
 - **Deferred:** `fresh-context` (Ralph) mode for the ~8k extreme; wiring `maxOutputTokens` from the real ADR-038
   `ModelProfile` (today it's accepted optionally and the reserve is defaulted); CJK-aware token estimate.
-- **Behavior change to note:** default trigger moves from a flat 80% to the threshold ladder (later on big
+- **Behavior change to note:** default trigger moves from a flat 80% to the absolute+proportional ladder (later on big
   windows, ~70% floor on small). Intended.
 
 ## Verification

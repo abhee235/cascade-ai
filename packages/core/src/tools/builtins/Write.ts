@@ -1,6 +1,5 @@
 // tools/builtins/Write.ts — create or overwrite a file. NOT read-only (matters for Phase 6 concurrency).
 
-
 import { z } from 'zod'
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname } from 'node:path'

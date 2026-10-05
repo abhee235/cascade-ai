@@ -52,6 +52,8 @@ export const MODEL_SPECS: SpecRow[] = [
 	{ match: 'o4-mini', contextMax: 200_000, outputMax: 100_000, tempMax: 1, topK: false, tools: true, vision: true, source: 'platform.openai.com/docs/models/o4-mini' },
 	{ match: 'o3', contextMax: 200_000, outputMax: 100_000, tempMax: 1, topK: false, tools: true, vision: true, source: 'platform.openai.com/docs/models/o3' },
 	{ match: 'o1', contextMax: 200_000, outputMax: 100_000, tempMax: 1, topK: false, tools: true, vision: true, source: 'platform.openai.com/docs/models/o1' },
+	// gpt-6-luna — the default OpenAI model: 1.05M context (922k input), 128k output, Responses API for tools.
+	{ match: 'gpt-6-luna', contextMax: 1_050_000, outputMax: 128_000, tempMax: 1, topK: false, tools: true, vision: true, source: 'developers.openai.com/api/docs/models/gpt-6-luna' },
 	// gpt-5.6-luna — the flagship: 1M context window. Matched before the generic gpt-5 row.
 	{ match: 'gpt-5.6-luna', contextMax: 1_048_576, outputMax: 128_000, tempMax: 1, topK: false, tools: true, vision: true, source: 'platform.openai.com/docs/models/gpt-5.6-luna' },
 	{ match: 'gpt-5.6', contextMax: 1_048_576, outputMax: 128_000, tempMax: 1, topK: false, tools: true, vision: true, source: 'platform.openai.com/docs/models' },

@@ -14,7 +14,7 @@ append the result, call it again; stop when it stops asking. That recurse *is* t
    provider accumulates them by index and `JSON.parse`s **once** at the end, emitting a complete
    `tool_use` event. The loop only ever sees finished tool calls.
 3. **The tool contract.** `name` + `description` + Zod `inputSchema` (validates AND → JSON Schema) +
-   `call()`. (cf. `Tool.ts:362`.)
+   `call()`.
 
 ## What we built (all in `@cascade/core`)
 - `tools/Tool.ts` (contract + `ToolContext`/`ToolResult`), `tools/builtins/Read.ts`, `tools/toolRegistry.ts`

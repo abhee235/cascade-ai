@@ -34,7 +34,7 @@ search from **MCP**, not a hardcoded backend.
 
 1. **Plain HTTP GET** — no headless browser (neither incumbent renders JS). A Playwright JS-render fallback
    is a *later opt-in* (Cascade already has host Playwright for the Browser tool), not v1.
-2. **Content-negotiate markdown first**: `Accept: text/markdown, text/html;q=0.9, …`. If the server
+2. **Content-negotiate markdown first** (agent B): `Accept: text/markdown, text/html;q=0.9, …`. If the server
    returns markdown, use it raw — already ideal. Else convert HTML → **markdown** (both incumbents convert
    rather than flatten — headings/links/lists/code are how a model navigates a page), dropping
    nav/header/footer/aside/script boilerplate. Dependency-free (core is bundled into the extension).
@@ -50,10 +50,10 @@ never eats a 50k-token page. Cascade can't do this yet — `ToolContext` carries
 one (a small/fast model handle, or the session's own) unlocks it. Tracked as a follow-up because it's an
 interface change, not a WebFetch tweak.
 
-### 2. Web search — via **MCP**, not a core built-in (Qwen's model)
+### 2. Web search — via **MCP**, not a core built-in (agent B's model)
 
 `WebSearch` is **removed** from `builtinTools`. Search is provided by connecting an MCP server (Tavily,
-SearXNG-MCP, Bailian, …). Rationale: no hardcoded backend or key baked into core; the operator picks the
+SearXNG-MCP, …). Rationale: no hardcoded backend or key baked into core; the operator picks the
 provider; keyless-scraping fragility is avoided; and **Cascade already has a complete MCP engine in core**
 (`mcpHub`, `sdkConnect`, `loadMcpConfig`) — search becomes config, not code we own. The gap is only that
 the **web server never wired MCP into its sessions and has no UI to manage servers** — that's §4.
@@ -61,7 +61,7 @@ the **web server never wired MCP into its sessions and has no UI to manage serve
 ### 3. `ImageSearch` — a server extraTool (built). Unchanged.
 
 `packages/server/src/imageSearchTool.ts`, injected via `extraTools` next to Browser/ApplyPack. Openverse
-(keyless, CC-licensed, CDN-allowlisted). App-building-specific and coupled to the preview CSP `img-src`.
+(keyless, Creative Commons-licensed, CDN-allowlisted). App-building-specific and coupled to the preview CSP `img-src`.
 The runtime `webPhoto()` helper stays the primary weak-model path for catalogs (one call, no multi-step).
 
 ### 4. "Connectors" — MCP integration for the web server + UI (built)

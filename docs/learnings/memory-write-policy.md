@@ -40,8 +40,8 @@ the researched consequences, and the production-grade design.
   instruction conflicts — degrading accuracy. [memory-bloat research].
 - **Multi-tenant leakage**: shared (un-segmented) memory leaks between users. [survey].
 
-## The best way — a CONSOLIDATION pipeline (how Mem0 does it)
-Don't append; **consolidate**. Mem0's pipeline = extraction → **update** → retrieval. For each candidate
+## The best way — a CONSOLIDATION pipeline (from published memory research)
+Don't append; **consolidate**. The published pipeline = extraction → **update** → retrieval. For each candidate
 fact, semantically retrieve similar existing memories, then the LLM picks one **operation**:
 - **ADD** — no semantically-equivalent memory exists.
 - **UPDATE** — augment/refine an existing memory (merge, don't duplicate).
@@ -51,8 +51,8 @@ This fixes duplicates (NOOP/UPDATE), contradictions (DELETE+ADD), and "nothing t
 
 ## Recommended design for Cascade (local-native, production-grade)
 1. **Change WHEN — don't curate every turn.** Curate at **session end** (or every N user turns / on a
-   debounce). More context to judge durability, far fewer calls, less noise. (Mem0 runs per pair *but always
-   consolidates*; batching is cheaper for local models.)
+   debounce). More context to judge durability, far fewer calls, less noise. (The published pipeline runs per
+   message pair *but always consolidates*; batching is cheaper for local models.)
 2. **Change HOW — consolidate, don't append.** Before writing a candidate: embed it, semantic-search
    existing memory; if cosine ≥ ~0.85 → **NOOP/UPDATE** (dedupe/merge); if it contradicts → **supersede**;
    else **ADD**. A small LLM "operation" call only when there's a near-match (cheap path otherwise).
@@ -76,10 +76,10 @@ turn-end via a stop-hook forked agent, while compaction's summary goes into the 
 durable memory. Cascade couples curation to compaction + session-end → built in Phase 11.
 
 ## Net
-Replace **per-turn blind-append** with **selective timing + Mem0-style consolidation (ADD/UPDATE/DELETE/NOOP)
+Replace **per-turn blind-append** with **selective timing + research-style consolidation (ADD/UPDATE/DELETE/NOOP)
 + durability/safety gating**. The explicit `Memory` tool stays the high-trust path; auto-curation becomes a
 careful background consolidator, not a firehose.
 
-Sources: Mem0 paper (arxiv 2504.19413) & blog; SecureFlag memory/context poisoning; Palo Alto Unit42
+Sources: a 2025 memory-consolidation paper (arxiv 2504.19413); SecureFlag memory/context poisoning; Palo Alto Unit42
 "indirect prompt injection poisons long-term memory"; "temporal memory contamination" (longitudinal drift);
 MemoryGraft (poisoned experience retrieval).

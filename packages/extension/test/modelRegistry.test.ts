@@ -35,8 +35,8 @@ describe('ModelRegistry', () => {
 
 	it('the ACTIVE model is always listed even if it was never curated (picker never hides what runs)', () => {
 		const r = new ModelRegistry(fakeState([{ provider: 'ollama', model: 'qwen3:8b' }]))
-		const list = r.list({ provider: 'openai', model: 'gpt-5.6-luna' })
-		expect(list.some((m) => m.provider === 'openai' && m.model === 'gpt-5.6-luna')).toBe(true)
+		const list = r.list({ provider: 'openai', model: 'gpt-6-luna' })
+		expect(list.some((m) => m.provider === 'openai' && m.model === 'gpt-6-luna')).toBe(true)
 	})
 
 	it('setParams merges onto a model, adding it when absent; paramsFor returns them for activation', async () => {

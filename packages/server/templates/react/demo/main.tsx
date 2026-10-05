@@ -3,8 +3,9 @@
 
 import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { Moon, Sparkles, Sun } from 'lucide-react'
+import { Moon, Sun } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Logo } from '@/components/blocks/Logo'
 import { NavBar } from '@/components/blocks/NavBar'
 import { useHistoryView } from '@/lib/useHistoryView'
 import { GalleryKit } from './GalleryKit'
@@ -61,11 +62,7 @@ function DemoApp() {
 	return (
 		<main className="min-h-screen bg-background text-foreground">
 			<NavBar
-				brand={
-					<>
-						<Sparkles className="size-4 text-primary" /> Meridian
-					</>
-				}
+				brand={<Logo name="Meridian" />}
 				links={
 					<>
 						{link('landing', 'The look')}

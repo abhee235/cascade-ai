@@ -27,7 +27,7 @@ const POLL_MS = 3000
 function StatItem({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
+      <span className="text-xs uppercase tracking-wider text-muted-foreground">{label}</span>
       <span className="font-mono text-xs font-medium">{value}</span>
     </div>
   )
@@ -55,7 +55,7 @@ function StatsBar({ traces }: { traces: TraceSummaryInfo[] }) {
       <StatItem label="Avg" value={formatDuration(stats.avgMs)} />
       {stats.models.length > 0 && (
         <div className="flex items-center gap-1.5">
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Models</span>
+          <span className="text-xs uppercase tracking-wider text-muted-foreground">Models</span>
           <span className="truncate font-mono text-xs text-muted-foreground">{stats.models.slice(0, 3).join(', ')}</span>
         </div>
       )}
@@ -221,7 +221,7 @@ function SpanResults({ spans, names, onOpen }: { spans: SpanInfo[] | null; names
                 <span className="block truncate text-sm font-medium">{s.name}</span>
                 {/* The matched context, not just the name — otherwise 40 rows called "tool Bash" are
                     indistinguishable and you have to open every one. */}
-                <span className="block truncate font-mono text-[11px] text-muted-foreground">
+                <span className="block truncate font-mono text-xs text-muted-foreground">
                   {String(s.attributes?.output ?? s.attributes?.input ?? '').slice(0, 160) || (s.attributes?.['cascade.project_id'] ? (names.get(String(s.attributes['cascade.project_id'])) ?? '') : '')}
                 </span>
               </span>
@@ -266,7 +266,12 @@ function SessionList({ sessions, loaded, names, onOpen }: { sessions: SessionInf
     )
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto px-3 pb-6">
+    // ADR-084 Phase 4: cap the MEASURE. Unconstrained, each row ran the full window — ~250 characters on a
+    // 2560px display against a 65–75 optimum — so the eye had to cross the whole screen to get from the
+    // prompt to its timestamp, and the metadata that actually distinguishes one row from another sat a
+    // screen-width away from the title it belongs to. Left-aligned, not centred: it stays anchored to the
+    // tabs above it.
+    <div className="min-h-0 max-w-5xl flex-1 overflow-auto px-3 pb-6">
       {sessions.map((s) => (
         <button
           key={s.chatId}
@@ -280,12 +285,12 @@ function SessionList({ sessions, loaded, names, onOpen }: { sessions: SessionInf
                 is the same on every row — what you remember is what you asked for. */}
             <span className="block truncate text-sm font-medium">{s.firstPrompt || '(no prompt recorded)'}</span>
             {s.lastOutput && <span className="mt-0.5 block truncate text-xs text-muted-foreground">→ {s.lastOutput}</span>}
-            <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+            <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
               {s.projectId && <span className="font-medium">{names.get(s.projectId) ?? 'unknown project'}</span>}
               <span>
                 {s.turnCount} turn{s.turnCount === 1 ? '' : 's'}
               </span>
-              {s.errorTurns > 0 && <span className="text-red-500">{s.errorTurns} failed</span>}
+              {s.errorTurns > 0 && <span className="text-danger">{s.errorTurns} failed</span>}
               <span className="font-mono">{formatDuration(s.endedAt - s.startedAt)}</span>
               {s.outputTokens > 0 && <span className="font-mono">{formatTokens(s.outputTokens)} out</span>}
               {s.models.length > 0 && <span className="truncate font-mono">{s.models.join(', ')}</span>}
@@ -344,7 +349,7 @@ function TraceRows({ traces, names, onOpen }: { traces: TraceSummaryInfo[]; name
   return (
     <div className="min-h-0 flex-1 overflow-auto px-3 pb-6">
       {/* A grid, not a table: the columns must stay aligned while each row is a single click target. */}
-      <div className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto_auto] items-center gap-x-4 px-3 py-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+      <div className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto_auto] items-center gap-x-4 px-3 py-2 text-xs uppercase tracking-wider text-muted-foreground">
         <span />
         <span>Turn</span>
         <span className="justify-self-end">Spans</span>

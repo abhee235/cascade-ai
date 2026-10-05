@@ -1,6 +1,7 @@
 {
   "name": "@cascade/app-protocol",
   "version": "0.0.0",
+  "license": "MIT",
   "description": "Cascade app/builder wire protocol — the wrapper-layer messages (projects, and later preview/terminal/versions/files) that the server and web frontends speak ALONGSIDE core's session protocol. Types only; depends on nothing.",
   "type": "module",
   "main": "./dist/index.js",

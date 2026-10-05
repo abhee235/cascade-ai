@@ -9,8 +9,8 @@ only from the server's `tools/list` — a runtime call over a **live connection*
 (`cascade.mcpServers`) holds the *launch command*, not the tools. So **pure-lazy is chicken-and-egg**: no
 connect → no discovery → tool never advertised → model never calls it → "lazy on first call" never fires.
 
-## What the real editors do (research, June 2026)
-- **Cursor** — connects to ALL servers at startup, calls `list_tools`, advertises. Config read once (full
+## What common MCP clients do (survey, June 2026)
+- **Editor A** — connects to ALL servers at startup, calls `list_tools`, advertises. Config read once (full
   restart to refresh). Disabled servers don't load.
 - **Editor B** — (re)starts the server to discover the tools; explicit startup + discovery.
 - **Extension C** — `mcpServers` config + a connection timeout on the initial connect; agent-mode only.

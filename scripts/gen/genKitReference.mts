@@ -95,7 +95,7 @@ const BLOCK_EXAMPLES: Record<string, string> = {
 // EVERY signed-in view (dashboard, admin, settings, account) lives inside one of these. A bare centred
 // column reads as a marketing page, not a product.
 <AppShell
-  brand={<><BarChart3 className="size-4 text-primary" /> Cadence</>}
+  brand={<Logo name="Cadence" />}
   groups={[
     { items: [{ label: 'Overview', icon: LayoutDashboard, active: true }, { label: 'Runs', icon: Package }] },
     { heading: 'Billing', items: [{ label: 'Invoices', icon: FileText, onClick: () => setView('invoices') }] },
@@ -191,7 +191,7 @@ const columns: DataColumn<Order>[] = [
   tiles={[
     { kind: 'media', span: 2, title: 'Repaired, not replaced', description: 'Send it back any year.',
       media: <Photo web="leather workshop" seed="bench" kind="product" /> },
-    { kind: 'stat', value: '11 yrs', label: 'Median product lifespan' },
+    { kind: 'stat', value: '11 yrs', label: 'Median product lifespan', trend: [4, 6, 7, 9, 11] },  // bars, not an empty tile
     { kind: 'plain', icon: ShieldCheck, title: 'Lifetime repairs', description: 'Free for a decade.' },
     { kind: 'accent', title: 'Join the list', description: 'One letter a month.',
       action: <Button variant="secondary">Subscribe</Button> },
@@ -199,11 +199,18 @@ const columns: DataColumn<Order>[] = [
 />
 \`\`\``,
 	LogoStrip: `\`\`\`tsx
-// Social proof under the hero. Plain TEXT wordmarks are the intended default — credible with zero assets.
-<LogoStrip
-  label="Stocked by independent shops in 14 countries"
-  items={['Northline', 'Hallowell', 'Studio Mena', 'The Good Press', 'Fieldnote', 'Vestry & Co']}
-/>
+// Social proof under the hero, in a COMPACT Section (a thin band sits close under what it supports).
+// Plain TEXT wordmarks are the intended default — credible with zero assets.
+<Section compact>
+  <LogoStrip label="Stocked by independent shops in 14 countries"
+    items={['Northline', 'Hallowell', 'Studio Mena', 'The Good Press', 'Fieldnote', 'Vestry & Co']} />
+</Section>
+\`\`\``,
+	Logo: `\`\`\`tsx
+// The brand — the app's NAME (or its short form) as a wordmark, for NavBar/Footer/AppShell/AuthCard \`brand\`.
+<Logo name="Tidewater Surf" />   // "Tidewater" + "Surf" in the primary color
+<Logo name="Meridian" />         // one word: the name + a primary-colored dot
+// No icon mark — the owner brings their own logo. Never a stock icon beside plain text.
 \`\`\``,
 	Photo: `\`\`\`tsx
 // The DEFAULT for any grid/list of distinct subjects: a real, deterministic photo per item, with an
@@ -216,7 +223,7 @@ const columns: DataColumn<Order>[] = [
 \`\`\``,
 	NavBar: `\`\`\`tsx
 <NavBar
-  brand={<><Sparkles className="size-4 text-primary" /> Meridian</>}
+  brand={<Logo name="Meridian" />}
   links={<><a className="text-sm text-muted-foreground hover:text-foreground">Shop</a>…</>}
   actions={<Button variant="ghost" size="icon" onClick={toggleDark}>{dark ? <Sun/> : <Moon/>}</Button>}
 />
@@ -232,12 +239,18 @@ const columns: DataColumn<Order>[] = [
 />
 \`\`\``,
 	Section: `\`\`\`tsx
+// A band. It owns its vertical padding (the preset's density) — never add py/my around it. compact = a
+// thin band (a logo row, a stat strip, one quote): it sits close under the band it supports.
 <Section eyebrow="How it works" heading="Three steps" description="One line." tone="muted">
   {/* any content — grids, FeatureGrid, StatStrip… */}
 </Section>
 \`\`\``,
 	PageHeader: `\`\`\`tsx
-<PageHeader title="Catalog" description="128 products" actions={<><Input placeholder="Search…" /><Button>Add product</Button></>} />
+// A title ROW, not a band: the first child of the view's first Section (or of AppShell's content).
+<Section>
+  <PageHeader title="Catalog" description="128 products" actions={<><Input placeholder="Search…" /><Button>Add product</Button></>} />
+  {/* the grid */}
+</Section>
 \`\`\``,
 	FeatureGrid: `\`\`\`tsx
 <FeatureGrid features={[{ icon: Truck, title: 'Free shipping', description: 'Over $50, everywhere.' }, …]} />
@@ -257,7 +270,7 @@ const columns: DataColumn<Order>[] = [
 <EmptyState icon={ShoppingCart} title="Your cart is empty" description="Find something you'll keep." action={<Button variant="outline" onClick={goCatalog}>Browse</Button>} />
 \`\`\``,
 	Footer: `\`\`\`tsx
-<Footer brand="Meridian" tagline="Small-batch goods." columns={[{ heading: 'Shop', links: ['Instruments', 'Home'] }]} fineprint="© 2026 Meridian" />
+<Footer brand={<Logo name="Meridian" />} tagline="Small-batch goods." columns={[{ heading: 'Shop', links: ['Instruments', 'Home'] }]} fineprint="© 2026 Meridian" />
 \`\`\``,
 	ArtImage: `\`\`\`tsx
 <ArtImage seed={product.name} kind="product" />   // deterministic token-colored art — same seed, same art
@@ -267,17 +280,20 @@ const columns: DataColumn<Order>[] = [
 
 const PAGE_ASSEMBLY = `## Canonical page assembly
 
-A landing page is blocks top-to-bottom; an app view is PageHeader + content; EVERY list has an EmptyState:
+A page is a stack of BANDS (Hero, Section, CTASection, Footer), each owning its vertical padding — the band
+that follows decides the gap, so nothing adds py/my between them. An app view is ONE Section opening with
+its PageHeader; EVERY list has an EmptyState:
 
 \`\`\`tsx
-// Landing:                                  // App view (catalog, dashboard…):
+// Landing:                                         // App view (catalog, dashboard…):
 <main className="min-h-screen bg-background text-foreground">
-  <NavBar brand={…} actions={…} />             <NavBar brand={…} actions={…} />
-  <Hero headline={…} actions={…} media={…} />  <PageHeader title="Catalog" actions={…} />
-  <Section tone="muted" …><FeatureGrid …/></Section>
-  <Section …>{/* MediaCard grid */}</Section>  <Section>{items.length ? grid : <EmptyState …/>}</Section>
-  <Section tone="muted"><StatStrip …/></Section>
-  <Footer brand={…} … />
+  <NavBar brand={<Logo …/>} actions={…} />            <NavBar brand={<Logo …/>} actions={…} />
+  <Hero headline={…} actions={…} media={…} />         <Section>
+  <Section compact><LogoStrip …/></Section>             <PageHeader title="Catalog" actions={…} />
+  <Section tone="muted" …><BentoGrid …/></Section>      {items.length ? grid : <EmptyState …/>}
+  <Section …>{/* MediaCard grid */}</Section>         </Section>
+  <CTASection headline={…} actions={…} />
+  <Footer brand={<Logo …/>} … />
 </main>
 \`\`\``
 
@@ -398,7 +414,7 @@ const kit = renderDir(UI, 'ui', EXAMPLES)
 const kitMd = `<!-- GENERATED by scripts/gen/genKitReference.mts from the template's actual kit source — do not edit by hand. -->\n# Kit reference — every component, its exports, variants, and canonical usage\n\n## Contents\n${kit.toc.join('\n')}\n\n${kit.sections.join('\n\n')}\n`
 
 const blocks = renderDir(BLOCKS, 'blocks', BLOCK_EXAMPLES)
-const blocksMd = `<!-- GENERATED by scripts/gen/genKitReference.mts from the template's actual blocks source — do not edit by hand. -->\n# Blocks reference — page-section components. Pages are BLOCK COMPOSITIONS: assemble these, fill their slots with the kit.\n\n## Contents\n${blocks.toc.join('\n')}\n\n${blocks.sections.join('\n\n')}\n\n${PAGE_ASSEMBLY}\n`
+const blocksMd = `<!-- GENERATED by scripts/gen/genKitReference.mts from the template's actual blocks source — do not edit by hand. -->\n# Blocks reference — page-section PATTERNS. Use one as it is, edit it, or adapt a copy for this app (keep its data-block stamp and tokens); fill their slots with the kit.\n\n## Contents\n${blocks.toc.join('\n')}\n\n${blocks.sections.join('\n\n')}\n\n${PAGE_ASSEMBLY}\n`
 
 // ── Category page references (design-overhaul P3 slice 5) ────────────────────────────────────────────
 // The demo/ pages are the CANONICAL page assemblies — full, runnable, and reviewed by eye in the gallery.

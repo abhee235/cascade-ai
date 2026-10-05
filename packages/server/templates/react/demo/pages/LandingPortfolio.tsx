@@ -9,12 +9,13 @@
 // card shows a DISTINCT subject-relevant photo. `photoFor()` here would draw from a ~2-photo pool and
 // every project would look like the same building.
 
-import { ArrowUpRight, Mail, PenTool } from 'lucide-react'
+import { ArrowUpRight, Mail } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CTASection } from '@/components/blocks/CTASection'
 import { Footer } from '@/components/blocks/Footer'
 import { Hero } from '@/components/blocks/Hero'
+import { Logo } from '@/components/blocks/Logo'
 import { MediaCard } from '@/components/blocks/MediaCard'
 import { Photo } from '@/components/blocks/Photo'
 import { Section } from '@/components/blocks/Section'
@@ -51,7 +52,7 @@ export function LandingPortfolio() {
 			/>
 
 			<Section eyebrow="Selected work" heading="Six things we made recently">
-				<div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+				<div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
 					{WORK.map((p) => (
 						<MediaCard
 							key={p.id}
@@ -65,7 +66,7 @@ export function LandingPortfolio() {
 			</Section>
 
 			<Section tone="muted" eyebrow="How we work" heading="Two people, start to finish">
-				<div className="grid gap-8 md:grid-cols-2">
+				<div className="grid grid-cols-1 gap-8 md:grid-cols-2">
 					<p className="text-lg text-muted-foreground">
 						No account managers and no handover. The people you meet in the first call are the people who draw the marks, set the type, and write the CSS — which is
 						why we take six projects a year instead of thirty.
@@ -100,11 +101,7 @@ export function LandingPortfolio() {
 			/>
 
 			<Footer
-				brand={
-					<>
-						<PenTool className="size-4 text-primary" /> Fold &amp; Field
-					</>
-				}
+				brand={<Logo name="Fold & Field" />}
 				tagline="Identity, packaging, and the web that carries them."
 				columns={[
 					{ heading: 'Studio', links: ['Work', 'About', 'Process', 'Contact'] },

@@ -59,7 +59,7 @@ export function ModelPicker() {
 					</button>
 					<div className="my-1 h-px bg-border" />
 					{enabledModels.length === 0 ? (
-						<div className="px-2 py-1.5 text-[11px] text-muted-foreground">No models yet — add some via Manage models.</div>
+						<div className="px-2 py-1.5 text-xs text-muted-foreground">No models yet — add some via Manage models.</div>
 					) : (
 						enabledModels.map((em) => {
 							const isActive = activeProvider === em.provider && activeModel === em.model
@@ -74,11 +74,13 @@ export function ModelPicker() {
 									className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-md hover:bg-accent"
 								>
 									{isActive ? <Check className="h-3 w-3 shrink-0 text-primary" /> : <span className="w-3 shrink-0" />}
-									<span className="min-w-0 flex-1 truncate">
+									{/* ADR-084 Phase 5: long ids truncate to the SAME string — `hf.co/unsloth/Qw…` and
+									    `hf.co/unsloth/Q…` are different models that look identical in this list. */}
+									<span className="min-w-0 flex-1 truncate" title={`${em.provider} · ${em.model}`}>
 										<span className="text-muted-foreground">{em.provider} · </span>
 										{em.model}
 									</span>
-									{em.contextWindow ? <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">{em.contextWindow >= 1024 ? `${Math.round(em.contextWindow / 1024)}K` : em.contextWindow}</span> : null}
+									{em.contextWindow ? <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{em.contextWindow >= 1024 ? `${Math.round(em.contextWindow / 1024)}K` : em.contextWindow}</span> : null}
 								</button>
 							)
 						})

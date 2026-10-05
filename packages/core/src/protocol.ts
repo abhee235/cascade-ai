@@ -4,7 +4,6 @@
 // is one of these types. They are plain JSON-serializable objects on purpose: that is what
 // makes the in-process (extension) and remote (web) frontends interchangeable. — ADR-018.
 
-
 // ── Internal message model (typed content blocks) ───────────────────────────────────────
 // Grows in Phase 3+. In Phase 0 only `text` is exercised.
 // A generic UI rendering hint a tool can attach to its result (M2). The engine just passes it through; the

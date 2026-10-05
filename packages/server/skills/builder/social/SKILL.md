@@ -40,7 +40,7 @@ whose text survives its own submit reads as broken even when the post landed.
 ## The layout — a single reading column
 
 ```tsx
-<NavBar brand="Murmur" />
+<NavBar brand={<Logo name="Murmur" />} />
 <main className="mx-auto max-w-xl">
   <div className="divide-y">
     <Composer avatar={…} value={draft} onValueChange={setDraft} onSubmit={submit} maxLength={280} />

@@ -37,7 +37,7 @@ export function keyFor(provider: string, settingsKey?: string, secret?: string):
 export const DEFAULT_MODELS: Record<string, string[]> = {
 	// Popular pullable local models (shown as "Available to pull" next to the installed list).
 	ollama: ['qwen3:8b', 'qwen3:4b', 'qwen2.5-coder:7b', 'llama3.2:3b', 'llama3.3:70b', 'gemma3:12b', 'gemma3:4b', 'deepseek-r1:14b', 'mistral:7b', 'nomic-embed-text'],
-	openai: ['gpt-5.6-luna', 'gpt-5', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini', 'o3', 'o4-mini'],
+	openai: ['gpt-6-luna', 'gpt-5', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini', 'o3', 'o4-mini'],
 	groq: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'qwen-2.5-coder-32b', 'deepseek-r1-distill-llama-70b'],
 	nvidia: ['meta/llama-3.3-70b-instruct', 'qwen/qwen2.5-coder-32b-instruct', 'nvidia/llama-3.3-nemotron-super-49b-v1', 'deepseek-ai/deepseek-r1'],
 	openrouter: ['openai/gpt-4o', 'openai/gpt-4o-mini', 'meta-llama/llama-3.3-70b-instruct', 'qwen/qwen-2.5-coder-32b-instruct', 'deepseek/deepseek-r1'],

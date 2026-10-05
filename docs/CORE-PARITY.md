@@ -58,7 +58,7 @@ Cascade has: `Read, Write, Edit, MultiEdit, Bash, Glob, Grep, TodoWrite, Lsp, As
 
 ---
 
-## C. Per-tool sophistication — "why theirs is 300–400 lines and ours is 30–40"
+## C. Per-tool sophistication — what a production-grade tool does that a 30–40-line one doesn't
 
 Each is a checklist of behaviours to port into our tool. (Cascade line counts in headers.)
 
@@ -109,7 +109,7 @@ Each is a checklist of behaviours to port into our tool. (Cascade line counts in
 1. **A4 + C2 freshness** and **C1 Read** sophistication (Read-before-Edit is foundational and small).
 2. **A1 streaming tool execution** (the signature loop behaviour).
 3. **A5 permission depth** (input-aware rules + bash classifier) then **A2 compaction stack**.
-4. **TodoWriteTool** + **MultiEdit** (high agent-quality, low risk).
+4. **TodoWrite** + **MultiEdit** (high agent-quality, low risk).
 5. Everything else as appetite allows.
 
 > Each item = one ADR (`docs/adr/ADR-0XX-*.md`) + a short phase note, built and verified against the two

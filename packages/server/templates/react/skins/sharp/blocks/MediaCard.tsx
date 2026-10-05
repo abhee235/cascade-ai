@@ -33,7 +33,7 @@ export function MediaCard({ media, title, meta, aside, actions, onClick, classNa
 				className,
 			)}
 		>
-			<div className="aspect-square w-28 shrink-0 overflow-hidden border-r-2 bg-muted sm:w-32 [&_img]:size-full [&_img]:object-cover [&_svg]:size-full">
+			<div className="aspect-square w-28 shrink-0 overflow-hidden border-r-2 bg-muted sm:w-32 [&>img]:size-full [&>img]:object-cover [&>svg]:size-full">
 				{media}
 			</div>
 			<div className="flex min-w-0 flex-1 flex-col gap-1 p-4">

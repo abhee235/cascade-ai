@@ -122,18 +122,18 @@ function RuntimeSection() {
 			    are still fenced. State the honest degree rather than a blanket "no isolation" (ADR-070 step 7). */}
 			{mode === 'host' &&
 				(confinement ? (
-					<p className="mt-1 inline-flex items-center gap-1 text-xs text-emerald-500">
+					<p className="mt-1 inline-flex items-center gap-1 text-xs text-success">
 						<ShieldCheck className="h-3.5 w-3.5" />
 						{confinement.enforcement === 'full'
 							? 'Writes are confined to the project by this OS’s sandbox — commands cannot modify files elsewhere.'
 							: 'Writes are fenced to the project (file writes outside it are blocked). Reads and network are not restricted — switch to WSL or Docker for full isolation.'}
 					</p>
 				) : (
-					<p className="mt-1 text-xs text-yellow-500">No isolation on this machine — the agent can run build scripts and install packages directly here. Switch to WSL or Docker to contain it.</p>
+					<p className="mt-1 text-xs text-warning">No isolation on this machine — the agent can run build scripts and install packages directly here. Switch to WSL or Docker to contain it.</p>
 				))}
 
 			{pending && (
-				<p className="mt-1 text-xs text-yellow-500">
+				<p className="mt-1 text-xs text-warning">
 					{runtime?.requested === 'wsl'
 						? 'WSL is selected but not ready, so commands are running on this machine. Ensure WSL is installed, then choose WSL again.'
 						: 'Docker is selected but not responding, so commands are running on this machine. Start Docker Desktop and choose Docker again.'}
@@ -161,7 +161,7 @@ export function SettingsPage() {
 							<span className="font-mono text-xs">ws://{location.hostname}:4319</span>
 						</Row>
 						<Row label="Status" icon={Activity} description="Live connection to the backend">
-							<span className={connected ? 'text-emerald-500' : 'text-yellow-500'}>{connected ? 'Connected' : 'Connecting…'}</span>
+							<span className={connected ? 'text-success' : 'text-warning'}>{connected ? 'Connected' : 'Connecting…'}</span>
 						</Row>
 						<Row label="Model" icon={Bot} description="Model currently serving this session">
 							{serverInfo?.model ?? '—'}

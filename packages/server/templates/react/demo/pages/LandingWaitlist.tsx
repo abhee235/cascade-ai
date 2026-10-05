@@ -11,7 +11,7 @@
 // than a toast that vanishes.
 
 import { useState } from 'react'
-import { CheckCircle2, Hourglass, Mail, Send } from 'lucide-react'
+import { CheckCircle2, Hourglass, Send } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -19,6 +19,7 @@ import { Label } from '@/components/ui/label'
 import { FAQ } from '@/components/blocks/FAQ'
 import { Footer } from '@/components/blocks/Footer'
 import { Hero } from '@/components/blocks/Hero'
+import { Logo } from '@/components/blocks/Logo'
 import { LogoStrip } from '@/components/blocks/LogoStrip'
 import { Section } from '@/components/blocks/Section'
 
@@ -98,13 +99,13 @@ export function LandingWaitlist() {
 				}
 			/>
 
-			<Section>
+			<Section compact>
 				<LogoStrip variant="bare" label="Built by people from" items={['Kestrel', 'Northwind', 'Fieldwire', 'Osmond', 'Bellhop']} />
 			</Section>
 
 			<Section tone="muted" eyebrow="What happens next" heading="Three steps, then it is yours">
 				{/* Numbered markers are honest here: this IS a sequence, and the order is the information. */}
-				<div className="grid gap-8 md:grid-cols-3">
+				<div className="grid grid-cols-1 gap-8 md:grid-cols-3">
 					{STEPS.map((s) => (
 						<div key={s.n} className="flex flex-col gap-2">
 							<span className="font-serif text-3xl font-semibold tabular-nums tracking-display text-muted-foreground/60">{s.n}</span>
@@ -126,11 +127,7 @@ export function LandingWaitlist() {
 			</Section>
 
 			<Footer
-				brand={
-					<>
-						<Mail className="size-4 text-primary" /> Sift
-					</>
-				}
+				brand={<Logo name="Sift" />}
 				tagline="Local-first search for everything you have written."
 				fineprint="© 2026 Sift. Nothing leaves your machine."
 			/>

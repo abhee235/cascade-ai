@@ -132,11 +132,13 @@ const AUDIT_EXPR = `(async () => {
 	return { pageHeight: H, steps, stuckSamples: [...stuck.keys()] }
 })()`
 
-/** Build the per-session Browser tool (extension flavor: host dev server, URL-addressed). */
+/** Build the per-session Browser tool (extension flavor: host dev server, URL-addressed). Its headless
+ *  browser closes when the session is disposed (core Tool.dispose) — before, one leaked per session. */
 export function createBrowserTool(deps: { launch?: () => Promise<{ page: PageLike; close: () => Promise<void> }> } = {}): Tool {
 	let session: { page: PageLike; close: () => Promise<void> } | undefined
 	let origin: string | undefined
 	let opened = false
+	let disposed = false
 	let screenshots = 0
 
 	const tool: Tool<z.infer<typeof inputSchema>> = {
@@ -149,11 +151,18 @@ export function createBrowserTool(deps: { launch?: () => Promise<{ page: PageLik
 		isConcurrencySafe: () => false, // one page, sequential ops
 
 		async call(input) {
+			if (disposed) return { content: 'This session has ended; its browser is closed.', isError: true }
 			try {
 				if (input.op === 'open') {
 					if (input.url) origin = new URL(input.url).origin
 					if (!origin) return { content: 'op:"open" needs `url` the first time, e.g. {op:"open", url:"http://localhost:5173"}. Start the dev server with Bash first.', isError: true }
 					session ??= await (deps.launch ?? launchPage)()
+					if (disposed) {
+						// The session ended while the browser launched: dispose() found nothing to close, so close it here.
+						await session.close().catch(() => {})
+						session = undefined
+						return { content: 'This session has ended; its browser is closed.', isError: true }
+					}
 					const target = input.url ?? origin + (input.path ?? '/')
 					await session.page.goto(target, { waitUntil: 'domcontentloaded', timeout: 15_000 })
 					await new Promise((r) => setTimeout(r, 800)) // let the app paint
@@ -236,6 +245,15 @@ export function createBrowserTool(deps: { launch?: () => Promise<{ page: PageLik
 			} catch (e) {
 				return { content: `Browser ${input.op} failed: ${e instanceof Error ? e.message : String(e)}`, isError: true }
 			}
+		},
+
+		// Called by session.dispose(). Idempotent; the dev server the model started with Bash is not ours.
+		async dispose() {
+			disposed = true
+			opened = false
+			const s = session
+			session = undefined
+			await s?.close().catch(() => {})
 		},
 	}
 	return tool as Tool

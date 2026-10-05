@@ -13,6 +13,7 @@
 
 import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import type { ProjectStart } from './templates.js'
 import {
   agentChildInstructions,
   createSession,
@@ -114,12 +115,15 @@ const MIN_PLAN_CHARS = 200
  * silently fell through to the builder, which assumed everything. The nudge names the violation and the
  * tool; the caller runs ONE extra submit with it before the ensurePlanPersisted fallback.
  */
-/** The revise nudge for a plan that EXISTS but is unusable (see planQualityIssues). */
-export function planReviseNudge(issues: string[]): string {
+/** The revise nudge for a plan that EXISTS but is unusable (see planQualityIssues). The design skill it points
+ *  to is the start's own: presets and blocks for React, the direction method for a blank project (ADR-086). */
+export function planReviseNudge(issues: string[], start: ProjectStart = 'react'): string {
+  const skillFor =
+    start === 'none' ? 'it defines how the design direction is written (palette, type, density, layout, imagery)' : 'it defines the presets, the blocks, and the imagery routing'
   return (
     '<system-reminder>Your PLAN.md needs one revision before the build can use it:\n' +
     issues.map((i) => `- ${i}`).join('\n') +
-    '\nRewrite PLAN.md now with those fixed, keeping every section it already has. Load Skill {name: "design"} first if you have not — it defines the presets, the blocks, and the imagery routing. Do not reply to this note.</system-reminder>'
+    `\nRewrite PLAN.md now with those fixed, keeping every section it already has. Load Skill {name: "design"} first if you have not — ${skillFor}. Do not reply to this note.</system-reminder>`
   )
 }
 
@@ -148,22 +152,49 @@ const PLAN_PIN_CAP = 2_500
  * every build turn that follows: the same failure shape as the context-file contamination, except from a
  * document this harness produced itself. Prompt text alone did not hold a 35B here, so the stage checks.
  */
-export function planQualityIssues(text: string): string[] {
+export function planQualityIssues(text: string, start: ProjectStart = 'react'): string[] {
   const issues: string[] = []
+  const blank = start === 'none' // ADR-086: a blank project has no presets, blocks or photo helpers to name
   if (text.length > PLAN_PIN_CAP) {
     issues.push(
       `it is ${text.length} characters — the builder only ever sees the first ${PLAN_PIN_CAP}, so everything past that is INVISIBLE to it. Cut it under ${PLAN_PIN_CAP} by tightening lines, not by dropping sections.`,
     )
   }
-  if (!/^\s*(?:#{1,3}\s*|\*\*)Design\b/im.test(text)) {
+  const design = /^\s*(?:(#{1,3})\s*|\*\*)Design\b/im.exec(text)
+  if (!design) {
     issues.push(
-      'it has no **Design** section. Add one naming the preset (a file in src/themes/), the BLOCK composition per view, and the imagery source — without it the builder invents styling, and the usual result is emoji-as-images, which the design system bans.',
+      blank
+        ? 'it has no **Design** section. Add one: `category:` first, then the direction — mood, palette (each role with a hex value), type (a display face and a body face), density, the layout of each view, and the imagery source. Without it the builder improvises styling view by view.'
+        : 'it has no **Design** section. Add one naming the preset (a file in src/themes/), the BLOCK composition per view, and the imagery source — without it the builder invents styling, and the usual result is emoji-as-images, which the design system bans.',
     )
+  } else if (blank) {
+    // In a blank project the Design section IS the theme: the builder turns its palette and faces into the
+    // tokens. A direction without colors or type is a mood board, not a contract.
+    // Where the section ENDS (review, 2026-10-04: the old cut at any line starting `#`/`**` + a capital dropped the
+    // palette whenever the planner used sub-headings — `### Palette` — or began a line with a colour, `#FAF7F2 …`,
+    // and drew a revise round on a correct plan). A heading needs a space after its hashes, so a colour is never one.
+    // `## Design` runs to the next heading of the same or higher level; the bold-label form (the planner template's)
+    // runs to the next top-level bold label or heading.
+    const level = design[1]?.length
+    const end = level ? new RegExp(`\\n\\s*#{1,${level}}\\s+\\S`) : /\n\s*(?:#{1,6}\s+\S|\*\*(?!Design\b)[A-Z])/
+    const section = design[0] + text.slice(design.index + design[0].length).split(end)[0]!
+    const missing = [!/#[0-9a-f]{3,8}\b|\b(?:oklch|rgb|hsl)\(/i.test(section) && 'a palette with hex values', !/\b(?:font|type|typeface|serif|sans)\b/i.test(section) && 'the two faces (display + body)'].filter(Boolean)
+    if (missing.length) issues.push(`its Design section names no ${missing.join(' and no ')} — the builder turns these into the theme tokens, so without them it has nothing to build the theme from.`)
   }
   const emoji = text.match(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/gu) ?? []
-  if (emoji.length >= 3 || /\bemoji\b/i.test(text)) {
+  // The WORD counts only when emoji are planned, not banned: measured (ADR-086 P0), 3 of 7 Luna plans wrote "never
+  // emoji", drew a revise round for it, and kept writing it. A negation earlier in the same clause clears a mention,
+  // and so does a ban written AFTER the word (review, 2026-10-04): "emoji-free", "Emoji: none", "emojis are banned".
+  const banBefore = /\b(?:never|no|not|nor|zero|without|avoid\w*|ban\w*|instead of)\b[^.;:\n—]*$/i
+  const banAfter = /^(?:-?\s*free\b|\s*[:=–-]\s*(?:none|no|never|banned|forbidden)\b|\s+(?:are|is)\s+(?:banned|forbidden|not allowed|never used)\b)/i
+  const plannedEmoji = [...text.matchAll(/\bemojis?\b/gi)].some(
+    (m) => !banBefore.test(text.slice(Math.max(0, m.index - 60), m.index)) && !banAfter.test(text.slice(m.index + m[0].length, m.index + m[0].length + 40)),
+  )
+  if (emoji.length >= 3 || plannedEmoji) {
     issues.push(
-      'it plans EMOJI as imagery. An emoji is never an image here: name `<Photo web="<subject>" seed={id}>` for a grid of distinct items, `photoFor()` for a single hero, `<ArtImage>` for abstract art.',
+      blank
+        ? 'it plans EMOJI as imagery. An emoji is never an image: plan real photos of each subject (the ImageSearch tool finds them), or drawn illustrations.'
+        : 'it plans EMOJI as imagery. An emoji is never an image here: name `<Photo web="<subject>" seed={id}>` for a grid of distinct items, `photoFor()` for a single hero, `<ArtImage>` for abstract art.',
     )
   }
   // The ROUTING token (design-overhaul P3 slice 5). PLAN.md is re-read every builder turn, so a
@@ -201,7 +232,7 @@ export function planQualityIssues(text: string): string[] {
   // Line-scan rather than one multiline regex: `photoFor` is CORRECT for a single hero, and only
   // becomes the repeat bug when the plan applies it per item.
   const perItem = /per (product|item|card)|each (product|item|card)|grid/i
-  if (text.split(/\r?\n/).some((line) => /photoFor/i.test(line) && perItem.test(line))) {
+  if (!blank && text.split(/\r?\n/).some((line) => /photoFor/i.test(line) && perItem.test(line))) {
     issues.push(
       'it plans `photoFor()` for a GRID. The bundled pack holds ~2 photos per category, so every card would show the same picture — use `<Photo web="<subject>" seed={id}>` per item; keep `photoFor()` for a single hero.',
     )

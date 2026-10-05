@@ -128,4 +128,9 @@ export interface Tool<I = unknown> {
    *  `onProgress` (Phase 8) lets long-running tools stream partial output (e.g. Bash stdout) live into
    *  the UI card as it arrives. Instantaneous tools ignore it. */
   call(input: I, ctx: ToolContext, onProgress?: (chunk: string) => void): Promise<ToolResult>
+  /** Release what the tool holds open (a headless browser, a socket) when the session that OWNS it ends.
+   *  session.dispose() calls it for the caller-provided `extraTools` only: builtins are module singletons
+   *  shared by every session, and subagents borrow their parent's instances. Measured (ADR-086 P0): the
+   *  Browser tool's headless Edge outlived every session — the bench process never exited. Best-effort. */
+  dispose?(): Promise<void>
 }

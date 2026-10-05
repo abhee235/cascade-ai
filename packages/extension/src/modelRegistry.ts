@@ -39,7 +39,7 @@ const KEY = 'cascade.enabledModels'
 /** Seed set — sane defaults across providers; the user curates from here (mirrors the server's DEFAULTS). */
 const DEFAULTS: EnabledModel[] = [
 	{ provider: 'ollama', model: 'qwen36-agentic:latest' },
-	{ provider: 'openai', model: 'gpt-5.6-luna' },
+	{ provider: 'openai', model: 'gpt-6-luna' },
 	{ provider: 'openai', model: 'gpt-4.1' },
 ]
 

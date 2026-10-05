@@ -8,6 +8,7 @@
 // the generic qwen rule stays 32k). This static map can't see that, so SPECIFIC variants must precede the generic family rule (first match
 // wins). The real fix is /api/show `num_ctx` auto-detection (ADR-038, deferred) — which would retire this map.
 const WINDOWS: [RegExp, number][] = [
+  [/gpt-6-luna/i, 1_050_000], // gpt-6-luna: 1.05M total (922k input + 128k output) — developers.openai.com/api/docs/models/gpt-6-luna
   [/gpt-5/i, 400_000], // gpt-5 / 5-mini / 5-nano / 5.x: 400k total (272k input + 128k output)
   [/gpt-4\.1/i, 1_000_000], // gpt-4.1 family: ~1M context — must precede the generic gpt-4 rules
   [/\bo[134]\b|\bo[134]-/i, 200_000], // o1/o3/o4(-mini): 200k. \b so "gpt-4o"/"llama3" never match

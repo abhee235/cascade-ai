@@ -16,8 +16,7 @@ faithful.
    reliable signal across providers). Append the assistant turn (thinking/text/tool_use) to history.
 4. **Terminal:** zero tool_use → emit the final `message`, `turnDone`, return.
 5. Otherwise: run each tool (`executeTool`), emit `toolStart`/`toolResult`, append the `tool_result`
-   blocks as a user message, and **loop** — the next call sees the results. (The recurse = the agent;
-   cf. `query.ts:1716`.)
+   blocks as a user message, and **loop** — the next call sees the results. (The recurse = the agent.)
 6. A `maxTurns` guard (default 10) stops runaways (Phase 11 hardens this).
 
 The session (`createSession`) owns the `Message[]` history and the AbortController; `submit()` just

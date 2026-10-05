@@ -48,12 +48,12 @@ function DiffView({ diff }: { diff: string }) {
   const CAP = 240
   const lines = all.slice(0, CAP)
   return (
-    <div className="max-h-72 overflow-auto border-t border-border bg-background/50 font-mono text-[11px] leading-[1.45]">
+    <div className="max-h-72 overflow-auto border-t border-border bg-background/50 font-mono text-xs leading-[1.45]">
       {lines.map((l, i) => {
         const c = l[0]
         if (l.startsWith('+++') || l.startsWith('---')) return null // file headers — redundant with the card header
         const cls =
-          c === '+' ? 'bg-green-500/10 text-green-600 dark:text-green-400' : c === '-' ? 'bg-red-500/10 text-red-600 dark:text-red-400' : l.startsWith('@@') ? 'text-sky-600 dark:text-sky-400' : 'text-muted-foreground'
+          c === '+' ? 'bg-green-500/10 text-success' : c === '-' ? 'bg-red-500/10 text-danger' : l.startsWith('@@') ? 'text-sky-600 dark:text-sky-400' : 'text-muted-foreground'
         return (
           <div key={i} className={cn('whitespace-pre-wrap px-3', cls)}>
             {l || ' '}
@@ -77,23 +77,26 @@ function FileEditCard({ display }: { display: Extract<ToolDisplay, { kind: 'file
   return (
     <div className="my-2 overflow-hidden rounded-md border border-border bg-card/60">
       <div className="flex items-center gap-2 px-3 py-2 text-xs">
-        <button type="button" onClick={() => setOpen((o) => !o)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+        {/* ADR-084 Phase 2: min-h-6 for the same reason as the thought-process row above. */}
+        <button type="button" onClick={() => setOpen((o) => !o)} className="flex min-h-6 min-w-0 flex-1 items-center gap-2 text-left">
           <ChevronRight className={cn('h-3 w-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
           <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <span className="shrink-0 text-muted-foreground">{display.op === 'create' ? 'Created' : display.op === 'overwrite' ? 'Rewrote' : 'Edited'}</span>
           <span className="font-mono font-medium">{name}</span>
           {dir && <span className="truncate font-mono text-muted-foreground/70">{dir}</span>}
         </button>
-        <span className="shrink-0 font-mono text-[10px]">
-          {added > 0 && <span className="text-green-500">+{added}</span>}
+        <span className="shrink-0 font-mono text-xs">
+          {added > 0 && <span className="text-success">+{added}</span>}
           {added > 0 && removed > 0 && ' '}
-          {removed > 0 && <span className="text-red-500">−{removed}</span>}
+          {removed > 0 && <span className="text-danger">−{removed}</span>}
         </span>
         <button
           type="button"
           title="Open in the Code pane"
           onClick={() => openFileInCode(display.path, 'diff')}
-          className="shrink-0 text-muted-foreground hover:text-foreground"
+          // ADR-084 Phase 2: the icon stays 14px; `after:-inset-2` grows the TARGET to ~30px so the
+          // densest, most-repeated control in the log clears SC 2.5.8 without loosening the log's rhythm.
+          className="relative shrink-0 text-muted-foreground after:absolute after:-inset-2 hover:text-foreground"
         >
           <SquareArrowOutUpRight className="h-3.5 w-3.5" />
         </button>
@@ -144,11 +147,11 @@ function CommandCard({ item }: { item: Extract<Item, { kind: 'tool' }> }) {
           {commandLabel(command)}
           {running && '…'}
         </span>
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground/70">{command}</span>
-        <StatusIcon className={cn('h-3.5 w-3.5 shrink-0', running && 'animate-spin text-muted-foreground', item.status === 'ok' && 'text-green-500', item.status === 'error' && 'text-red-500', item.status === 'interrupted' && 'text-muted-foreground/70')} />
+        <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground/70">{command}</span>
+        <StatusIcon className={cn('h-3.5 w-3.5 shrink-0', running && 'animate-spin text-muted-foreground', item.status === 'ok' && 'text-success', item.status === 'error' && 'text-danger', item.status === 'interrupted' && 'text-muted-foreground/70')} />
       </button>
       {open && item.preview && (
-        <pre className="max-h-56 overflow-auto whitespace-pre-wrap border-t border-border bg-muted/50 px-3 py-1.5 font-mono text-[11px] text-foreground/80">{item.preview}</pre>
+        <pre className="max-h-56 overflow-auto whitespace-pre-wrap border-t border-border bg-muted/50 px-3 py-1.5 font-mono text-xs text-foreground/80">{item.preview}</pre>
       )}
     </div>
   )
@@ -166,7 +169,10 @@ function ThoughtBlock({ thinking, ms }: { thinking: string; ms?: number }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full min-w-0 items-center gap-1 text-left text-[13px] leading-[21px] text-muted-foreground transition-colors hover:text-foreground"
+        // ADR-084 Phase 2: min-h-6 (24px). These rows are contiguous, so SC 2.5.8's spacing exception does
+        // not apply — a 24px circle on one row intersects its neighbour. The text and leading are unchanged;
+        // only the target grows, and `items-center` keeps the label optically where it was.
+        className="flex min-h-6 w-full min-w-0 items-center gap-1 text-left text-[13px] leading-[21px] text-muted-foreground transition-colors hover:text-foreground"
       >
         <ChevronRight className={cn('h-3 w-3 shrink-0 transition-transform', open && 'rotate-90')} />
         <span className="shrink-0">{label}</span>
@@ -219,13 +225,13 @@ function ToolCard({ item }: { item: Extract<Item, { kind: 'tool' }> }) {
         <Icon className="h-3.5 w-3.5 shrink-0 opacity-60" />
         
         <span className="truncate">{(item.summary || (item.status === 'running' ? 'working…' : '')).split('/workspace/').join('')}</span>
-        {item.status === 'interrupted' && <span className="shrink-0 text-[11px] text-muted-foreground/70">interrupted</span>}
+        {item.status === 'interrupted' && <span className="shrink-0 text-xs text-muted-foreground/70">interrupted</span>}
         {hasOutput && (
           <ChevronRight className={cn('ml-auto h-3 w-3 shrink-0 opacity-0 transition-all group-hover:opacity-60', open && 'rotate-90 opacity-60')} />
         )}
       </button>
       {open && hasOutput && (
-        <pre className="mb-1 ml-[22px] max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-secondary/60 px-3 py-2 font-mono text-[11px] text-muted-foreground">
+        <pre className="mb-1 ml-[22px] max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-secondary/60 px-3 py-2 font-mono text-xs text-muted-foreground">
           {item.preview}
         </pre>
       )}
@@ -245,7 +251,7 @@ function TodoCard({ items }: { items: TodoItem[] }) {
     <div className="my-4 rounded-md border border-border bg-card/80 p-2.5 text-[13px] text--muted-foreground">
       <div className="mb-1.5 flex items-center gap-2 font-medium text-muted-foreground">
         <ListTodo className="h-3.5 w-3.5" /> Tasks
-        <span className="ml-auto font-mono text-[10px]">
+        <span className="ml-auto font-mono text-xs">
           {done}/{items.length}
         </span>
       </div>
@@ -253,7 +259,7 @@ function TodoCard({ items }: { items: TodoItem[] }) {
         {items.map((t, i) => (
           <div key={i} className="flex items-start gap-2">
             {t.status === 'completed' ? (
-              <CheckSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-green-500" />
+              <CheckSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" />
             ) : t.status === 'in_progress' ? (
               <Loader2 className={cn('mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-500', busy ? 'animate-spin' : 'opacity-50')} />
             ) : (
@@ -281,8 +287,8 @@ export function ChangeSet({ items }: { items: Extract<Item, { kind: 'tool' }>[] 
         <ChevronRight className={cn('h-3 w-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
         <Layers className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <span className="font-medium">{items.length} files changed</span>
-        <span className="ml-auto shrink-0 font-mono text-[10px]">
-          <span className="text-green-500">+{added}</span> <span className="text-red-500">−{removed}</span>
+        <span className="ml-auto shrink-0 font-mono text-xs">
+          <span className="text-success">+{added}</span> <span className="text-danger">−{removed}</span>
         </span>
       </button>
       {open && (

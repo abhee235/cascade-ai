@@ -1,4 +1,4 @@
-// memory/memoryStore.ts — durable, cross-session memory (ADR-015). File-backed "core memory" (the MemGPT
+// memory/memoryStore.ts — durable, cross-session memory (ADR-015). File-backed "core memory" (the always-loaded
 // tier): read every session and injected into the system prompt, and crucially it lives OUTSIDE the
 // compactable conversation history — so compaction can never erase it. See
 // docs/learnings/context-and-memory-design.md.
@@ -113,7 +113,7 @@ export function loadMemory(cwd: string): string {
 }
 
 /** Append a durable fact to PROJECT memory (CASCADE.md at the workspace root), creating it if missing.
- *  The agent's self-edit path (MemGPT-style core-memory curation). Returns the file path written. */
+ *  The agent's self-edit path (core-memory self-curation). Returns the file path written. */
 export function appendMemory(cwd: string, fact: string): string {
   const { project } = memoryPaths(cwd)
   let existing = ''

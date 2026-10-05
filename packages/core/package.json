@@ -1,6 +1,7 @@
 {
   "name": "@cascade/core",
   "version": "0.0.0",
+  "license": "MIT",
   "description": "Cascade headless agent engine. No vscode, no DOM — drivable by any frontend.",
   "type": "module",
   "main": "./dist/index.js",

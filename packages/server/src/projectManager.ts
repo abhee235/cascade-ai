@@ -13,16 +13,11 @@ import { randomUUID } from 'node:crypto'
 import { createProvider, createSession, JsonlTracer, type AgentDef, type CascadeSession, type Sandbox, type Tracer } from '@cascade/core'
 import { fanout, OtelTracer, type NestableTracer } from './otelTracer.js'
 import type { ProjectInfo } from '@cascade/app-protocol'
-import { applyTemplate, readAiRules } from './templates.js'
-import { createPlannerSession, needsPlanStage } from './planStage.js'
-import { browserHostFor, createBrowserTool } from './browserTool.js'
-import { createPackTool } from './packTool.js'
-import { createTemplateAuditTool } from './auditTool.js'
-import { createRestyleTool } from './restyleTool.js'
-import { createImageSearchTool } from './imageSearchTool.js'
+import { applyTemplate, readAiRules, stampStart } from './templates.js'
+import { needsPlanStage } from './planStage.js'
+import { agentDirsFor, builderSessionOptions, plannerSessionFor } from './builderSession.js'
 import { hasVision } from './modelCaps.js'
 import type { ProjectRuntime } from './projectRuntime.js'
-import { resourceDir } from './resources.js'
 
 /** Initialize a git repo in `dir` with one commit — the baseline for checkpoints (Phase 18). Best-effort. */
 function gitInit(dir: string): void {
@@ -87,92 +82,12 @@ export interface ProjectManagerOptions {
  *    runtime (ADR-067), so it can't be captured once at startup. */
 export type SessionTracerFactory = (info: { projectId?: string; kind: 'builder' | 'planner'; model?: string }) => Tracer | undefined
 
-/** Builder behavior injected ahead of every project's AI rules (as generic `extraInstructions`). The core
- *  base prompt is concise-chat-tuned, which makes the model explore then stop; the builder needs the opposite:
- *  keep using tools until the whole app is actually built. Kept here (server/wrapper), not in headless core.
- *  Exported so the Tier-3 builder bench runs sessions IDENTICAL to the product's (forensic fidelity). */
-// RECOMPOSED 2026-08-11 (prompt-audit findings B–E): one identity, headed subsections each answering one
-// question, precedence declared once at the top, emphasis reserved for the few real invariants (uniform
-// shouting reads as uniform priority to a weak model), and every rule keeping its measured origin as a
-// comment. Imagery-routing DETAIL moved to the design skill (its trigger words already live there); this
-// prompt states only the bar. The audit yardstick: every rule lives in the one section whose question it
-// answers, and appears exactly once across system prompt + tool descriptions.
-export const BUILDER_BEHAVIOR = [
-  '# Builder session',
-  'This session has a product role that refines the general rules above — where they conflict, this section wins.',
-  '',
-  'You are the autonomous app builder for a sandboxed project. The deliverable is working files and a green build; the session is pre-authorized, and no one can answer questions mid-build.',
-  '',
-  '## Pace',
-  '- Complete the entire request this turn: create or edit every file needed, tool call after tool call, until it is fully done. A plan or an explanation is not a deliverable — the working files are.',
-  // Measured (gpt-oss:20b, 2026-07-24): ended turns asking permission ("if you'd like me to install…"),
-  // cited scope ("beyond what can be done in one turn"), treated `tsc: not found` as a blocker.
-  '- Never end your turn to ask a question or offer options ("let me know", "shall I…") — a question burns the turn, because nobody is there to answer. Decide and act.',
-  // Batch-3 counterweight (critique): unbounded self-heal licensed `npm install <anything>` while the
-  // dashboard skill and most PLANs forbid new deps — the collision resolves here, at the rule itself.
-  '- Self-heal instead of stalling: something missing (`tsc: not found`, a package, a directory) is a step to fix — restore what the scaffold declares (`npm install`), create the missing file — and continue. A NEW dependency is different: prefer the kit and existing packages, and add one only when nothing in the kit or the packs can do the job.',
-  '- Nothing is "too big for one turn" and nothing gets silently downscoped: decompose and keep building until the whole request is done.',
-  '- Length belongs in tool calls, not prose: many file edits, minimal commentary. Never paste file contents into the reply — content goes in the file.',
-  '',
-  '## Context you already have',
-  // Measured (gpt-oss:20b, 2026-07-24): read 24 files across 30 turns and wrote ZERO — analysis-paralysis.
-  // Batch-3 scoping (critique): the rule was greenfield-shaped; on later turns the codebase IS the truth.
-  '- On a fresh build, do not survey the codebase — the pinned skills and PLAN.md are your context; read a file only right before you edit that exact file, and start writing within your first couple of tool calls. On LATER turns of an existing app, the code is the truth and PLAN.md may be stale: Grep/Read what you are about to change, still without broad surveying.',
-  // Same run: tried to READ files its own plan says to CREATE (data.ts 4×), looping on ENOENT.
-  '- Files your PLAN lists are targets to create, not files to open: a Read answering "does not exist" means Write it now.',
-  '- PLAN.md (pinned below) is the contract: build exactly the views, components, and data model it specifies. The line for updating it first: a NEW view, route, or data-model entity goes through Subagent {agent: "planner", prompt: <the request>} (the pinned copy refreshes automatically); anything smaller you build directly.',
-  // Batch-3 (critique, demonstrated by a pinned PLAN that hand-rolled view routing beside useHistoryView):
-  // the planner cannot see the scaffold, so PLAN sometimes re-invents an existing seam. The seam wins.
-  '- If PLAN.md contradicts an existing seam in src/lib (useHistoryView, storage, photos, utils), the SEAM wins — use it, and note the deviation in one line as you build.',
-  // Weak models route poorly on categories — the two always-needed skills are mandated, not routed;
-  // situational skills carry literal trigger words in the catalog below.
-  '- Before your first Write or Edit, load Skill {name: "architecture"} and Skill {name: "design"} — mandatory. Load the situational skills when their trigger words match.',
-  // The plan's `category:` token (design-overhaul P3 slice 5) is the routing instruction, and PLAN.md is
-  // pinned into EVERY turn — so unlike an inference made once from the brief, it survives compaction.
-  // `game` maps to the `game-dev` skill — the one token whose skill name differs. Stated explicitly:
-  // a weak model told "load that category's skill" will otherwise call Skill {name:"game"} and error.
-  '- PLAN.md\'s Design line opens with `category: <commerce|dashboard|landing|app-shell|social|game|none>`. Load THAT category\'s skill too (unless it is `none`; `game` loads Skill {name: "game-dev"}): it carries the view contract the plan was written against, plus `reference/pages.md` — the verbatim source of a full, working page of that kind. When a view fights you, read that page rather than inventing a shape.',
-  '',
-  '## Architecture and quality',
-  // Measured (shop-iterate-1): one ever-growing App.tsx crossed the read cap by round 2 — every later
-  // edit fought windowed reads and stale views.
-  '- Small components: one concern per file under src/components/, every file under ~150 lines — extract as you go, because a file that outgrows the read window makes every later edit blind. New components ARE the deliverable, never clutter: the general "don\'t create files needlessly" rule applies to configs, scripts, and docs, not to the app you were asked to build.',
-  '- The app must look designed, not scaffolded: pages assembled from src/components/blocks, token colors only (no raw bg-white/hex), and real imagery routed per the design skill\'s IMAGERY ROUTING (an emoji is never an image). First impression is part of "done".',
-  // ADR-066, measured (gpt-oss:20b): tried `npm run applypack` / `npx @cascade/backend` — mapped the pack
-  // to a shell command instead of the provided tool. Say plainly what ApplyPack is.
-  '- Persistence is the browser (the src/lib/storage.ts seam) by default. When the user asks for a database, server, or cross-device persistence: load Skill {name: "backend"} and call the ApplyPack tool — it sits in your toolset exactly like Write; it is not a shell command, and hand-writing a server, schema, or migration is never the path.',
-  '',
-  '## Verifying the running app',
-  // Batch-3 (critique): three documents stated "done" at three bars, and the strongest imperative was the
-  // weakest bar — a green tsc is fully compatible with a blank page. ONE canonical checklist, stated here.
-  // Measured (qwen36-agentic-iq4, builder-shop 2026-08-11): written as a bare name between a backticked
-  // SHELL command and a braced TOOL call, "TemplateAudit clean" read as a CLI — the model burned three
-  // turns on `npx template-audit`, `npx -y @<some-scope>/template-audit`, `grep -i audit package.json`
-  // before finding the tool. Every rung now carries its own call syntax, so the kind is unambiguous.
-  '- Done means, in order: `npm run build` green (the declared check) → TemplateAudit {} clean (zero HARD findings — no demo residue, no unreplaced placeholders; it is a TOOL you call, not a shell command) → Browser {op:"open"} loads → Browser {op:"audit"} clean (no invisible content, CSS loaded, no console errors). Then end the turn.',
-  // Batch-3 (critique): "only end when green" + "never ask" had no legal exit when green is impossible —
-  // which contradicted "Report faithfully". The honest red is that exit; the gates bound the loop anyway.
-  '- If the build still fails after 3 distinct fix attempts on the SAME error, stop: report the exact final error, what you tried, and what was completed. An honest red build is a valid ending; a loop is not.',
-  // Batch-4 (subagent-critique): the escalation tier above the inline Browser smoke — situational, because
-  // a full second-session QA pass on a local model is minutes of cost; and its report is model output.
-  '- When your own checks disagree with reality — audit failing twice on the same problem, or the user saying the app looks wrong — spawn Subagent {agent: "smoketester"} for an independent report. Its findings are claims, not evidence: fix the P0s and re-verify them yourself before calling anything done.',
-  // A dev server never exits, so a foreground `npm run dev` blocks until the Bash timeout kills it — no
-  // port-readiness signal on that path, unlike the Browser tool (detached start + poll).
-  '- To see the app run, use Browser {op:"open"} — it starts the dev server detached and port-polled. A foreground `npm run dev` never returns; it can only stall the turn.',
-  // Measured (2026-07-25): `pkill -f vite; pkill -f node` SIGTERMed the container including its own
-  // tooling (exit 143), then ~100 turns chasing the empty page it had just caused.
-  '- No broad process kills (`pkill -f node`, `pkill -f vite`, `killall`): they take down your own tooling and the dev server, and the blank app you then inspect is a bug you created. The harness reaps stale processes for you.',
-].join('\n')
 
 /** name → a filesystem-safe slug (so dirs are readable); id keeps them unique. */
 const slug = (name: string) =>
   name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || 'project'
 
-/** The capability dirs every builder-facing session shares: server-owned base first (immutable), then the
- *  project's own `.cascade/` (user-owned; shadows base by name). One definition — builder, plan stage,
- *  and the eval bench must all see the SAME capabilities. */
-export const skillDirsFor = (dir: string) => [resourceDir('skills', 'builder'), join(dir, '.cascade', 'skills')]
-export const agentDirsFor = (dir: string) => [resourceDir('agents', 'builder'), join(dir, '.cascade', 'agents')]
+export { agentDirsFor, BUILDER_BEHAVIOR, skillDirsFor } from './builderSession.js' // moved (ADR-085 P0); re-exported for existing importers
 
 /** Per-project forensic traces (ADR-023, product path — the first live walkthrough was UNDIAGNOSABLE
  *  without them). One JSONL per session under the project's own .cascade/traces/.
@@ -297,115 +212,20 @@ export class ProjectManager {
     this.createSessionFor =
       opts.createSessionFor ??
       ((dir, sandbox, extraInstructions) =>
-        createSession({
-          cwd: dir,
-          // THE SHARED LAYERS ARE READ-ONLY, AND NOW ACTUALLY ARE. Both directories carried a READ-ONLY
-          // comment and nothing else; measured (qwen3.5:9b 2026-08-13) two of three builds rewrote blocks
-          // anyway — NavBar/Hero/LogoStrip edited, a DangerZone block invented. Every property that makes
-          // a generated app remixable and lintable ("pages COMPOSE frozen blocks") dies silently there,
-          // with the build still green. Reads stay open: composing a block requires reading it first.
-          frozenPaths: ['src/components/blocks', 'src/components/ui'],
-          provider: this.makeProvider({ provider: this.active.provider, model: this.active.model, baseUrl: this.active.baseUrl, apiKey: this.active.apiKey, api: this.active.api }),
-          model: this.active.model,
-          // Hosted providers have no live window probe — honor an explicit override so the compactor sizes
-          // against the NIM endpoint's real window instead of the model→map guess (or the 8k default).
-          contextWindow: this.active.contextWindow,
-          // ADR-067: per-model output cap + sampling, applied on every turn (providers ignore what they can't use).
-          // UNSET means the window-ratio default ('auto' → max(window/8, 2048) capped at 16,384 — core's
-          // recommendedMaxOutputTokens), NOT the flat 16,384 the providers fall back to. On small windows
-          // the flat cap let a weak model's thinking eat 40% of the context (measured: 16,384 of 40,960),
-          // dragging the wire wall and the compaction trigger down with it. An explicit value still wins.
-          maxOutputTokens: this.active.maxOutputTokens ?? ('auto' as const),
-          temperature: this.active.temperature,
-          topP: this.active.topP,
-          topK: this.active.topK,
-          repeatPenalty: this.active.repeatPenalty,
-          presencePenalty: this.active.presencePenalty,
-          thinking: this.active.thinking, // TASK-thinking-control: reasoning-effort knob (rides the sampling plumbing)
-          // The autonomous builder has no synchronous user to answer mid-build — drop AskUserQuestion so a
-          // weak model can't stall the turn asking permission / for the next step (it must ACT — see
-          // BUILDER_BEHAVIOR). Clarifying questions belong to the planner stage, which keeps the tool.
-          // ADR-075: drop Lsp too. Its diagnostics half is redundant (type errors are PUSHED after each edit),
-          // and its navigation half went UNUSED across the whole build corpus (0 calls) while adding a
-          // false-negative hazard — a weak model that fumbles the required line/column gets "no references
-          // found" and can act destructively on that false empty. Push diagnostics, don't offer pull-navigation
-          // to the weak builder. The LanguageService ENGINE stays (the harness uses it for the diagnostics push).
-          excludeTools: ['AskUserQuestion', 'Lsp'],
-          // Hardware knob (2026-07-23): earlier compaction keeps decode fast on offloaded setups — see
-          // ProjectManagerOptions.compactRatio for the measured rationale.
-          compactRatio: this.opts.compactRatio,
-          // ADR-071: MCP servers (web search, etc.) the user configured in the MCP panel. The session builds
-          // its own McpHub from these and connects in the background; their tools join the registry. Injected
-          // (not read from a file here) so a config change + session-invalidation surfaces on the next open.
-          mcpServers: this.opts.mcpServers?.(),
-          mcpConnect: this.opts.mcpConnect,
-          // Product forensics (walkthrough lesson: no trace = no diagnosis). ADR-081: the deployment's own
-          // tracer joins the fanout here — on the desktop that is the SQLite store the Observatory reads.
-          tracer: tracerFor(dir, 'builder', this.opts.sessionTracerFor?.({ projectId: this.idOfDir(dir), kind: 'builder', model: this.active.model })),
-          // ADR-074: ON. The original OFF had two reasons — (a) curation adds hidden model calls (dead air),
-          // (b) recall mutated the system-prompt PREFIX, breaking the KV cache. (b) is now gone: dynamic recall
-          // appends surfaced facts at the message TAIL (dynamicRecall.ts), leaving the cached prefix intact, and
-          // curation writes to archival never touch the frozen system prompt. That leaves only (a) — curation
-          // fires just at compaction (bounded dead air), a trade the user chose: a durable fact recalled once
-          // beats re-diagnosing it across a dozen fix-loop turns (the measured Velocarta CTA-colour loop).
-          autoMemory: true,
-          sandbox, // 13.3: command tools run in the project's sandbox when present
-          // Sandboxed ⇒ auto-allow (the builder is contained; it shouldn't prompt for every command/edit).
-          // Without a sandbox we keep the default gate (the host is not isolated).
-          mode: sandbox ? 'bypass' : 'default',
-          // Prepend builder behavior to the template's AI rules. The core base prompt is tuned for concise
-          // chat ("short, direct responses"), which makes the model stop after exploring; the builder must
-          // instead keep using tools u ntil the whole app is built. This OVERRIDES the concise default.
-          extraInstructions: [BUILDER_BEHAVIOR, extraInstructions].filter(Boolean).join('\n\n'),
-          // A full build is many model round-trips (one per file batch); the chat default of 10 is far too low.
-          // 80 → 500 (2026-07-20): run 4 hit the 80 cap mid-fix-loop with ~30 turns lost to friction the
-          // harness has since fixed — the cap is a runaway BACKSTOP, not a working budget, so it must sit
-          // far above any legitimate build. The gates (todo/verify/read-loop) are what end a stuck session.
-          maxTurns: 500,
-          // ADR-036 SAFETY: the project dir is MODEL-WRITABLE, but hook commands spawn on the HOST — never
-          // load a hooks.json the builder itself could have written (sandbox escape at the next open()).
-          loadProjectHooks: false,
-          // ADR-051: a builder project is "done" when it compiles — declare it, so the verify gate holds the
-          // model to `npm run build` by name instead of accepting "I created all the files" on faith.
-          checkCommand: 'npm run build',
-          // ADR-055: base skills are SERVER-owned (immutable — outside the project and the Read jail);
-          // user skills in the project shadow base by name and are theirs to edit.
-          skillDirs: skillDirsFor(dir),
-          // ADR-056: named agents — base personas server-owned; user personas in the project shadow by name.
-          // ADR-056 rung 2 activation is NOT wired here: the base planner.md declares `proactive: true`
-          // in its own frontmatter (the idiom: policy travels with the capability, never a session flag).
-          agentDirs: agentDirsFor(dir),
-          // ADR-056 rung 5: PLAN.md is pinned into the builder's system prompt, re-read each turn — the
-          // contract is ALWAYS in context (measured: the builder read it 0 times when only on disk), and
-          // survives compaction across iterate rounds (the whole reason a durable plan exists).
-          contextFiles: [join(dir, 'PLAN.md')],
-          // Server-owned EXTRA tools, each self-gating:
-          // - Browser (ADR-060): the agent LOOKS at the app — needs model `vision` + a Docker sandbox.
-          // - ApplyPack (ADR-066): graduate the prototype to a backend — offered only while the template
-          //   has an UN-applied pack (createPackTool returns undefined otherwise, e.g. after graduation).
-          //   templateId is 'react' — every Cascade project uses the one React template (cf.
-          //   ensureVisualEditConfig).
-          // - ImageSearch (ADR-071): real stock photos for the app — server-side because it's coupled to the
-          //   preview CSP img-src allowlist. Always offered (no gating; it degrades to webPhoto/ArtImage).
-          extraTools: [
-            // Browser rides on BOTH runtimes now (browserHostFor adapts host-mode previewPort/startDev),
-            // and vision no longer gates the TOOL — only op:"screenshot" (2026-08-10: a text-only local
-            // quant had no runtime smoke channel at all; snapshot/audit/probe are text and stay).
-            ...((): import('@cascade/core').Tool[] => {
-              const host = browserHostFor(sandbox as unknown as import('./projectRuntime.js').ProjectRuntime | undefined)
-              return host ? [createBrowserTool({ sandbox: host, vision: this.visionOk })] : []
-            })(),
-            createImageSearchTool(),
-            ...([
-              createPackTool({ projectDir: dir, templateId: 'react' }),
-              // P1: the residue audit — self-gates to undefined when the template ships no contract.
-              createTemplateAuditTool({ projectDir: dir, templateId: 'react' }),
-              // P5: mechanical restyle (preset/skin swap) — self-gates when the project has no themes.
-              // The complement of frozenPaths above: blocks can't be hand-edited, only swapped whole.
-              createRestyleTool({ projectDir: dir, templateId: 'react' }),
-            ].filter(Boolean) as import('@cascade/core').Tool[]),
-          ],
-        }))
+        createSession(
+          builderSessionOptions({
+            dir,
+            sandbox,
+            extraInstructions,
+            provider: this.makeProvider({ provider: this.active.provider, model: this.active.model, baseUrl: this.active.baseUrl, apiKey: this.active.apiKey, api: this.active.api }),
+            active: this.active,
+            vision: this.visionOk,
+            compactRatio: this.opts.compactRatio,
+            mcpServers: this.opts.mcpServers?.(),
+            mcpConnect: this.opts.mcpConnect,
+            tracer: tracerFor(dir, 'builder', this.opts.sessionTracerFor?.({ projectId: this.idOfDir(dir), kind: 'builder', model: this.active.model })),
+          }),
+        ))
     this.load()
   }
 
@@ -421,23 +241,14 @@ export class ProjectManager {
     const build =
       this.opts.createPlanSessionFor ??
       ((dir: string, d: AgentDef, sandbox?: Sandbox) =>
-        createPlannerSession(d, {
+        plannerSessionFor(d, {
           dir,
           // ADR-067: the ACTIVE selection, NOT `opts` (the env seed). Measured 2026-07-22: with the picker on
           // a local Ollama model, the plan stage still ran its whole pass on CASCADE_MODEL — Ollama's request
           // log shows zero calls for the 56s the planner spent making 10 model calls to the hosted default.
           // Silent, billed, and invisible except in a per-message label.
           provider: this.makeProvider({ provider: this.active.provider, model: this.active.model, baseUrl: this.active.baseUrl, apiKey: this.active.apiKey, api: this.active.api }),
-          model: this.active.model,
-          // The window matters as much as the model: unset, a local backend silently front-truncates the
-          // prompt (ADR-038) — so the planner must size against the same window the builder uses.
-          contextWindow: this.active.contextWindow,
-          // UNSET means the window-ratio default ('auto' → max(window/8, 2048) capped at 16,384 — core's
-          // recommendedMaxOutputTokens), NOT the flat 16,384 the providers fall back to. On small windows
-          // the flat cap let a weak model's thinking eat 40% of the context (measured: 16,384 of 40,960),
-          // dragging the wire wall and the compaction trigger down with it. An explicit value still wins.
-          maxOutputTokens: this.active.maxOutputTokens ?? ('auto' as const),
-          skillDirs: skillDirsFor(dir),
+          active: this.active,
           sandbox,
           // ADR-081 amendment: the plan stage is a SUB-AGENT of this turn, not a turn of its own. One
           // user message, one trace — the planner's root becomes a child AGENT span inside the builder's,
@@ -533,8 +344,15 @@ export class ProjectManager {
     const id = randomUUID()
     const dir = join(this.opts.root, `${slug(name)}-${id.slice(0, 8)}`)
     mkdirSync(dir, { recursive: true })
-    if (templateId) {
+    if (templateId === 'none') {
+      // ADR-086 blank start: no scaffold. A .gitignore only, so the baseline commit exists and the builder's
+      // own `npm install` / build output never land in the user's history; the stamp picks the free profile.
+      writeFileSync(join(dir, '.gitignore'), 'node_modules\ndist\n')
+      stampStart(dir, 'none')
+      gitInit(dir)
+    } else if (templateId) {
       applyTemplate(templateId, dir) // copy the scaffold (Vite+React+TS+Tailwind, etc.)
+      stampStart(dir, 'react')
       gitInit(dir) // baseline commit for future checkpoints (Phase 18)
     }
     const project: Project = { id, name: name.trim() || 'Untitled', createdAt: new Date().toISOString(), dir }
@@ -546,6 +364,10 @@ export class ProjectManager {
   /** The active provider/model (for the serverInfo greeting + the UI's picker). */
   get currentProvider(): string {
     return this.active.provider
+  }
+  /** Does the active model accept images? (ADR-086: the plan stage only hands images to a model that can see them.) */
+  get vision(): boolean {
+    return this.visionOk
   }
   get currentModel(): string {
     return this.active.model

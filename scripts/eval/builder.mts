@@ -14,16 +14,16 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { parseArgs } from 'node:util'
-import { createProvider, createSession, JsonlTracer, type CascadeSession, type ModelProvider } from '@cascade/core'
-import { BUILDER_BEHAVIOR } from '../../packages/server/src/projectManager'
-import { createPlannerSession, ensurePlanPersisted, needsPlanStage, planQualityIssues, planReviseNudge, planSalvageNudge } from '../../packages/server/src/planStage'
+import { createProvider, createSession, JsonlTracer, type ActivityEvent, type CascadeSession, type ModelProvider, type SessionOptions } from '@cascade/core'
+// ADR-085 P0: the bench builds its sessions and plan stage from the SAME functions as the product.
+import { builderSessionOptions, plannerSessionFor, runBuilderTurn, runPlanStage, type ActiveModel } from '../../packages/server/src/builderSession'
+import { needsPlanStage } from '../../packages/server/src/planStage'
 import { HostSandbox } from '../../packages/server/src/hostSandbox'
-import { createPackTool } from '../../packages/server/src/packTool'
-import { createTemplateAuditTool } from '../../packages/server/src/auditTool'
-import { createRestyleTool } from '../../packages/server/src/restyleTool'
-import { templateCopyFilter } from '../../packages/server/src/templates'
+import { hasVision } from '../../packages/server/src/modelCaps'
+import { readAiRules, stampStart, templateCopyFilter } from '../../packages/server/src/templates'
+import { builtPreset, installSeed, loadSeed, pinPlanPreset } from './designSeed.mts'
 import { keepAwake } from './keepAwake.mts'
 import { fanout, OtelTracer } from './otelTracer.mts'
 
@@ -60,8 +60,48 @@ const { values: args } = parseArgs({
 		// own detached process with stdout/stderr on a FILE (file writes can't block on a dead reader);
 		// progress is then observable via <runDir>/runner.log + traces, completion via results.jsonl.
 		detach: { type: 'boolean', default: false },
+		// ADR-083 A/B treatment arm: a third-party skill FOLDER to adopt as-is. It is copied into every
+		// workdir's .cascade/skills/<name>/ (the builder's Bash can only reach the project, and its scripts
+		// must be runnable), and the builder is told to load it before its first write — the same mandate
+		// architecture/design get. Everything else stays identical to the control arm.
+		'extra-skill': { type: 'string' },
+		// (ADR-083's research-only --free-brief arm retired into the product's None start: --template none.)
+		// Prompt overrides: a dir holding `<scenario id>.txt` (single-shot) used instead of scenario.json's.
+		'prompt-dir': { type: 'string' },
+		// ADR-085 P0 oracle: a seeds root holding `<scenario id>/seed.json` (eval/design-seeds). B arm = the
+		// seed's theme + fonts, active before the session exists, and PLAN.md's preset pinned to it after the
+		// plan stage; --design-brief adds its DESIGN.md (the C arm). Scenarios without a seed run unseeded.
+		'design-seed': { type: 'string' },
+		'design-brief': { type: 'boolean', default: false },
+		// ADR-086: the project's START — `react` (the template) or `none` (a blank project: no scaffold and no
+		// shared node_modules, so the model scaffolds and `npm install`s itself, exactly as in the product).
+		template: { type: 'string', default: 'react' },
+		// ADR-086: comma-separated image files attached to the FIRST prompt — the planner studies them (on a
+		// model with vision, as the product decides) before the plan, and the first builder turn gets them too.
+		images: { type: 'string' },
+		'max-turns': { type: 'string' },
+		// ADR-086 P2: follow-up rounds to "done". A local model may need more than one turn to finish; after the
+		// scenario's prompts the product's check runs, and a failure goes back as the next prompt, up to N times.
+		// Counted in the row (followups, solvedFirst), never gated.
+		followups: { type: 'string' },
 	},
 })
+if (args['design-brief'] && !args['design-seed']) {
+	console.error('--design-brief is the C arm of the oracle: it needs --design-seed')
+	process.exit(2)
+}
+if (args.template !== 'react' && args.template !== 'none') {
+	console.error(`--template must be react or none (got "${args.template}")`)
+	process.exit(2)
+}
+if (args.template === 'none' && args['design-seed']) {
+	console.error('--template none is a BLANK project: --design-seed needs the React template')
+	process.exit(2)
+}
+// The attachments as the product sends them: data URIs.
+const firstImages = args.images
+	? args.images.split(',').map((f) => `data:image/${/\.jpe?g$/i.test(f) ? 'jpeg' : /\.webp$/i.test(f) ? 'webp' : 'png'};base64,${readFileSync(f.trim()).toString('base64')}`)
+	: undefined
 
 const ROOT = join(import.meta.dirname, '..', '..')
 const SCENARIOS_DIR = join(ROOT, 'eval', 'builder')
@@ -110,6 +150,12 @@ function makeWorkdir(id: string): string {
 	// the scaffold from memory). The OS never cleans repo dirs; eval/.work is gitignored.
 	mkdirSync(join(ROOT, 'eval', '.work'), { recursive: true })
 	const work = mkdtempSync(join(ROOT, 'eval', '.work', `builder-${id}-`))
+	if (args.template === 'none') {
+		// ADR-086: what ProjectManager.create(…, 'none') makes — a .gitignore and the stamp, nothing else.
+		writeFileSync(join(work, '.gitignore'), 'node_modules\ndist\n')
+		stampStart(work, 'none')
+		return work
+	}
 	// The PRODUCT's filter, not a local copy of it: a raw recursive copy handed every run the template's
 	// `demo/` — complete reference implementations of the exact scenarios under test — and choked the
 	// junction below on a stray `node_modules`. The bench must scaffold what applyTemplate ships.
@@ -294,6 +340,14 @@ if (args.detach && !process.env.CASCADE_DETACHED) {
 	process.exit(0)
 }
 
+/** The bench has no human: answer each question with its first option, approve each permission, and print
+ *  one progress dot per tool call. Used for the plan stage and every builder round alike. */
+const autoAnswer = (s: CascadeSession) => (ev: ActivityEvent) => {
+	if (ev.type === 'toolStart') process.stdout.write('.')
+	else if (ev.type === 'question') s.respondQuestion(ev.id, Object.fromEntries(ev.questions.map((q) => [q.question, q.options[0]?.label ?? 'Other'])))
+	else if (ev.type === 'permission') s.respondPermission(ev.id, 'allow')
+}
+
 function withTemperature(p: ModelProvider, temperature: number): ModelProvider {
 	return {
 		id: p.id,
@@ -305,11 +359,40 @@ function withTemperature(p: ModelProvider, temperature: number): ModelProvider {
 	}
 }
 
-writeFileSync(join(runDir, 'meta.json'), JSON.stringify({ label, model: args.model, tier: 'builder', scenarios: wanted, startedAt: new Date().toISOString() }, null, '\t'))
+/** ADR-083 A/B treatment: install `skillDir` into the workdir's own skills dir and return the mandate line
+ *  appended to the builder's instructions ('' when no extra skill was requested). The ONLY content change
+ *  is the path rewrite: `${CLAUDE_PLUGIN_ROOT}` exists only in the skill's plugin-host install, not here,
+ *  so its script paths are pointed at the in-project copy. */
+function installExtraSkill(work: string, skillDir: string | undefined): string {
+	if (!skillDir) return ''
+	const name = basename(skillDir)
+	const rel = `.cascade/skills/${name}`
+	const dest = join(work, '.cascade', 'skills', name)
+	cpSync(skillDir, dest, { recursive: true })
+	const rewrite = (dir: string): void => {
+		for (const entry of readdirSync(dir, { withFileTypes: true })) {
+			const p = join(dir, entry.name)
+			if (entry.isDirectory()) rewrite(p)
+			else if (entry.name.endsWith('.md'))
+				writeFileSync(p, readFileSync(p, 'utf8').replaceAll(`\${CLAUDE_PLUGIN_ROOT}/.claude/skills/${name}`, rel))
+		}
+	}
+	rewrite(dest)
+	return (
+		`\n\nThis project adopts the "${name}" skill as its UI/UX design guide. Before your first Write or Edit, ` +
+		`load Skill {name: "${name}"} — mandatory, like architecture and design — and follow its workflow. ` +
+		`Its scripts are inside the project at ${rel}/scripts/; run them from the project root with \`python\`.`
+	)
+}
+
+writeFileSync(join(runDir, 'meta.json'), JSON.stringify({ label, model: args.model, tier: 'builder', scenarios: wanted, extraSkill: args['extra-skill'] ?? null, designSeed: args['design-seed'] ?? null, designBrief: args['design-brief'] ?? false, template: args.template, images: args.images ?? null, followups: Number(args.followups) || 0, contextWindow: args['context-window'] ?? null, startedAt: new Date().toISOString() }, null, '\t'))
 console.log(`builder bench "${label}" — model=${args.model} scenarios=${wanted.length}\n`)
 // Builder scenarios (esp. iterate) run far past the 60-min sleep/hibernate threshold — hold the box awake.
 // keepAwake self-reaps on process exit; release() is called explicitly after the run loop below.
 const awake = keepAwake()
+// ADR-085: vision comes from the model's own capabilities, exactly as the product resolves it (hasVision) —
+// not the hard-coded `true` the free arm used, which would hand a text-only model screenshots it can't read.
+const vision = await hasVision(args.model!, args['base-url'], args.provider!).catch(() => false)
 
 const repeats = Math.max(1, Number(args.repeats) || 1)
 for (const id of wanted) {
@@ -319,6 +402,12 @@ for (let attempt = 1; attempt <= repeats; attempt++) {
 	const runId = repeats > 1 ? `${id}-a${attempt}` : id
 	const scenario: Scenario = JSON.parse(readFileSync(join(SCENARIOS_DIR, id, 'scenario.json'), 'utf8'))
 	const work = makeWorkdir(id)
+	const skillMandate = installExtraSkill(work, args['extra-skill']) // ADR-083 A/B treatment ('' = control)
+	// ADR-085 oracle: seed BEFORE the session exists (Restyle's preset list and AI_RULES are read at creation).
+	const seed = args['design-seed'] ? loadSeed(args['design-seed'], id) : undefined
+	if (seed) installSeed(work, seed, args['design-brief']!)
+	else if (args['design-seed']) console.warn(`(no design seed for ${id} under ${args['design-seed']} — this scenario runs unseeded)`)
+	let seedPin: ReturnType<typeof pinPlanPreset> | undefined
 	const tracePath = join(runDir, 'traces', `${runId}.jsonl`)
 	process.stdout.write(`▶ ${runId} `)
 
@@ -339,102 +428,68 @@ for (let attempt = 1; attempt <= repeats; attempt++) {
 	const otelEndpoint = process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
 	const otel = otelEndpoint ? new OtelTracer({ endpoint: otelEndpoint, service: `${label}:${id}`, attributes: { 'cascade.model': args.model! } }) : undefined
 
-	// Same capability dirs for the builder session AND the plan stage (mirrors projectManager's
-	// skillDirsFor/agentDirsFor — base server-owned dirs first, project .cascade/ shadows).
-	const skillDirs = [join(ROOT, 'packages', 'server', 'skills', 'builder'), join(work, '.cascade', 'skills')]
-	const agentDirs = [join(ROOT, 'packages', 'server', 'agents', 'builder'), join(work, '.cascade', 'agents')]
-	// FIDELITY: identical to the product's builder session (projectManager.ts) — same behavior instructions,
-	// same declared check — so forensics on a bench trace transfer 1:1 to the real product experience.
-	const session = createSession({
-		cwd: work,
-		// FIDELITY: the product freezes the shared layers (projectManager.ts) — the bench must too, or a
-		// bench run can pass by rewriting a block the real product would have refused.
-		frozenPaths: ['src/components/blocks', 'src/components/ui'],
-		provider,
+	// ADR-085 P0 — FIDELITY BY CONSTRUCTION: the product's builder session, built by the product's own function
+	// (Browser, ImageSearch, AI_RULES.md, excluded tools, the 'auto' output cap, skills, agents — per start).
+	// The bench differs ONLY in BenchDifferences: no curation into the user's global memory between runs, and
+	// the scenario's turn budget. The runtime is HostSandbox, the product's default (ADR-081).
+	const active: ActiveModel = {
+		provider: args.provider!,
 		model: args.model!,
-		mode: 'bypass',
-		// FIDELITY: the product's default runtime is HostSandbox (ADR-081) — on Windows that now means Git
-		// Bash when present, cmd fallback otherwise, and the Bash tool advertises whichever it got. Without
-		// this the bench ran core's sandbox-less spawn (always cmd on Windows) and measured a shell the
-		// product no longer uses.
-		sandbox: new HostSandbox(work),
-		tracer: otel ? fanout(new JsonlTracer(tracePath), otel) : new JsonlTracer(tracePath),
-		autoMemory: false,
-		maxTurns: scenario.budgets.maxTurns,
-		extraInstructions: BUILDER_BEHAVIOR,
-		checkCommand: 'npm run build',
+		baseUrl: args['base-url'],
 		contextWindow: args['context-window'] ? Number(args['context-window']) : scenario.session?.contextWindow,
 		maxOutputTokens: scenario.session?.maxOutputTokens,
-		// ADR-055/056 fidelity: same skills + named agents as the product's builder sessions.
-		skillDirs,
-		agentDirs,
-		contextFiles: [join(work, 'PLAN.md')], // ADR-056 rung 5: pin PLAN.md into the builder prompt (fidelity)
-		// ADR-066 fidelity: the product injects the ApplyPack tool (projectManager). Without it, a graduation
-		// scenario couldn't call it. Self-gates to undefined once applied (createPackTool → filter Boolean).
-		// (The Browser tool is product-only — it needs a Docker sandbox the bench doesn't have.)
-		extraTools: [createPackTool({ projectDir: work, templateId: 'react' }), createTemplateAuditTool({ projectDir: work, templateId: 'react' }), createRestyleTool({ projectDir: work, templateId: 'react' })].filter(Boolean) as import('@cascade/core').Tool[],
-	})
+	}
+	const sandbox = new HostSandbox(work)
+	const productOptions = builderSessionOptions(
+		{
+			dir: work,
+			provider,
+			active,
+			sandbox,
+			vision,
+			tracer: otel ? fanout(new JsonlTracer(tracePath), otel) : new JsonlTracer(tracePath),
+			// The template's AI rules, as the product injects them — plus the A/B treatment's skill mandate, if any.
+			extraInstructions: [readAiRules(work), skillMandate.trim()].filter(Boolean).join('\n\n'),
+		},
+		{ autoMemory: false, maxTurns: args['max-turns'] ? Number(args['max-turns']) : scenario.budgets.maxTurns },
+	)
+	const options: SessionOptions = productOptions
+	const session = createSession(options)
 	const t0 = Date.now()
 	let timedOut = false
 	const rounds: { n: number; ok: boolean; ms: number; note?: string }[] = []
+	const followups = Math.max(0, Number(args.followups) || 0)
+	let followupsUsed = 0
+	let solvedFirst: boolean | undefined
 	let stage: CascadeSession | undefined
 	const timer = setTimeout(() => {
 		timedOut = true
 		stage?.abort()
 		session.abort()
 	}, args['timeout-ms'] ? Number(args['timeout-ms']) : scenario.budgets.timeoutMs)
-	const prompts = scenario.prompts ?? [scenario.prompt!]
+	const prompts = args['prompt-dir'] ? [readFileSync(join(args['prompt-dir'], `${id}.txt`), 'utf8')] : (scenario.prompts ?? [scenario.prompt!])
 	try {
-		// ADR-056 rung 3 FIDELITY: same deterministic plan stage as the product (wsServer submit path) —
-		// fresh project + no PLAN.md + proactive planner ⇒ the planner runs as its own top-level session on
-		// the FIRST prompt, auto-answered like every other question in the bench. Separate trace file so
-		// stage forensics don't interleave with the builder's.
-		const plannerDef = needsPlanStage(work, 0, agentDirs)
+		// ADR-056 rung 3 + ADR-085: the product's plan stage, run by the product's own function — fresh project +
+		// no PLAN.md + proactive planner ⇒ the planner runs first on the FIRST prompt (auto-answered here), with
+		// the same salvage/revise round. Separate trace file so stage forensics don't interleave with the builder's.
+		const plannerDef = needsPlanStage(work, 0, options.agentDirs ?? [])
 		if (plannerDef) {
 			process.stdout.write('P')
-			const planner = createPlannerSession(plannerDef, {
-				dir: work,
-				provider,
-				model: args.model!,
-				skillDirs,
-				tracer: otel ? fanout(new JsonlTracer(join(runDir, 'traces', `${runId}-planner.jsonl`)), otel) : new JsonlTracer(join(runDir, 'traces', `${runId}-planner.jsonl`)),
-				contextWindow: args['context-window'] ? Number(args['context-window']) : scenario.session?.contextWindow,
-				maxOutputTokens: scenario.session?.maxOutputTokens,
-			})
+			const plannerTrace = new JsonlTracer(join(runDir, 'traces', `${runId}-planner.jsonl`))
+			const planner = plannerSessionFor(plannerDef, { dir: work, provider, active, sandbox, tracer: otel ? fanout(plannerTrace, otel) : plannerTrace })
 			stage = planner
 			try {
-				for await (const ev of planner.submit(prompts[0]!)) {
-					if (ev.type === 'toolStart') process.stdout.write('.')
-					else if (ev.type === 'question') planner.respondQuestion(ev.id, Object.fromEntries(ev.questions.map((q) => [q.question, q.options[0]?.label ?? 'Other'])))
-					else if (ev.type === 'permission') planner.respondPermission(ev.id, 'allow')
-				}
-				// FIDELITY (wsServer submit path): the spoken-questions salvage — when the stage ended with no
-				// plan and no question asked, ONE nudge round names the protocol violation and re-runs.
-				if (!timedOut && !ensurePlanPersisted(work, planner)) {
-					process.stdout.write('p')
-					for await (const ev of planner.submit(planSalvageNudge(planner))) {
-						if (ev.type === 'toolStart') process.stdout.write('.')
-						else if (ev.type === 'question') planner.respondQuestion(ev.id, Object.fromEntries(ev.questions.map((q) => [q.question, q.options[0]?.label ?? 'Other'])))
-						else if (ev.type === 'permission') planner.respondPermission(ev.id, 'allow')
-					}
-				} else if (!timedOut) {
-					// FIDELITY: same one-shot plan revision the product path runs (planQualityIssues).
-					const issues = planQualityIssues(readFileSync(join(work, 'PLAN.md'), 'utf8'))
-					if (issues.length) {
-						process.stdout.write('r')
-						for await (const ev of planner.submit(planReviseNudge(issues))) {
-							if (ev.type === 'toolStart') process.stdout.write('.')
-							else if (ev.type === 'question') planner.respondQuestion(ev.id, Object.fromEntries(ev.questions.map((q) => [q.question, q.options[0]?.label ?? 'Other'])))
-							else if (ev.type === 'permission') planner.respondPermission(ev.id, 'allow')
-						}
-					}
-				}
+				// ADR-086, as wsServer does it: the planner studies attached images only on a model with vision; a
+				// text-only one is told they exist and were not seen.
+				const planPrompt = firstImages && !vision ? `${prompts[0]!}\n\n(The user attached ${firstImages.length} image${firstImages.length > 1 ? 's' : ''}, but this model cannot view images: plan from the text, and note in the plan that the images were not seen.)` : prompts[0]!
+				await runPlanStage(work, planner, planPrompt, { onEvent: autoAnswer(planner), onStatus: () => process.stdout.write('r'), aborted: () => timedOut }, vision ? firstImages : undefined)
 			} finally {
 				stage = undefined
-				ensurePlanPersisted(work, planner) // guarantee PLAN.md exists (from the write, or the final message)
-				await planner.dispose().catch(() => {})
 			}
 		}
+		// The planner picks a preset from the menu (premium, by habit); the oracle's seed must win, as P1's
+		// applyPlanDesign() will make the server's choice win in the product.
+		if (seed) seedPin = pinPlanPreset(work, seed.id)
 		let pendingFeedback: string | undefined
 		for (let i = 0; i < prompts.length; i++) {
 			if (timedOut) break
@@ -445,11 +500,9 @@ for (let attempt = 1; attempt <= repeats; attempt++) {
 				pendingFeedback && scenario.checkFeedback
 					? `${prompts[i]!}\n\n<system-reminder>The automated checkpoint after your PREVIOUS round FAILED:\n${pendingFeedback}\nFix that first — it stays broken until you do — then complete this round's work. The checkpoint re-runs after every round.</system-reminder>`
 					: prompts[i]!
-			for await (const ev of session.submit(roundPrompt)) {
-				if (ev.type === 'toolStart') process.stdout.write('.')
-				else if (ev.type === 'question') session.respondQuestion(ev.id, Object.fromEntries(ev.questions.map((q) => [q.question, q.options[0]?.label ?? 'Other'])))
-				else if (ev.type === 'permission') session.respondPermission(ev.id, 'allow')
-			}
+			// The product's builder turn (P2's post-turn design check lands in it); no runtime — the bench's
+			// workdirs share a pre-installed node_modules, so there is nothing to install.
+			await runBuilderTurn(session, roundPrompt, { onEvent: autoAnswer(session) }, { images: i === 0 ? firstImages : undefined })
 			if (scenario.checkEachRound && !timedOut) {
 				// Reap the round's vite orphans BEFORE the checkpoint (see reapDevServer's round-scale note).
 				reapDevServer(VITE_RANGE)
@@ -472,21 +525,40 @@ for (let attempt = 1; attempt <= repeats; attempt++) {
 				process.stdout.write(rc.ok ? '✓' : '✗')
 			}
 		}
+		// ADR-086 P2 — follow-up rounds to done, while the session (and its context) is still alive: the product's
+		// check runs; a failure goes back as the next turn with the check's own words. The last run of the check
+		// (after the finally) is the verdict; the first one says whether a single turn was enough.
+		for (let k = 0; followups > 0 && k <= followups && !timedOut; k++) {
+			const rc = runCheck(id, work)
+			solvedFirst ??= rc.ok
+			if (rc.ok || k === followups) break
+			followupsUsed++
+			process.stdout.write('+')
+			const failing = rc.output.split('\n').filter((l) => l.trim() && !/instrument crashed/i.test(l)).slice(-14).join('\n').slice(0, 1500)
+			await runBuilderTurn(session, `The app is not done yet — the automated check fails:\n${failing}\n\nFix every item above, run \`npm run build\` until it is green, and check the running app again before you finish.`, { onEvent: autoAnswer(session) })
+		}
 	} catch {
 		/* abort may throw; the row records timedOut */
 	} finally {
 		clearTimeout(timer)
-		await session.dispose().catch(() => {})
+		await session.dispose().catch(() => {}) // closes the Browser tool's headless browser (Tool.dispose)
+		// The Browser tool's dev server: HostSandbox serves on an OS-assigned port, outside the reap range below —
+		// measured (ADR-086 P0), it outlived every run and, with the browser, kept the bench from exiting.
+		await sandbox.dispose().catch(() => {})
 		reapDevServer([...VITE_RANGE, 8787]) // …and anything the model left listening — incl. the app's API server (scenario-lifetime state; it ends here)
 		await otel?.shutdown().catch(() => {}) // flush spans before the next scenario / exit
 	}
 	const wallMs = Date.now() - t0
 	const check = runCheck(id, work)
+	// The seed's survival, read from what was BUILT (the check just ran vite build): a run that drifted back to
+	// a shipped preset is excluded from the oracle comparison and counted.
+	const built = seed ? builtPreset(work) : undefined
+	const seedRow = seed ? { seed: { id: seed.id, brief: args['design-brief'], pin: seedPin ?? 'no-plan', built: built ?? null, kept: built === seed.id } } : {}
 	await captureScreenshots(work, join(runDir, 'shots'), runId) // best-effort, pass or fail — never the verdict
 	if (args.keep) console.log(`\n   workdir kept for replay → ${work}`)
 	else cleanup(work)
 
-	const row = { ts: new Date().toISOString(), label, model: args.model, scenario: id, ...(repeats > 1 ? { attempt } : {}), solved: check.ok, timedOut, wallMs, traceFile: `${runId}.jsonl`, ...(rounds.length ? { rounds } : {}), ...(args.keep ? { workdir: work } : {}) }
+	const row = { ts: new Date().toISOString(), label, model: args.model, scenario: id, ...(repeats > 1 ? { attempt } : {}), solved: check.ok, timedOut, wallMs, traceFile: `${runId}.jsonl`, ...(rounds.length ? { rounds } : {}), ...(followups ? { followups: followupsUsed, solvedFirst: solvedFirst ?? false } : {}), ...seedRow, ...(args.keep ? { workdir: work } : {}) }
 	appendFileSync(join(runDir, 'results.jsonl'), `${JSON.stringify(row)}\n`)
 	console.log(` ${check.ok ? '✅' : timedOut ? '⏱ timeout' : '❌'}  ${Math.round(wallMs / 1000)}s${check.ok ? '' : `\n   ${check.output.split('\n').filter(Boolean).slice(-2).join(' | ').slice(0, 200)}`}`)
 }

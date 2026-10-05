@@ -14,7 +14,7 @@ const navBarVariants = cva('top-0 z-40 w-full', {
 })
 
 export interface NavBarProps extends VariantProps<typeof navBarVariants> {
-	/** Brand: name + optional icon slot (a lucide icon or a small logo mark). */
+	/** Brand: a <Logo> — the mark in a form chosen for the subject (never a bare stock icon beside the name). */
 	brand: ReactNode
 	/** Center links (render <a>/<button className="text-sm text-muted-foreground hover:text-foreground">). */
 	links?: ReactNode

@@ -8,7 +8,7 @@
 // Hero `layout="bleed"` puts the photo edge to edge behind the headline — the loudest opening the kit
 // has. It works exactly once per page, and only with a photo that survives having text on top of it.
 
-import { Battery, Compass, Mountain, Radio } from 'lucide-react'
+import { Battery, Compass, Radio } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { BentoGrid } from '@/components/blocks/BentoGrid'
@@ -16,6 +16,7 @@ import { CTASection } from '@/components/blocks/CTASection'
 import { FAQ } from '@/components/blocks/FAQ'
 import { Footer } from '@/components/blocks/Footer'
 import { Hero } from '@/components/blocks/Hero'
+import { Logo } from '@/components/blocks/Logo'
 import { Section } from '@/components/blocks/Section'
 import { StatStrip } from '@/components/blocks/StatStrip'
 import { Testimonial } from '@/components/blocks/Testimonial'
@@ -49,8 +50,9 @@ export function LandingLaunch() {
 				media={<img src={photo('nature-mountain')} alt="A ridge line at first light" />}
 			/>
 
-			{/* Numbers first: a launch audience wants the claim quantified before it wants the story. */}
-			<Section>
+			{/* Numbers first: a launch audience wants the claim quantified before it wants the story. A thin
+			    band, so compact: it sits close under the hero it quantifies. */}
+			<Section compact>
 				<StatStrip
 					stats={[
 						{ value: '16 days', label: 'Typical battery, GPS on' },
@@ -71,7 +73,7 @@ export function LandingLaunch() {
 							description: 'Memory-in-pixel, always on, no backlight tax. The sun is a feature here, not a problem.',
 							media: <img src={photo('nature-beach')} alt="The Kestrel display in direct sun" />,
 						},
-						{ kind: 'stat', value: '0.4 W', label: 'Peak draw with GPS tracking' },
+						{ kind: 'stat', value: '0.4 W', label: 'Peak draw with GPS tracking', trend: [1.9, 1.4, 1.1, 0.8, 0.6, 0.4] },
 						{ kind: 'plain', icon: Battery, title: 'Replaceable cell', description: 'A coin cell you can change with a nickel, not a service centre.' },
 						{ kind: 'plain', icon: Radio, title: 'Offline maps', description: '4 GB of vector topo on board. No signal, no subscription.' },
 						{
@@ -115,16 +117,21 @@ export function LandingLaunch() {
 				variant="full"
 				headline="The first run is 2,000 watches"
 				subcopy="Reserve now to hold a place in the March batch. Nothing is charged until yours ships."
-				actions={<Button size="lg" variant="secondary">Reserve yours — $340</Button>}
+				actions={
+					<>
+						<Button size="lg" variant="secondary">
+							Reserve yours — $340
+						</Button>
+						<Button size="lg" variant="outline">
+							Read the field notes
+						</Button>
+					</>
+				}
 				fineprint="Free returns for 60 days · Ten-year repair guarantee · Made in Sheffield"
 			/>
 
 			<Footer
-				brand={
-					<>
-						<Mountain className="size-4 text-primary" /> Kestrel
-					</>
-				}
+				brand={<Logo name="Kestrel" />}
 				tagline="Instruments for long days outside."
 				columns={[
 					{ heading: 'The watch', links: ['Specifications', 'Field notes', 'Straps', 'Repairs'] },

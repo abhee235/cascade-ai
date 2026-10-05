@@ -77,10 +77,10 @@ export function lintDoc(doc: Doc): Finding[] {
 	if (/[A-Za-z]:\\|(?<!\\)\\(?:src|scripts|reference|docs)\b/.test(body)) add('WARN', 'windows-paths', 'backslash path in body — always use forward slashes (official anti-pattern)')
 	if (/\b(before|after|until)\s+(19|20)\d{2}\b/i.test(body)) add('WARN', 'time-sensitive', 'date-conditional instruction — will silently rot; use an "old patterns" section instead')
 
-	// Multi-step workflow without a copyable checklist (skillify: checklists + success criteria per step).
+	// Multi-step workflow without a copyable checklist (rule: checklists + success criteria per step).
 	const numberedSteps = (body.match(/^\s*\d+\.\s/gm) ?? []).length
 	if (doc.kind === 'skill' && numberedSteps >= 4 && !body.includes('- [ ]')) {
-		add('WARN', 'no-checklist', `${numberedSteps} numbered steps but no copyable "- [ ]" checklist (skillify rule: checklist + success criteria)`)
+		add('WARN', 'no-checklist', `${numberedSteps} numbered steps but no copyable "- [ ]" checklist (skill rule: a checklist plus success criteria)`)
 	}
 
 	// Bundled references must be advertised in the body ("ignored content" smell otherwise).
@@ -96,7 +96,7 @@ export function lintDoc(doc: Doc): Finding[] {
 			if (!KNOWN_TOOLS.has(base)) add('FAIL', 'unknown-tool', `tools lists "${t}" — not a Cascade tool (typo disables the agent's allowlist)`)
 		}
 		if (meta.maxturns && !/^\d+$/.test(meta.maxturns)) add('FAIL', 'maxturns-numeric', `maxTurns "${meta.maxturns}" is not a number`)
-		if (!body.includes('- [ ]') && !/success criteria/i.test(body)) add('WARN', 'no-success-criteria', 'agent body has no self-check/success criteria — skillify requires knowing what done looks like')
+		if (!body.includes('- [ ]') && !/success criteria/i.test(body)) add('WARN', 'no-success-criteria', 'agent body has no self-check/success criteria — a skill must say what done looks like')
 	}
 	return f
 }

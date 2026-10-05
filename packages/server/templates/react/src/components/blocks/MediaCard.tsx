@@ -29,7 +29,7 @@ export function MediaCard({ media, title, meta, aside, actions, onClick, classNa
 				className,
 			)}
 		>
-			<div className="aspect-[4/3] overflow-hidden bg-muted [&_img]:size-full [&_img]:object-cover [&_img]:transition-transform [&_img]:duration-300 group-hover:[&_img]:scale-[1.03] [&_svg]:size-full">
+			<div className="aspect-[4/3] overflow-hidden bg-muted [&>img]:size-full [&>img]:object-cover [&>img]:transition-transform [&>img]:duration-300 group-hover:[&>img]:scale-[1.03] [&>svg]:size-full">
 				{media}
 			</div>
 			<div className="flex flex-1 flex-col gap-1.5 p-4">

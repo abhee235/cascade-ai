@@ -63,4 +63,3 @@ its signal; 40 k of output keeps `line0` **and** `line4999` with a `[N chars omi
 gpt-oss:20b in the web builder.
 
 [builtins/Bash.ts]: ../../packages/core/src/tools/builtins/Bash.ts
-

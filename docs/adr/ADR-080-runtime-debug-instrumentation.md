@@ -1,4 +1,4 @@
-# ADR-080 — Hypothesis-driven runtime debugging (Cursor Debug Mode, Cascade-shaped)
+# ADR-080 — Hypothesis-driven runtime debugging (an editor-agent debug mode, Cascade-shaped)
 
 Status: **Proposed** — phased; Phase 0 queued for next idle window, Phase 1 after the 3D-website milestone,
 Phases 2–3 deferred until Phase 1 proves the loop.
@@ -21,9 +21,9 @@ That is precisely the **debug mode** an AI code editor has published: (1) genera
 (3) reproduce, (4) analyze the runtime logs against the hypotheses, (5) fix + verify, (6) **remove all
 instrumentation**, leaving a clean diff. Runtime behavior becomes text, which LLMs are good at reading.
 
-## Why Cascade can build this CHEAPER than Cursor did
+## Why Cascade can build this CHEAPER than that editor did
 
-Cursor needed a dedicated debug-server + extension endpoint to collect logs. Cascade's agent already owns a
+That editor needed a dedicated debug-server + extension endpoint to collect logs. Cascade's agent already owns a
 live Playwright session into the page — so a **ring buffer on `window` + the existing probe op IS the
 collector**. No new server, no new transport, no new protocol.
 
@@ -34,7 +34,7 @@ collector**. No new server, no new transport, no new protocol.
 - Browser gains **`click`** (selector or text) and **`press`** (key) ops — the missing hands. Needed by
   gametester ("click START GAME") and by any reproduce-by-interaction debugging. Playwright one-liners.
 
-### Phase 1 — the manual-instrumentation loop (small; the Cursor shape, model-driven)
+### Phase 1 — the manual-instrumentation loop (small; the published shape, model-driven)
 - **Template helper** (`src/lib/debugLog.ts`, template + skill-taught):
   `__LOG__(tag, data)` → pushes `{t, tag, data}` into `window.__LOGS__` (ring buffer, 500 cap) and
   optionally mirrors to console. Zero infra — probe reads `__LOGS__`.

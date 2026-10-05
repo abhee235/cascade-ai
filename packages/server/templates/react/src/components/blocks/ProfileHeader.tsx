@@ -29,11 +29,11 @@ export interface ProfileHeaderProps {
 export function ProfileHeader({ cover, avatar, name, handle, bio, stats, action, className }: ProfileHeaderProps) {
 	return (
 		<div data-block="profile-header" className={cn('flex flex-col', className)}>
-			<div className="h-36 overflow-hidden bg-accent sm:h-44 [&_img]:size-full [&_img]:object-cover [&_svg]:size-full">{cover}</div>
+			<div className="h-36 overflow-hidden bg-accent sm:h-44 [&>img]:size-full [&>img]:object-cover [&>svg]:size-full">{cover}</div>
 			<div className="px-4">
 				<div className="flex items-end justify-between">
 					{/* -mt pulls the avatar over the cover; the ring cuts it out of the photo behind it. */}
-					<div className="-mt-10 size-20 overflow-hidden rounded-full ring-4 ring-background sm:-mt-12 sm:size-24 [&_img]:size-full [&_img]:object-cover [&_svg]:size-full">
+					<div className="-mt-10 size-20 overflow-hidden rounded-full ring-4 ring-background sm:-mt-12 sm:size-24 [&>img]:size-full [&>img]:object-cover [&>svg]:size-full">
 						{avatar}
 					</div>
 					{action ? <div className="pb-2">{action}</div> : null}

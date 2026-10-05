@@ -26,7 +26,7 @@ export interface CheckoutPanelProps {
  *  tabular-nums so the column reads as a column; the total is visually separated from its parts. */
 export function CheckoutPanel({ lines, total, totalLabel = 'Total', children, action, confirmation, className }: CheckoutPanelProps) {
 	return (
-		<div data-block="checkout-panel" className={cn('grid gap-6 md:grid-cols-[1fr_20rem] md:items-start', className)}>
+		<div data-block="checkout-panel" className={cn('grid grid-cols-1 gap-6 md:grid-cols-[1fr_20rem] md:items-start', className)}>
 			<div className="flex flex-col gap-4 rounded-xl border bg-card p-6">
 				{confirmation ?? children}
 				{!confirmation && action ? <div className="mt-2 flex justify-end">{action}</div> : null}

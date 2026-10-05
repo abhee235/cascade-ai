@@ -40,7 +40,7 @@ export type ModelParams = Omit<EnabledModel, 'provider' | 'model'>
 
 /** Seed set — a few sane defaults across the configured providers. The user curates from here. */
 const DEFAULTS: EnabledModel[] = [
-  { provider: 'openai', model: 'gpt-5.6-luna' },
+  { provider: 'openai', model: 'gpt-6-luna' },
   { provider: 'openai', model: 'gpt-4.1' },
   { provider: 'ollama', model: 'qwen36-agentic' },
 ]

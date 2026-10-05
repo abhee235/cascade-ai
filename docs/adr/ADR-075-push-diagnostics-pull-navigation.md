@@ -17,7 +17,7 @@ edits — and never converged. Forensics (this session):
   silently delivered nothing.
 - Cross-referenced two established agents: **one PUSHES diagnostics** after every edit (baseline
   diff, new-only, deduped, capped, gated on the model having an action tool) and its LSP tool exposes **no
-  diagnostics op** — navigation is pull, diagnostics are push. **A pull-only design fetches everything** via a model-invoked
+  diagnostics op** — navigation is pull, diagnostics are push. **The other PULLS everything** via a model-invoked
   `lsp` tool (incl. diagnostics) — which is exactly the "model must remember to ask" failure: our `Lsp` tool saw
   **0 calls across the entire build corpus.**
 - Corpus churn-split (49 builds): 6 feedback-starvation, ~7 weak-signal "source-hunting?", 36 no-churn. No clean

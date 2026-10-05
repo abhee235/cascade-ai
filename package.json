@@ -1,6 +1,7 @@
 {
   "name": "cascade-monorepo",
   "version": "0.0.0",
+  "license": "MIT",
   "private": true,
   "description": "Cascade — an Ollama-native AI coding agent. One headless engine, many frontends.",
   "workspaces": [

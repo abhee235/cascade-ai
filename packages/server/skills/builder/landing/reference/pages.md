@@ -16,7 +16,7 @@ the copy, and the data must all come from the user's brief.
 // The archetype, in order: Hero(collage) → LogoStrip → BentoGrid → PricingTable → Testimonial → FAQ →
 // CTASection → Footer. Every band is a block with props; there is no bespoke CSS on this page.
 
-import { GitBranch, Shield, Sparkles, Zap } from 'lucide-react'
+import { GitBranch, Shield, Sparkles } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { BentoGrid } from '@/components/blocks/BentoGrid'
@@ -24,6 +24,7 @@ import { CTASection } from '@/components/blocks/CTASection'
 import { FAQ } from '@/components/blocks/FAQ'
 import { Footer } from '@/components/blocks/Footer'
 import { Hero } from '@/components/blocks/Hero'
+import { Logo } from '@/components/blocks/Logo'
 import { LogoStrip } from '@/components/blocks/LogoStrip'
 import { PricingTable } from '@/components/blocks/PricingTable'
 import { Section } from '@/components/blocks/Section'
@@ -57,7 +58,7 @@ export function LandingSaaS() {
 				media={<img src={photo('workspace-code')} alt="The Cadence run timeline" />}
 			/>
 
-			<Section>
+			<Section compact>
 				<LogoStrip label="Running in production at" items={['Northwind', 'Kestrel', 'Bellhop', 'Trimble', 'Osmond', 'Fieldwire']} />
 			</Section>
 
@@ -71,7 +72,7 @@ export function LandingSaaS() {
 							description: 'Durations, retries, and the exact diff that changed behaviour.',
 							media: <img src={photo('workspace-office')} alt="Run timeline" />,
 						},
-						{ kind: 'stat', value: '99.98%', label: 'Scheduler uptime, trailing 90 days' },
+						{ kind: 'stat', value: '99.98%', label: 'Scheduler uptime, trailing 90 days', trend: [99.9, 99.95, 99.97, 99.99, 99.98, 100] },
 						{ kind: 'plain', icon: GitBranch, title: 'Branch-aware', description: 'Preview pipelines per PR, torn down on merge.' },
 						{ kind: 'plain', icon: Shield, title: 'Secrets stay yours', description: 'BYO KMS; we never store decrypted values.' },
 						{ kind: 'accent', title: 'Start with a template', description: 'Fourteen pipelines, ready to fork.', action: <Button variant="secondary">Browse templates</Button> },
@@ -149,11 +150,7 @@ export function LandingSaaS() {
 			/>
 
 			<Footer
-				brand={
-					<>
-						<Zap className="size-4 text-primary" /> Cadence
-					</>
-				}
+				brand={<Logo name="Cadence" />}
 				tagline="Scheduled data pipelines with receipts."
 				columns={[
 					{ heading: 'Product', links: ['Pipelines', 'Schedules', 'Alerting', 'Pricing'] },
@@ -180,7 +177,7 @@ export function LandingSaaS() {
 // Hero `layout="bleed"` puts the photo edge to edge behind the headline — the loudest opening the kit
 // has. It works exactly once per page, and only with a photo that survives having text on top of it.
 
-import { Battery, Compass, Mountain, Radio } from 'lucide-react'
+import { Battery, Compass, Radio } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { BentoGrid } from '@/components/blocks/BentoGrid'
@@ -188,6 +185,7 @@ import { CTASection } from '@/components/blocks/CTASection'
 import { FAQ } from '@/components/blocks/FAQ'
 import { Footer } from '@/components/blocks/Footer'
 import { Hero } from '@/components/blocks/Hero'
+import { Logo } from '@/components/blocks/Logo'
 import { Section } from '@/components/blocks/Section'
 import { StatStrip } from '@/components/blocks/StatStrip'
 import { Testimonial } from '@/components/blocks/Testimonial'
@@ -221,8 +219,9 @@ export function LandingLaunch() {
 				media={<img src={photo('nature-mountain')} alt="A ridge line at first light" />}
 			/>
 
-			{/* Numbers first: a launch audience wants the claim quantified before it wants the story. */}
-			<Section>
+			{/* Numbers first: a launch audience wants the claim quantified before it wants the story. A thin
+			    band, so compact: it sits close under the hero it quantifies. */}
+			<Section compact>
 				<StatStrip
 					stats={[
 						{ value: '16 days', label: 'Typical battery, GPS on' },
@@ -243,7 +242,7 @@ export function LandingLaunch() {
 							description: 'Memory-in-pixel, always on, no backlight tax. The sun is a feature here, not a problem.',
 							media: <img src={photo('nature-beach')} alt="The Kestrel display in direct sun" />,
 						},
-						{ kind: 'stat', value: '0.4 W', label: 'Peak draw with GPS tracking' },
+						{ kind: 'stat', value: '0.4 W', label: 'Peak draw with GPS tracking', trend: [1.9, 1.4, 1.1, 0.8, 0.6, 0.4] },
 						{ kind: 'plain', icon: Battery, title: 'Replaceable cell', description: 'A coin cell you can change with a nickel, not a service centre.' },
 						{ kind: 'plain', icon: Radio, title: 'Offline maps', description: '4 GB of vector topo on board. No signal, no subscription.' },
 						{
@@ -287,16 +286,21 @@ export function LandingLaunch() {
 				variant="full"
 				headline="The first run is 2,000 watches"
 				subcopy="Reserve now to hold a place in the March batch. Nothing is charged until yours ships."
-				actions={<Button size="lg" variant="secondary">Reserve yours — $340</Button>}
+				actions={
+					<>
+						<Button size="lg" variant="secondary">
+							Reserve yours — $340
+						</Button>
+						<Button size="lg" variant="outline">
+							Read the field notes
+						</Button>
+					</>
+				}
 				fineprint="Free returns for 60 days · Ten-year repair guarantee · Made in Sheffield"
 			/>
 
 			<Footer
-				brand={
-					<>
-						<Mountain className="size-4 text-primary" /> Kestrel
-					</>
-				}
+				brand={<Logo name="Kestrel" />}
 				tagline="Instruments for long days outside."
 				columns={[
 					{ heading: 'The watch', links: ['Specifications', 'Field notes', 'Straps', 'Repairs'] },
@@ -324,12 +328,13 @@ export function LandingLaunch() {
 // card shows a DISTINCT subject-relevant photo. `photoFor()` here would draw from a ~2-photo pool and
 // every project would look like the same building.
 
-import { ArrowUpRight, Mail, PenTool } from 'lucide-react'
+import { ArrowUpRight, Mail } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CTASection } from '@/components/blocks/CTASection'
 import { Footer } from '@/components/blocks/Footer'
 import { Hero } from '@/components/blocks/Hero'
+import { Logo } from '@/components/blocks/Logo'
 import { MediaCard } from '@/components/blocks/MediaCard'
 import { Photo } from '@/components/blocks/Photo'
 import { Section } from '@/components/blocks/Section'
@@ -366,7 +371,7 @@ export function LandingPortfolio() {
 			/>
 
 			<Section eyebrow="Selected work" heading="Six things we made recently">
-				<div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+				<div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
 					{WORK.map((p) => (
 						<MediaCard
 							key={p.id}
@@ -380,7 +385,7 @@ export function LandingPortfolio() {
 			</Section>
 
 			<Section tone="muted" eyebrow="How we work" heading="Two people, start to finish">
-				<div className="grid gap-8 md:grid-cols-2">
+				<div className="grid grid-cols-1 gap-8 md:grid-cols-2">
 					<p className="text-lg text-muted-foreground">
 						No account managers and no handover. The people you meet in the first call are the people who draw the marks, set the type, and write the CSS — which is
 						why we take six projects a year instead of thirty.
@@ -415,11 +420,7 @@ export function LandingPortfolio() {
 			/>
 
 			<Footer
-				brand={
-					<>
-						<PenTool className="size-4 text-primary" /> Fold &amp; Field
-					</>
-				}
+				brand={<Logo name="Fold & Field" />}
 				tagline="Identity, packaging, and the web that carries them."
 				columns={[
 					{ heading: 'Studio', links: ['Work', 'About', 'Process', 'Contact'] },
@@ -448,7 +449,7 @@ export function LandingPortfolio() {
 // than a toast that vanishes.
 
 import { useState } from 'react'
-import { CheckCircle2, Hourglass, Mail, Send } from 'lucide-react'
+import { CheckCircle2, Hourglass, Send } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -456,6 +457,7 @@ import { Label } from '@/components/ui/label'
 import { FAQ } from '@/components/blocks/FAQ'
 import { Footer } from '@/components/blocks/Footer'
 import { Hero } from '@/components/blocks/Hero'
+import { Logo } from '@/components/blocks/Logo'
 import { LogoStrip } from '@/components/blocks/LogoStrip'
 import { Section } from '@/components/blocks/Section'
 
@@ -535,13 +537,13 @@ export function LandingWaitlist() {
 				}
 			/>
 
-			<Section>
+			<Section compact>
 				<LogoStrip variant="bare" label="Built by people from" items={['Kestrel', 'Northwind', 'Fieldwire', 'Osmond', 'Bellhop']} />
 			</Section>
 
 			<Section tone="muted" eyebrow="What happens next" heading="Three steps, then it is yours">
 				{/* Numbered markers are honest here: this IS a sequence, and the order is the information. */}
-				<div className="grid gap-8 md:grid-cols-3">
+				<div className="grid grid-cols-1 gap-8 md:grid-cols-3">
 					{STEPS.map((s) => (
 						<div key={s.n} className="flex flex-col gap-2">
 							<span className="font-serif text-3xl font-semibold tabular-nums tracking-display text-muted-foreground/60">{s.n}</span>
@@ -563,11 +565,7 @@ export function LandingWaitlist() {
 			</Section>
 
 			<Footer
-				brand={
-					<>
-						<Mail className="size-4 text-primary" /> Sift
-					</>
-				}
+				brand={<Logo name="Sift" />}
 				tagline="Local-first search for everything you have written."
 				fineprint="© 2026 Sift. Nothing leaves your machine."
 			/>

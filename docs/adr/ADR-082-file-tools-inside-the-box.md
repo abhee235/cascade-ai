@@ -15,11 +15,11 @@ folder."* Today that is true for **commands** (Docker/WSL run them inside; the p
 host path bridged; the live suite proved `/mnt/c` is unreachable) but not for **file tools**: Read/Write/Edit
 execute in the server process on the host, confined by the path jail (ADR-033) — a check in trusted code
 over a model-controlled path, i.e. a *policy fence, not a kernel boundary*. A jail bug is a host write; a
-VM boundary bug is not. The survey of DeepSeek Harness (in `_temp/deepseek-harness`) shows the same split
-in their default local design, with the same honest self-description (`fs-sandbox/README.md`: "a policy
-fence, not a kernel boundary … containment, not a security boundary") — and shows the fix: their E2B world
-relocates the *filesystem seam* into the sandbox (`fs-e2b`), so file tools execute inside against the real
-remote FS with no host jail at all. Cascade already has the local box; it lacks the relocated fs seam.
+VM boundary bug is not. A survey of an open-source agent harness shows the same split in its default local
+design, with the same honest self-description (its own docs call its fs fence a policy fence rather than a
+kernel boundary — containment, not a security boundary) — and shows the fix: its remote cloud-VM mode
+relocates the *filesystem seam* into the sandbox, so file tools execute inside against the real remote FS with
+no host jail at all. Cascade already has the local box; it lacks the relocated fs seam.
 
 **2. Escalation was reachable without a denial — and a hard error manufactured one.** Measured with
 gpt-5.6-luna in the plan stage: the model set `sandbox_permissions: "workspace-write"` (the mode it already
@@ -155,8 +155,8 @@ start, restarted on failure; large reads stream in chunks; binary files stat-onl
 ## Consequences
 
 - The sandboxed runtimes become the "everything in the box" world the product promises, with no change to
-  how users see their project. This is the point at which Cascade's local WSL/Docker tiers exceed DeepSeek
-  Harness's *default* (host, in-place) and match its opt-in remote world — locally, with nothing to install.
+  how users see their project. This is the point at which Cascade's local WSL/Docker tiers exceed that
+  harness's *default* (host, in-place) and match its opt-in remote world — locally, with nothing to install.
 - One more seam to keep coherent across three runtimes; the parity test idea from the skins work (identical
   behavior across backends over a fixture tree) is the natural guard.
 - Per-operation latency rises from an in-process call to a helper round-trip (~1–5 ms in-VM); batching in
@@ -171,7 +171,7 @@ start, restarted on failure; large reads stream in chunks; binary files stat-onl
   live suites per runtime proving a jail-bypass attempt (`../../` beyond the root, a symlink out) is refused
   *by the box*, not by our check; the freshness guard holding across an in-box write.
 
-## How others do it
+## Prior art
 
 The surveyed open-source harness: local default = in-place kernel confinement of commands + a userland fs
 fence, reads never restricted, explicitly not a general-purpose security sandbox; remote (opt-in) = fs and

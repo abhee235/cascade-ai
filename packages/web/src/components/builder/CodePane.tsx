@@ -88,7 +88,7 @@ function SearchPanel({ tree, onOpen }: { tree: FileNode[]; onOpen: (path: string
               <button key={f} onClick={() => onOpen(f)} title={f} className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-[13px] hover:bg-accent/50">
                 <FileGlyph path={f} className="h-4 w-4" />
                 <span className="shrink-0 truncate">{nameOf(f)}</span>
-                {dir && <span className="min-w-0 truncate text-[10px] text-muted-foreground/60">{dir}</span>}
+                {dir && <span className="min-w-0 truncate text-xs text-muted-foreground/60">{dir}</span>}
               </button>
             )
           })
@@ -216,9 +216,9 @@ export function CodePane() {
               {/* editor actions: save indicator + Code/Diff toggle */}
               <div className="flex shrink-0 items-center gap-2 border-l border-border px-2">
                 {codeView === 'code' && saved !== 'idle' && (
-                  <span className="text-[10px] text-muted-foreground/70">{saved === 'saving' ? 'saving…' : 'saved'}</span>
+                  <span className="text-xs text-muted-foreground/70">{saved === 'saving' ? 'saving…' : 'saved'}</span>
                 )}
-                <div className="flex items-center overflow-hidden rounded-md border border-border text-[11px]">
+                <div className="flex items-center overflow-hidden rounded-md border border-border text-xs">
                   {(['code', 'diff'] as const).map((v) => (
                     <button
                       key={v}

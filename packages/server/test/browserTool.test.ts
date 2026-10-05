@@ -283,3 +283,39 @@ describe('browserHostFor — the host runtime gets a Browser too (was Docker-onl
 		expect(browserHostFor(undefined)).toBeUndefined()
 	})
 })
+
+// ADR-086 P0: the headless browser outlived its session — one leaked per model switch or project close, and
+// the bench process never exited. session.dispose() now calls Tool.dispose.
+describe('Browser dispose (the leaked headless browser)', () => {
+	it('closes the browser once; a disposed tool refuses to launch another', async () => {
+		const f = stubFetch(true)
+		const close = vi.fn(async () => {})
+		const launch = vi.fn(async () => ({ page: fakePage(), close }))
+		const tool = createBrowserTool({ sandbox: fakeSandbox(), launch })
+		await tool.call({ op: 'open' }, {} as never)
+		await tool.dispose!()
+		await tool.dispose!() // idempotent: project close, then server shutdown
+		expect(close).toHaveBeenCalledTimes(1)
+		expect((await tool.call({ op: 'open' }, {} as never)).isError).toBe(true)
+		expect(launch).toHaveBeenCalledTimes(1)
+		f.mockRestore()
+	})
+
+	it('a browser that finishes launching after dispose is closed, not leaked (dispose mid-turn)', async () => {
+		const f = stubFetch(true)
+		const close = vi.fn(async () => {})
+		let release: (() => void) | undefined
+		const launch = () => new Promise<{ page: PageLike; close: () => Promise<void> }>((resolve) => {
+			release = () => resolve({ page: fakePage(), close })
+		})
+		const tool = createBrowserTool({ sandbox: fakeSandbox(), launch })
+		const opening = tool.call({ op: 'open' }, {} as never)
+		await vi.waitFor(() => expect(release).toBeDefined())
+		await tool.dispose!() // nothing launched yet — nothing to close
+		expect(close).not.toHaveBeenCalled()
+		release!()
+		expect((await opening).isError).toBe(true)
+		expect(close).toHaveBeenCalledTimes(1)
+		f.mockRestore()
+	})
+})

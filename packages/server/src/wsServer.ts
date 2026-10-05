@@ -10,19 +10,19 @@
 
 import './loadDotEnv.js' // FIRST import: .env → process.env before the CASCADE_* consts below read it
 import { dirname, extname, join, resolve, sep } from 'node:path'
-import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
+import { appendFileSync, createReadStream, existsSync, mkdirSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomBytes } from 'node:crypto'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { CascadeSession, InboundMessage } from '@cascade/core'
 import type { BuilderCommand } from '@cascade/app-protocol'
 import { beginTurn, flushTracers, ProjectManager, setTraceSession, type SessionTracerFactory } from './projectManager.js'
-import { ensurePlanPersisted, planQualityIssues, planReviseNudge, planSalvageNudge } from './planStage.js'
+import { runBuilderTurn, runPlanStage } from './builderSession.js'
 import { DockerSandbox, dockerAvailable, sweepSandboxContainers } from './dockerSandbox.js'
 import { HostSandbox, sweepHostDevServers } from './hostSandbox.js'
 import { DEFAULT_RUNTIME_MODE, type RuntimeMode } from './projectRuntime.js'
 import { WslSandbox, resetWslCache, wslOfferable, wslRuntimeUsable } from './wslSandbox.js'
-import { localBackendClaims, selectLocalBackend } from './sandboxBackends.js'
+import { localBackendClaims, selectLocalBackend, sweepWorkspaceLabels } from './sandboxBackends.js'
 import type { RuntimeInfo } from '@cascade/app-protocol'
 import { ensureVisualEditConfig, listTemplates } from './templates.js'
 import { listModels, modelInfo, providerCatalog, setProviderKey } from './modelCaps.js'
@@ -618,41 +618,22 @@ export function handleConnection(
           // pipe; its turnDone is swallowed so the UI sees ONE turn.
           pinnedLog({ user: msg.text }) // the user row of the replay, FIRST — matching the live optimistic render
           const planner = activeId ? manager.planSessionFor(activeId) : undefined
+          const status = (text: string) => relay({ type: 'status', text })
           try {
-            if (planner) {
-              staging = planner
-              relay({ type: 'status', text: 'Planning first — writing PLAN.md…' })
+            // planSessionFor only returns a planner for an open project, which always has a dir.
+            if (planner && turnDir) {
+              staging = planner // questions/permissions/abort route to the planner while it runs
+              status('Planning first — writing PLAN.md…')
               try {
-                for await (const ev of planner.submit(msg.text)) {
-                  if (ev.type === 'turnDone') continue
-                  relay(ev)
-                }
-                // SALVAGE (measured, dokar/qwen3.5-9B): the planner spoke its clarifying questions as
-                // prose and stopped — no AskUserQuestion call, no plan anywhere. One nudge round names
-                // the protocol violation and re-runs the session; a planner that DID produce a plan
-                // (PLAN.md or heading-led final text, which ensurePlanPersisted persists) skips this.
-                if (turnDir && !stageAborted && !ensurePlanPersisted(turnDir, planner)) {
-                  for await (const ev of planner.submit(planSalvageNudge(planner))) {
-                    if (ev.type === 'turnDone') continue
-                    relay(ev)
-                  }
-                } else if (turnDir && !stageAborted) {
-                  // The plan EXISTS but may be unusable — over the pin cap (silently truncated in the
-                  // builder's context), missing its Design section, or planning banned imagery. One
-                  // revise round, then take what we get: a flawed contract still beats no contract.
-                  const issues = planQualityIssues(readFileSync(join(turnDir, 'PLAN.md'), 'utf8'))
-                  if (issues.length) {
-                    relay({ type: 'status', text: 'Tightening the plan…' })
-                    for await (const ev of planner.submit(planReviseNudge(issues))) {
-                      if (ev.type === 'turnDone') continue
-                      relay(ev)
-                    }
-                  }
-                }
+                // ADR-085: the ONE plan stage the bench runs too — salvage (no plan) or revise (plan fails
+                // planQualityIssues), then PLAN.md guaranteed and the planner disposed. See runPlanStage.
+                // ADR-086: attached images are the design reference, so the planner studies them FIRST — but
+                // only a model with vision gets them; a text-only one is told they exist and were not seen.
+                const refs = msg.images?.length ? msg.images : undefined
+                const planPrompt = refs && !manager.vision ? `${msg.text}\n\n(The user attached ${refs.length} image${refs.length > 1 ? 's' : ''}, but this model cannot view images: plan from the text, and note in the plan that the images were not seen.)` : msg.text
+                await runPlanStage(turnDir, planner, planPrompt, { onEvent: relay, onStatus: status, aborted: () => stageAborted }, manager.vision ? refs : undefined)
               } finally {
                 staging = undefined
-                if (turnDir) ensurePlanPersisted(turnDir, planner) // guarantee PLAN.md
-                await planner.dispose().catch(() => {})
               }
               sendTree() // PLAN.md (and nothing else) appeared
               if (stageAborted) {
@@ -661,16 +642,13 @@ export function handleConnection(
                 break
               }
             }
-            // Fresh projects ship an EMPTY node_modules (only the preview installs, on Run) — so the agent's
-            // first `npm run build` would hit `tsc: not found`, and a weak model stalls asking to install
-            // (measured: gpt-oss:20b). Install ONCE here, before the build, so the agent always inherits a
-            // build-ready project. No-op after the first install (node_modules populated).
-            const buildRuntime = manager.runtimeOf(turnProjectId)
-            if (buildRuntime && !(await buildRuntime.hasDependencies().catch(() => true))) {
-              relay({ type: 'status', text: 'Installing dependencies…' })
-              await buildRuntime.installDependencies().catch(() => false)
-            }
-            for await (const ev of s.submit(msg.text, msg.images)) relay(ev) // M11: images = attached data-URIs
+            // ADR-085: install-once-then-submit is shared with the bench (runBuilderTurn); P2's post-turn
+            // design check lands there too. M11: images = attached data-URIs — only to a model that can see them
+            // (the plan stage above is gated the same way; a text-only backend may reject image blocks outright),
+            // and a text-only model is told they were attached but not shown (review, 2026-10-04).
+            const shown = manager.vision ? msg.images : undefined
+            const unseen = msg.images?.length && !manager.vision ? `\n\n(The user attached ${msg.images.length} image${msg.images.length > 1 ? 's' : ''}, but this model cannot view images — work from the text and the plan.)` : ''
+            await runBuilderTurn(s, msg.text + unseen, { onEvent: relay, onStatus: status }, { images: shown, runtime: manager.runtimeOf(turnProjectId), dir: turnDir })
           } finally {
             liveTurn.end(turn) // turn over (or aborted) — clears the dot + composer lock everywhere
             // The build just populated node_modules (brand-new app) and/or changed files — auto-start the
@@ -1117,6 +1095,16 @@ export async function start(deps: ServerDeps = {}) {
   // dev servers of EVERY project at startup, not just the ones that happen to get reopened.
   const hostSwept = await sweepHostDevServers(PROJECTS_ROOT).catch(() => 0)
   if (hostSwept) console.log(`Reclaimed ${hostSwept} recorded dev server(s) from previous runs.`)
+  // ADR-087 amendment: a project is writable to fenced commands only while open. A previous run that crashed
+  // before disposing its sandboxes left its projects labeled — take those labels off before anything runs.
+  const unlabeled = (() => {
+    try {
+      return sweepWorkspaceLabels(PROJECTS_ROOT)
+    } catch {
+      return 0
+    }
+  })()
+  if (unlabeled) console.log(`Closed the write-fence label on ${unlabeled} project(s) left open by a previous run.`)
   // ALWAYS a runtime now. Host mode previously injected nothing, which is why it had no live preview, no
   // Console pane and no problems panel — the whole product minus the parts that need somewhere to run.
   // Reads the CURRENT mode on every call, so a live switch takes effect on the next open() without

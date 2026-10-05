@@ -27,12 +27,12 @@ place and advertised each turn.
 |---|---|
 | **Read** | Pull a file into context — also images, PDFs, notebooks (multimodal). The atom of "look at code." |
 | **Glob** | Find files *by name/path pattern*, fast, at any repo size. "Where is the file?" |
-| **Grep** | Find files *by content* (ripgrep + regex). Prompt **forbids** raw `grep`/`rg` via Bash — the dedicated tool has correct permissions + structured output. |
+| **Grep** | Find files *by content* (ripgrep + regex). Its description steers the model **away from** raw `grep`/`rg` via Bash — the dedicated tool has correct permissions + structured output. |
 | **LSP** | *Semantic* intelligence, not text: go-to-definition, find-references, call hierarchy. "The actual definition and everyone who calls it" vs "lines containing `foo`". |
-| **WebFetch** | Retrieve a URL → markdown → summarise via a small model. Reach beyond the repo. |
-| **WebSearch** | Information past the knowledge cutoff; mandates a Sources section. |
-| **ListMcpResources / ReadMcpResource** | Read data exposed by MCP servers (faculty F). |
-| **ToolSearch** | Discover *deferred* tools when too many to fit the prompt (faculty F). |
+| **Web fetch** | Retrieve a URL → markdown → summarise via a small model. Reach beyond the repo. |
+| **Web search** | Information past the knowledge cutoff; its description asks for a sources section. |
+| **MCP resource list / read** | Read data exposed by MCP servers (faculty F). |
+| **Tool search** | Discover *deferred* tools when too many to fit the prompt (faculty F). |
 
 Unifying property: **none mutate state**, so the scheduler fires a whole batch concurrently.
 
@@ -40,8 +40,8 @@ Unifying property: **none mutate state**, so the scheduler fires a whole batch c
 | Tool | Why it exists |
 |---|---|
 | **Edit** | Exact string replacement — the *surgical* change, sends only the diff. **Requires a prior Read** (read-before-edit invariant; our ADR-032). |
-| **Write** | Create / full-rewrite a file. Also Read-first if it exists. Prompt steers toward Edit. |
-| **NotebookEdit** | Cell-level `.ipynb` edits — notebooks are JSON, a normal Edit would corrupt them. |
+| **Write** | Create / full-rewrite a file. Also Read-first if it exists. Its description steers toward Edit. |
+| **Notebook edit** | Cell-level `.ipynb` edits — notebooks are JSON, a normal Edit would corrupt them. |
 | **Bash / PowerShell** | Run any shell command — build, test, git, install. The universal escape hatch ([[tool-granularity]]). |
 
 The dangerous ones: pass the permission gate, run **serially** (writes race; reads don't).
@@ -49,39 +49,39 @@ The dangerous ones: pass the permission gate, run **serially** (writes race; rea
 ### C. Decide / Plan — executive function
 | Tool | Why it exists |
 |---|---|
-| **TodoWrite** | Lightweight in-session checklist. Fights weak-model **drift and early exit**: "exactly one in_progress," "mark done immediately," "never done if tests fail." Attention management *as a tool*. |
-| **TaskCreate / Get / Update / List** | "Todo v2" — *persistent* tasks with dependencies (`blocks`/`blockedBy`) and **owners** (hand work to teammates). TodoWrite is a sticky note; this is a project tracker. |
+| **TodoWrite** | Lightweight in-session checklist. Fights weak-model **drift and early exit**: keep exactly one item in progress, mark items done as soon as they are, never mark done while tests fail. Attention management *as a tool*. |
+| **Persistent tasks** (create / get / update / list) | "Todo v2" — *persistent* tasks with dependencies (blocks / blocked-by) and **owners** (hand work to teammates). TodoWrite is a sticky note; this is a project tracker. |
 | **EnterPlanMode** | Flip into a **read-only design phase** for non-trivial work — explore, don't mutate, propose an approach. |
 | **ExitPlanMode** | The **approval gate**: mutation stays blocked until the human approves the plan file. |
 
 ### D. Act-at-scale — delegation (protects the main context window)
 | Tool | Why it exists |
 |---|---|
-| **Agent** | Spawn a sub-agent (or *fork*). Key trick: it does noisy work in *its own* context and returns **only the conclusion** → main window stays clean. Supports background / worktree / remote isolation. |
-| **SendMessage** | Resume an existing agent *with its context intact* (a fresh `Agent` call starts cold). |
-| **TeamCreate / TeamDelete** | Manage agent *swarms*. |
-| **TaskStop / TaskOutput** | Control async work — stop it, fetch its output. |
+| **Spawn agent** | Spawn a sub-agent (or *fork*). Key trick: it does noisy work in *its own* context and returns **only the conclusion** → main window stays clean. Supports background / worktree / remote isolation. |
+| **Send message** | Resume an existing agent *with its context intact* (a fresh spawn starts cold). |
+| **Team create / delete** | Manage agent *swarms*. |
+| **Task stop / output** | Control async work — stop it, fetch its output. |
 | **Skill** | Invoke a *packaged procedure* (slash command/skill) — reuse a vetted workflow instead of re-deriving steps. |
 
 ### E. Communicate — human-in-the-loop
 | Tool | Why it exists |
 |---|---|
 | **AskUserQuestion** | Structured multiple-choice to resolve ambiguity *mid-task* without stopping. Clarifies *specifics*; plan approval goes through ExitPlanMode. |
-| **SendUserMessage** (a.k.a. Brief) | The channel the user **actually reads**. Its prompt is blunt: plain text outside this tool is assumed *unread* — the real answer must go through here. `status: proactive` flags agent-initiated messages. |
+| **User-message channel** (a brief tool) | The channel the user **actually reads**. Its description makes the point bluntly: plain text outside this tool may go *unread* — the real answer must go through here. A proactive-status flag marks agent-initiated messages. |
 
 ### F. Connectivity & tool-sprawl management
 | Tool | Why it exists |
 |---|---|
-| **MCP tools** (dynamic) + **McpAuth** | Plug in external systems (GitHub, Sentry, DBs, browsers) without rebuilding the harness. MCP = the USB-C port for tools (see [[mcp-init-strategy]]). |
-| **ToolSearch** | When too many tools exist, their schemas blow the context budget → tools are **deferred** (names only) and schemas fetched on demand. |
+| **MCP tools** (dynamic) + **MCP auth** | Plug in external systems (GitHub, Sentry, DBs, browsers) without rebuilding the harness. MCP = the USB-C port for tools (see [[mcp-init-strategy]]). |
+| **Tool search** | When too many tools exist, their schemas blow the context budget → tools are **deferred** (names only) and schemas fetched on demand. |
 
 ### G. Persist across time — autonomy (feature-gated "proactive" surface)
 | Tool | Why it exists |
 |---|---|
-| **Sleep / Cron / Monitor / RemoteTrigger / SubscribePR / PushNotification / SuggestBackgroundPR** | Pause, schedule, watch a condition, wake on an external event, reach the user when away. These turn a *request-response* agent into one that **operates across time** — the leap from chatbot to coworker. |
+| **Sleep / cron / monitor / remote trigger / PR subscription / push notification / background-PR suggestion** | Pause, schedule, watch a condition, wake on an external event, reach the user when away. These turn a *request-response* agent into one that **operates across time** — the leap from chatbot to coworker. |
 
 ### H. Environment isolation
-| **EnterWorktree / ExitWorktree** | Work on an isolated git worktree so experiments don't touch the main tree. |
+| **Enter / exit worktree** | Work on an isolated git worktree so experiments don't touch the main tree. |
 
 ---
 
@@ -89,13 +89,13 @@ The dangerous ones: pass the permission gate, run **serially** (writes race; rea
 
 This maps directly onto our `agentLoop.ts` + `scheduler.ts`:
 
-1. **Advertise** — each turn the model is sent the available tool *schemas* (or deferred names + ToolSearch).
+1. **Advertise** — each turn the model is sent the available tool *schemas* (or deferred names + tool search).
 2. **Model emits tool calls** (faculty A/B/…) or finishes (no tool_use ⇒ terminal — see [[agentic-loop]]).
 3. **Gate** — each call passes the permission check *before* running (`scheduler.ts` `checkPermission`). Reads auto-allow; writes/Bash may prompt ([[permissions-vs-sandbox]]).
 4. **Schedule by safety** — consecutive **read-only tools run in parallel**; any **mutating tool runs solo/serial** (correctness: reads can't interfere, writes can race — our `partition()`).
 5. **Mode restricts the toolset** — in **plan mode**, mutating tools are *removed entirely*; only Perceive + Plan tools are offered. That's how "read-only design phase" is *enforced*, not merely requested.
 6. **Results feed back** into context; loop repeats.
-7. **Delegation isolates context** — an **Agent** call runs a nested loop with its *own* window and returns only its final message (our `spawnSubagent`, [[resilience-and-subagents-design]]).
+7. **Delegation isolates context** — a **spawn-agent** call runs a nested loop with its *own* window and returns only its final message (our `spawnSubagent`, [[resilience-and-subagents-design]]).
 
 So the faculties aren't just a taxonomy — they correspond to **how the scheduler treats each tool**
 (parallel vs serial, gated vs free, allowed vs hidden-by-mode).
@@ -114,31 +114,31 @@ So the faculties aren't just a taxonomy — they correspond to **how the schedul
 | Perceive (semantic) | **LSP** findReferences | "Who calls `registerRoute`?" — text search isn't enough. |
 | Decide (clarify) | **AskUserQuestion** | "In-memory or Redis-backed?" — a fork only the user can pick. |
 | Decide (submit) | **ExitPlanMode** | Plan written → request approval. Mutation unlocks only after "yes." |
-| Organise | **TaskCreate / TodoWrite** | Track: add middleware, wire config, write tests, run suite. |
+| Organise | **Persistent tasks / TodoWrite** | Track: add middleware, wire config, write tests, run suite. |
 | Act (serial) | **Write** → **Edit** | New middleware file; surgical edit into the router. Each needed a prior Read. |
 | Verify | **Bash / PowerShell** | `npm test`. Red ⇒ task stays in_progress, fix, re-run. |
-| Delegate | **Agent** (code-reviewer, background) | Independent review in its own context; keep working; notification returns later. |
-| Persist | **Skill** (`/commit-push-pr`) | Reuse the vetted commit+PR procedure. |
-| Communicate | **SendUserMessage** | "Shipped, tests green, PR #142" — the message they actually read. |
+| Delegate | **Spawn agent** (code-reviewer, background) | Independent review in its own context; keep working; notification returns later. |
+| Persist | **Skill** (a commit-and-PR procedure) | Reuse the vetted commit+PR procedure. |
+| Communicate | **User-message channel** | "Shipped, tests green, PR #142" — the message they actually read. |
 
 ### Scenario 2 — "Investigate an incident + stand watch" (the outward + temporal loop)
 > *"Error rates spiked on checkout after this morning's deploy. Figure it out, and keep an eye on it."*
 
 | Loop phase | Tool(s) | Why here |
 |---|---|---|
-| Connect | **ToolSearch** | Sentry/GitHub MCP tools are deferred — fetch schemas first. |
-| Connect | **McpAuth + ListMcpResources / ReadMcpResource** | Auth to the observability server; pull error events + traces. |
-| Perceive (external) | **WebSearch → WebFetch** | Trace cites a library bug; search it, fetch the GitHub issue for the fix. |
+| Connect | **Tool search** | Sentry/GitHub MCP tools are deferred — fetch schemas first. |
+| Connect | **MCP auth + MCP resource list / read** | Auth to the observability server; pull error events + traces. |
+| Perceive (external) | **Web search → Web fetch** | Trace cites a library bug; search it, fetch the GitHub issue for the fix. |
 | Perceive (deep) | **Grep (multiline) + LSP** incomingCalls | Locate the failing function and trace *who* calls it. |
 | Perceive (history) | **Bash** (`git log`, `gh pr view`) | Identify the morning's deploy commit/PR. |
-| Analyse data | **NotebookEdit + Bash** | A quick `.ipynb` charting error-rate-over-time from exported logs. |
-| Isolate | **EnterWorktree** → Edit/Bash → **ExitWorktree** | Reproduce + test a candidate fix without disturbing the main tree. |
-| Delegate (parallel) | **Agent ×2** (background) | One drafts the hotfix; one maps blast radius. Independent ⇒ launched together. |
-| Persist across time | **Monitor / Cron / RemoteTrigger** | "Keep an eye on it": watch until normal / schedule checks / wake on a webhook. |
-| Reach the user | **PushNotification** | They're away — ping when the threshold trips or the fix is ready. |
-| Resume | **SendMessage** | The hotfix agent reports back; continue *it* (context intact) for review comments. |
-| Control async | **TaskOutput / TaskStop** | Pull findings; stop the monitor once resolved. |
-| Communicate | **SendUserMessage** (`status: proactive`) | Agent-initiated summary: root cause, hotfix PR, baseline restored. |
+| Analyse data | **Notebook edit + Bash** | A quick `.ipynb` charting error-rate-over-time from exported logs. |
+| Isolate | **Enter worktree** → Edit/Bash → **Exit worktree** | Reproduce + test a candidate fix without disturbing the main tree. |
+| Delegate (parallel) | **Spawn agent ×2** (background) | One drafts the hotfix; one maps blast radius. Independent ⇒ launched together. |
+| Persist across time | **Monitor / cron / remote trigger** | "Keep an eye on it": watch until normal / schedule checks / wake on a webhook. |
+| Reach the user | **Push notification** | They're away — ping when the threshold trips or the fix is ready. |
+| Resume | **Send message** | The hotfix agent reports back; continue *it* (context intact) for review comments. |
+| Control async | **Task output / stop** | Pull findings; stop the monitor once resolved. |
+| Communicate | **User-message channel** (proactive) | Agent-initiated summary: root cause, hotfix PR, baseline restored. |
 
 **Why two:** Scenario 1 exercises the planning/file/execution/delegation core that fires on almost every
 coding request. Scenario 2 mops up the tools that *only* appear when you reach **external** systems (MCP,
@@ -156,13 +156,13 @@ Mapped to faculties:
 
 | Faculty | Cascade has | Cascade lacks (→ see CORE-PARITY §B for status) |
 |---|---|---|
-| **A. Perceive** | Read, Glob, Grep, MemorySearch (recall) | LSP (semantic), WebFetch/WebSearch (external), MCP resource reads |
-| **B. Act** | Write, Edit, Bash | MultiEdit, NotebookEdit |
+| **A. Perceive** | Read, Glob, Grep, MemorySearch (recall) | LSP (semantic), web fetch/search (external), MCP resource reads |
+| **B. Act** | Write, Edit, Bash | MultiEdit, notebook edit |
 | **C. Decide/Plan** | TodoWrite | **Plan-mode flow** (we have a `plan` permission *mode* but no Enter/Exit flow) |
-| **D. Delegate** | Subagent (nested loop, returns summary) | SendMessage (resume), background tasks (TaskCreate/Stop/Output), Skill |
+| **D. Delegate** | Subagent (nested loop, returns summary) | send-message (resume), background tasks (create/stop/output), Skill |
 | **E. Communicate** | — (replies via text/`ActivityEvent`) | AskUserQuestion, a real user-message channel |
-| **F. Connectivity** | MCP **tools** | MCP **resources**, ToolSearch (deferred catalog) |
-| **G. Time/autonomy** | — | Sleep/Cron/Monitor/RemoteTrigger/PushNotification |
+| **F. Connectivity** | MCP **tools** | MCP **resources**, tool search (deferred catalog) |
+| **G. Time/autonomy** | — | sleep/cron/monitor/remote trigger/push notification |
 | **H. Isolation** | sandbox (ADR-033) | git worktrees |
 
 **Priority for a weak-model harness** (ties back to the harness-engineering discussion): the faculties weak

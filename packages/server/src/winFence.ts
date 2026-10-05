@@ -1,19 +1,23 @@
-// winFence.ts — the Win32 FFI core of the Windows write-fence (ADR-070 step 6). Runs in the RUNNER
-// process (winFenceRunner.ts), never in the server. koffi binds the handful of advapi32/kernel32 calls
-// the mechanism needs.
+// winFence.ts — the Win32 FFI core of the Windows write-fence (ADR-070 step 6, ADR-087). Token creation and
+// the confined spawn run in the RUNNER process (winFenceRunner.ts), never in the server; the server only sets
+// the workspace's label (labelLowIntegrity). koffi binds the handful of advapi32/kernel32 calls involved.
 //
-// Mechanism: duplicate the caller's token into a WRITE_RESTRICTED restricted token whose restricting-SID
-// list carries the keep-alive pair (logon SID + Everyone) plus, under workspace-write, the synthetic
-// workspace + temp SIDs. Windows then checks every WRITE twice — the object's own DACL AND the restricting
-// list — so a write clears only where BOTH allow it. Reads/exec/network are untouched (that is exactly why
-// arbitrary toolchains keep working, and exactly why this is `partial`, not full, enforcement: reads and
-// network are open, and the documented Everyone/hard-link boundaries remain). Then grant a write ACE for
-// the workspace SID on the workspace tree, merge that SID into the token's default DACL (so child-created
-// objects like anonymous pipes pass the pass-2 check), and CreateProcessAsUser the child under the token.
+// workspace-write (ADR-087): the caller's token, privileges stripped, lowered to the LOW integrity level.
+// Windows' No-Write-Up policy then denies every write to an object not labeled low — the user's files, other
+// folders, other processes — and the workspace carries a standing, inheritable low label, so it is the one
+// tree the child may write. The child's own new objects (its stdio pipes, files, temp) are low as well, so a
+// child that spawns grandchildren with piped stdio — esbuild, npm scripts, any node child — works. The
+// WRITE_RESTRICTED design this replaced failed every such spawn: node creates each stdio pipe as a NAMED pipe,
+// whose fixed default DACL (Everyone: read) no restricting SID could write — `spawn EPERM` (measured 2026-09-29).
 //
-// EVERY Win32 call is checked and throws Win32Error on failure — fail-closed by construction. The public
-// POC this mechanism follows ignored return values and, when token creation failed, silently ran the child
-// with the FULL unrestricted token; this port never does.
+// read-only: a WRITE_RESTRICTED token whose restricting-SID list is the keep-alive pair (logon SID +
+// Everyone). Windows checks every write twice — the object's DACL AND that list — and the list grants nothing
+// writable; the workspace's low label grants nothing to this medium-integrity token either.
+//
+// Both modes leave reads, exec and network open — why arbitrary toolchains work, and why the rung reports
+// `partial`. EVERY Win32 call is checked and throws Win32Error on failure — fail-closed by construction. The
+// public POC the first version followed ignored return values and, when token creation failed, silently ran
+// the child with the FULL unrestricted token; this port never does.
 
 import koffi from 'koffi'
 
@@ -28,40 +32,25 @@ const WRITE_RESTRICTED = 0x8
 const LUA_TOKEN = 0x4
 const SE_GROUP_LOGON_ID = 0xc0000000 // attribute bits marking the logon-session SID group
 const TokenGroups = 2
-const TokenDefaultDacl = 6
+const TokenIntegrityLevel = 25
+const SE_GROUP_INTEGRITY = 0x20 // the attribute a TOKEN_MANDATORY_LABEL's SID carries
 const ERROR_INSUFFICIENT_BUFFER = 122
 const ERROR_SUCCESS = 0
 const SE_FILE_OBJECT = 1
-const DACL_SECURITY_INFORMATION = 0x4
-const GRANT_ACCESS = 1
-const SUB_CONTAINERS_AND_OBJECTS_INHERIT = 0x3
-const NO_MULTIPLE_TRUSTEE = 0
-const TRUSTEE_IS_SID = 0
-const TRUSTEE_IS_UNKNOWN = 0
-const FILE_GENERIC_WRITE = 0x120116
+const LABEL_SECURITY_INFORMATION = 0x10
+const SDDL_REVISION_1 = 1
 const CREATE_UNICODE_ENVIRONMENT = 0x00000400
 const INFINITE = 0xffffffff
 const SECURITY_MAX_SID_SIZE = 68
 const WinWorldSid = 1 // Everyone
+/** The Low mandatory level — what a workspace-write child runs at (ADR-087). */
+const LOW_INTEGRITY_SID = 'S-1-16-4096'
+/** The workspace's label: Low, No-Write-Up, inherited by every file (OI) and folder (CI) below it. */
+const LOW_LABEL_ACE = '(ML;OICI;NW;;;LW)'
 
 // ── struct layouts ──────────────────────────────────────────────────────────────────────────────────
 // SID_AND_ATTRIBUTES { PSID Sid; DWORD Attributes; } — 8-byte pointer + 4-byte dword, 8-byte aligned = 16.
 const SID_AND_ATTRIBUTES = koffi.struct('SID_AND_ATTRIBUTES', { Sid: 'void*', Attributes: 'uint32' })
-// TRUSTEE_W { TRUSTEE_W* MultipleTrustee; int MultipleTrusteeOperation; int TrusteeForm; int TrusteeType; void* ptstrName; }
-const TRUSTEE_W = koffi.struct('TRUSTEE_W', {
-	pMultipleTrustee: 'void*',
-	MultipleTrusteeOperation: 'int',
-	TrusteeForm: 'int',
-	TrusteeType: 'int',
-	ptstrName: 'void*',
-})
-// EXPLICIT_ACCESS_W { DWORD grfAccessPermissions; int grfAccessMode; DWORD grfInheritance; TRUSTEE_W Trustee; }
-const EXPLICIT_ACCESS_W = koffi.struct('EXPLICIT_ACCESS_W', {
-	grfAccessPermissions: 'uint32',
-	grfAccessMode: 'int',
-	grfInheritance: 'uint32',
-	Trustee: TRUSTEE_W,
-})
 // STARTUPINFOW — only cb matters here (72 bytes on x64); the rest stay zero.
 const STARTUPINFOW = koffi.struct('STARTUPINFOW', {
 	cb: 'uint32',
@@ -118,8 +107,17 @@ function bindNow() {
 		CopySid: advapi32.func('int CopySid(uint32 destLen, void* dest, void* src)'),
 		CreateWellKnownSid: advapi32.func('int CreateWellKnownSid(int type, void* domainSid, _Out_ void* sid, _Inout_ uint32* size)'),
 		ConvertStringSidToSidW: advapi32.func('int ConvertStringSidToSidW(str16 sddl, _Out_ void** sid)'),
-		SetEntriesInAclW: advapi32.func('uint32 SetEntriesInAclW(uint32 count, void* entries, void* oldAcl, _Out_ void** newAcl)'),
 		SetNamedSecurityInfoW: advapi32.func('uint32 SetNamedSecurityInfoW(str16 name, int objType, uint32 secInfo, void* owner, void* group, void* dacl, void* sacl)'),
+		GetNamedSecurityInfoW: advapi32.func(
+			'uint32 GetNamedSecurityInfoW(str16 name, int objType, uint32 secInfo, void* owner, void* group, void* dacl, _Out_ void** sacl, _Out_ void** sd)',
+		),
+		ConvertStringSecurityDescriptorToSecurityDescriptorW: advapi32.func(
+			'int ConvertStringSecurityDescriptorToSecurityDescriptorW(str16 sddl, uint32 revision, _Out_ void** sd, _Out_ uint32* size)',
+		),
+		ConvertSecurityDescriptorToStringSecurityDescriptorW: advapi32.func(
+			'int ConvertSecurityDescriptorToStringSecurityDescriptorW(void* sd, uint32 revision, uint32 secInfo, _Out_ void** sddl, _Out_ uint32* len)',
+		),
+		GetSecurityDescriptorSacl: advapi32.func('int GetSecurityDescriptorSacl(void* sd, _Out_ int* present, _Out_ void** sacl, _Out_ int* defaulted)'),
 		CreateProcessAsUserW: advapi32.func(
 			'int CreateProcessAsUserW(void* token, str16 appName, _Inout_ uint16* cmdLine, void* procAttrs, void* threadAttrs, int inheritHandles, uint32 flags, void* env, str16 cwd, void* startupInfo, _Out_ void* procInfo)',
 		),
@@ -205,14 +203,14 @@ function logonSid(token: unknown): Uint8Array {
 
 export interface FenceOptions {
 	mode: 'read-only' | 'workspace-write'
-	/** Writable roots to grant + their SIDs (workspace-write only). Each: an existing directory + its SID. */
-	grants?: { dir: string; sid: string }[]
 }
 
 /**
- * Build a WRITE_RESTRICTED token for `mode`, grant write ACEs for each `grants` entry, and return the token
- * handle plus a pointer array to keep the SID buffers alive for the token's lifetime. Fail-closed: any
- * Win32 failure throws before a child is ever spawned.
+ * Build the child's token for `mode`; return it plus the buffers it references (keep them alive while it
+ * lives). workspace-write: our token, privileges stripped, lowered to Low integrity — the workspace's
+ * standing low label (labelLowIntegrity, set once by the server) is what makes that tree writable.
+ * read-only: WRITE_RESTRICTED with only the keep-alive pair. Fail-closed: any Win32 failure throws before a
+ * child is ever spawned.
  */
 export function buildRestrictedToken(opts: FenceOptions): { token: unknown; keepAlive: unknown[] } {
 	const procTokenOut = [null] as unknown[]
@@ -221,99 +219,102 @@ export function buildRestrictedToken(opts: FenceOptions): { token: unknown; keep
 		'OpenProcessToken',
 	)
 	const procToken = procTokenOut[0]
-
-	// Restricting list: keep-alive pair in both modes; the capability SIDs only under workspace-write.
 	const keepAlive: unknown[] = []
-	const sids: unknown[] = [logonSid(procToken), everyoneSid()]
-	if (opts.mode === 'workspace-write') {
-		for (const g of opts.grants ?? []) {
-			const sid = sidFromString(g.sid)
-			keepAlive.push(sid)
-			sids.push(sid)
-		}
-	}
-	// Pack SID_AND_ATTRIBUTES[]: one 16-byte entry per SID, Attributes = 0.
-	const arr = new Uint8Array(sids.length * 16)
-	for (let i = 0; i < sids.length; i++) koffi.encode(arr.subarray(i * 16), 'void*', sids[i])
-	keepAlive.push(...sids, arr)
-
 	const tokenOut = [null] as unknown[]
-	checkBool(
-		w32().CreateRestrictedToken(procToken, DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED, 0, null, 0, null, sids.length, arr, tokenOut),
-		'CreateRestrictedToken',
-		`${sids.length} restricting SIDs`,
-	)
-	const token = tokenOut[0]
-
-	// Merge each capability SID into the token's DEFAULT DACL so the child's own new objects (anonymous
-	// stdio pipes) pass the write pass-2 check. The directory-side write ACEs are NOT granted here — the
-	// server grants them ONCE per workspace (grantWriteAce, cached), because that grant is a standing,
-	// expensive full-tree propagation and must not repeat on every exec.
 	if (opts.mode === 'workspace-write') {
-		for (const g of opts.grants ?? []) mergeDefaultDaclSid(token, g.sid)
+		// A CHILD of our own token (CreateRestrictedToken, no SID restricted), so CreateProcessAsUser needs no
+		// privilege — then lowered. Lowering is always allowed; only raising needs SeRelabelPrivilege.
+		checkBool(w32().CreateRestrictedToken(procToken, DISABLE_MAX_PRIVILEGE | LUA_TOKEN, 0, null, 0, null, 0, null, tokenOut), 'CreateRestrictedToken', 'low integrity')
+		setIntegrityLevel(tokenOut[0], LOW_INTEGRITY_SID)
+	} else {
+		// Restricting list: the keep-alive pair (DLL init and CNG die without them) — it grants nothing writable.
+		const sids: unknown[] = [logonSid(procToken), everyoneSid()]
+		// Pack SID_AND_ATTRIBUTES[]: one 16-byte entry per SID, Attributes = 0.
+		const arr = new Uint8Array(sids.length * 16)
+		for (let i = 0; i < sids.length; i++) koffi.encode(arr.subarray(i * 16), 'void*', sids[i])
+		keepAlive.push(...sids, arr)
+		checkBool(
+			w32().CreateRestrictedToken(procToken, DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED, 0, null, 0, null, sids.length, arr, tokenOut),
+			'CreateRestrictedToken',
+			`${sids.length} restricting SIDs`,
+		)
 	}
 	w32().CloseHandle(procToken)
-	return { token, keepAlive }
+	return { token: tokenOut[0], keepAlive }
 }
 
-/** Add an inheritable FILE_GENERIC_WRITE allow ACE for `sddlSid` on `dir` (merged with the existing DACL).
- *  Idempotent at the OS level — re-adding the identical ACE is a no-op cost aside, which is why the same
- *  workspace SID's grant can STAND across sessions. */
-export function grantWriteAce(dir: string, sddlSid: string): void {
-	const sid = sidFromString(sddlSid)
-	// EXPLICIT_ACCESS_W describing the grant.
-	const ea = {
-		grfAccessPermissions: FILE_GENERIC_WRITE,
-		grfAccessMode: GRANT_ACCESS,
-		grfInheritance: SUB_CONTAINERS_AND_OBJECTS_INHERIT,
-		Trustee: { pMultipleTrustee: null, MultipleTrusteeOperation: NO_MULTIPLE_TRUSTEE, TrusteeForm: TRUSTEE_IS_SID, TrusteeType: TRUSTEE_IS_UNKNOWN, ptstrName: sid },
-	}
-	const eaBuf = new Uint8Array(koffi.sizeof(EXPLICIT_ACCESS_W))
-	koffi.encode(eaBuf, EXPLICIT_ACCESS_W, ea)
-	const newAclOut = [null] as unknown[]
-	// oldAcl = null merges into a fresh ACL carrying only this ACE; SetNamedSecurityInfo then UNIONs it
-	// with the object's existing DACL because we pass DACL_SECURITY_INFORMATION without PROTECTED — the
-	// standard "add an ACE" idiom.
-	const r1 = w32().SetEntriesInAclW(1, eaBuf, null, newAclOut)
-	if (r1 !== ERROR_SUCCESS) throw new Win32Error('SetEntriesInAclW', r1, dir)
-	const newAcl = newAclOut[0]
-	const r2 = w32().SetNamedSecurityInfoW(dir, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, null, null, newAcl, null)
-	w32().LocalFree(newAcl)
-	if (r2 !== ERROR_SUCCESS) throw new Win32Error('SetNamedSecurityInfoW', r2, dir)
+/** Set `token`'s mandatory integrity level. TOKEN_MANDATORY_LABEL { SID_AND_ATTRIBUTES Label } is a SID
+ *  pointer + SE_GROUP_INTEGRITY; the length covers the struct AND the SID it points to. */
+function setIntegrityLevel(token: unknown, levelSid: string): void {
+	const sid = sidFromString(levelSid)
+	const label = new Uint8Array(16)
+	koffi.encode(label, 'void*', sid)
+	new DataView(label.buffer).setUint32(8, SE_GROUP_INTEGRITY, true)
+	checkBool(w32().SetTokenInformation(token, TokenIntegrityLevel, label, 16 + w32().GetLengthSid(sid)), 'SetTokenInformation', `integrity level ${levelSid}`)
 }
 
-/** Merge a full-access ACE for `sddlSid` into the token's DEFAULT DACL (the DACL new objects the token
- *  creates inherit). Without it, a child's anonymous stdio pipe fails its own creation-time write check —
- *  every piped grandchild spawn breaks (the POC-documented boundary). Named a RESTRICTING sid, so the new
- *  object passes pass-2 while creation stays gated by the parent container's DACL. */
-function mergeDefaultDaclSid(token: unknown, sddlSid: string): void {
-	const retLen = [0] as number[]
-	w32().GetTokenInformation(token, TokenDefaultDacl, null, 0, retLen)
-	const needed = retLen[0]
-	if (needed === 0) throw new Win32Error('GetTokenInformation', w32().GetLastError(), 'TokenDefaultDacl size')
-	const buf = new Uint8Array(needed)
-	checkBool(w32().GetTokenInformation(token, TokenDefaultDacl, buf, needed, retLen), 'GetTokenInformation', 'TokenDefaultDacl')
-	// TOKEN_DEFAULT_DACL { PACL DefaultDacl; } — the current DACL pointer sits at offset 0.
-	const currentDacl = koffi.decode(buf, 'void*') as unknown
-	const sid = sidFromString(sddlSid)
-	const ea = {
-		grfAccessPermissions: 0x10000000, // GENERIC_ALL — full access for the token's own new objects
-		grfAccessMode: GRANT_ACCESS,
-		grfInheritance: 0,
-		Trustee: { pMultipleTrustee: null, MultipleTrusteeOperation: NO_MULTIPLE_TRUSTEE, TrusteeForm: TRUSTEE_IS_SID, TrusteeType: TRUSTEE_IS_UNKNOWN, ptstrName: sid },
+/**
+ * Give `dir` the workspace's standing label — Low, No-Write-Up, inherited by everything below it (ADR-087):
+ * the low-integrity child may write exactly the objects that carry it. SetNamedSecurityInfo propagates the
+ * inheritable label through the existing tree (one full walk, as the write ACE it replaced did; it does not
+ * follow junctions), and the label STANDS: a later session or restart finds it on the root and skips the
+ * walk. A label no higher than our own level needs only WRITE_OWNER, which a project folder's owner has.
+ * Fail-closed: any failure throws, so a command never runs against a half-labeled tree unannounced.
+ */
+export function labelLowIntegrity(dir: string): void {
+	if (hasLowLabel(dir)) return
+	const sdOut = [null] as unknown[]
+	checkBool(w32().ConvertStringSecurityDescriptorToSecurityDescriptorW(`S:${LOW_LABEL_ACE}`, SDDL_REVISION_1, sdOut, [0]), 'ConvertStringSecurityDescriptorToSecurityDescriptorW', LOW_LABEL_ACE)
+	try {
+		const saclOut = [null] as unknown[]
+		checkBool(w32().GetSecurityDescriptorSacl(sdOut[0], [0], saclOut, [0]), 'GetSecurityDescriptorSacl', LOW_LABEL_ACE)
+		const r = w32().SetNamedSecurityInfoW(dir, SE_FILE_OBJECT, LABEL_SECURITY_INFORMATION, null, null, null, saclOut[0])
+		if (r !== ERROR_SUCCESS) throw new Win32Error('SetNamedSecurityInfoW', r, dir)
+	} finally {
+		w32().LocalFree(sdOut[0])
 	}
-	const eaBuf = new Uint8Array(koffi.sizeof(EXPLICIT_ACCESS_W))
-	koffi.encode(eaBuf, EXPLICIT_ACCESS_W, ea)
-	const newAclOut = [null] as unknown[]
-	const r = w32().SetEntriesInAclW(1, eaBuf, currentDacl, newAclOut)
-	if (r !== ERROR_SUCCESS) throw new Win32Error('SetEntriesInAclW', r, 'default DACL merge')
-	const newDacl = newAclOut[0]
-	// SetTokenInformation copies the ACL, so we free ours right after.
-	const info = new Uint8Array(8)
-	koffi.encode(info, 'void*', newDacl)
-	const ok = w32().SetTokenInformation(token, TokenDefaultDacl, info, 8)
-	w32().LocalFree(newDacl)
-	checkBool(ok, 'SetTokenInformation', 'TokenDefaultDacl')
+}
+
+/**
+ * Take the workspace label back off `dir` (ADR-087 amendment, 2026-10-06): an EMPTY label set, propagated, drops
+ * the inherited low label from every object below — measured, including files the low child CREATED while it held
+ * the label, so nothing it wrote stays writable to the next low process. A no-op on a root that is not labeled.
+ * Called when the last sandbox holding the workspace is disposed, and by the startup sweep after a crash.
+ */
+export function unlabelLowIntegrity(dir: string): void {
+	if (!hasLowLabel(dir)) return
+	const sdOut = [null] as unknown[]
+	checkBool(w32().ConvertStringSecurityDescriptorToSecurityDescriptorW('S:', SDDL_REVISION_1, sdOut, [0]), 'ConvertStringSecurityDescriptorToSecurityDescriptorW', 'empty label set')
+	try {
+		const saclOut = [null] as unknown[]
+		checkBool(w32().GetSecurityDescriptorSacl(sdOut[0], [0], saclOut, [0]), 'GetSecurityDescriptorSacl', 'empty label set')
+		const r = w32().SetNamedSecurityInfoW(dir, SE_FILE_OBJECT, LABEL_SECURITY_INFORMATION, null, null, null, saclOut[0])
+		if (r !== ERROR_SUCCESS) throw new Win32Error('SetNamedSecurityInfoW', r, dir)
+	} finally {
+		w32().LocalFree(sdOut[0])
+	}
+}
+
+/** Does `dir` itself carry the workspace label? Explicit only — an inherited one reads `(ML;OICIID;…)`, and a
+ *  root that merely inherits a label from somewhere above is not a workspace we labeled. */
+export function hasLowLabel(dir: string): boolean {
+	const sdOut = [null] as unknown[]
+	const r = w32().GetNamedSecurityInfoW(dir, SE_FILE_OBJECT, LABEL_SECURITY_INFORMATION, null, null, null, [null], sdOut)
+	if (r !== ERROR_SUCCESS) throw new Win32Error('GetNamedSecurityInfoW', r, dir)
+	try {
+		const strOut = [null] as unknown[]
+		const lenOut = [0] as number[]
+		checkBool(
+			w32().ConvertSecurityDescriptorToStringSecurityDescriptorW(sdOut[0], SDDL_REVISION_1, LABEL_SECURITY_INFORMATION, strOut, lenOut),
+			'ConvertSecurityDescriptorToStringSecurityDescriptorW',
+			dir,
+		)
+		const sddl = koffi.decode(strOut[0], 'char16', lenOut[0]) as string
+		w32().LocalFree(strOut[0])
+		return sddl.includes(LOW_LABEL_ACE)
+	} finally {
+		w32().LocalFree(sdOut[0])
+	}
 }
 
 /**
@@ -330,8 +331,8 @@ const HANDLE_FLAG_INHERIT = 0x1
 export function spawnUnderToken(token: unknown, commandLine: string, cwd: string): number {
 	// Pass our own std handles down so the child's output reaches whatever captured OURS (the Bash tool's
 	// pipe). Mark each inheritable first — inheritHandles=TRUE only duplicates handles flagged inheritable.
-	// This works for the DIRECT child; a confined child that opens its OWN pipes for a grandchild is the
-	// documented `partial` boundary (named-pipe default SD), which we do not need here.
+	// Pipes the confined child opens for ITS children (esbuild, npm scripts) are its own low-integrity objects
+	// under workspace-write, so they work; under read-only they still fail (WRITE_RESTRICTED — ADR-087).
 	const b = w32()
 	const hIn = b.GetStdHandle(STD_INPUT_HANDLE)
 	const hOut = b.GetStdHandle(STD_OUTPUT_HANDLE)

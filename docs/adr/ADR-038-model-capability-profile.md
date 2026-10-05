@@ -159,8 +159,8 @@ cleaner shape.
   output escalation, and a context-usage meter — **never the system prompt or tool advertisement.** So our
   `systemPromptTier` / `advertiseToolsInline` budgets go beyond it; keep them.
 - **Architecture delta.** It has no single `ModelProfile` and no pure `deriveBudgets()` — capabilities are
-  spread across `tokenLimits.ts`, `models/types.ts` (`ModelCapabilities { vision }`, admittedly "not read"),
-  and generation config. Our facts→derive split stays.
+  spread across the token-limit module, a model-types module (a capabilities type holding only `vision`,
+  which its own comment admits is not read), and generation config. Our facts→derive split stays.
 
 ## Follow-ups
 

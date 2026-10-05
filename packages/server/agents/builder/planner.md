@@ -55,15 +55,17 @@ Do exactly this:
    these sections, each as a TERSE list:
    - **Goal** — one line.
    - **Views** — one line each (name — purpose), in build order.
-   - **Design** — 1–2 lines, opening with `category:` then `preset:`, then each view as a BLOCK
-     composition, then the imagery source. `category` is ONE of `commerce` · `dashboard` · `landing` ·
+   - **Design** — 1–2 lines, opening with `category:` then `preset:`, then each view as its bands (the block
+     pattern per band, and how it is adapted where the subject needs it), then the imagery source. (The brand
+     is the app's name as a wordmark — `<Logo name>` — nothing to plan.) `category` is ONE of `commerce` · `dashboard` · `landing` ·
      `app-shell` · `social` · `game` · `none`, and it is the ROUTING TOKEN: the builder reads it off the pinned plan
      every turn and loads that category skill, which carries the view contract and the verbatim reference
      page. Pick the category of the app's PRIMARY surface (a shop with a marketing home is still
      `commerce`); `none` only when no category fits. Example:
-     `category: commerce; preset: premium; catalog: NavBar+PageHeader+MediaCard grid; detail: Section; imagery: <Photo web> per catalog item (distinct real photos — NOT photoFor, which repeats), photoFor() single hero`
+     `category: commerce; preset: premium; catalog: Section(PageHeader + MediaCard grid); detail: split gallery + buy box; imagery: <Photo web> per catalog item (distinct real photos — NOT photoFor, which repeats), photoFor() single hero`
+     (The example shows the FORMAT — its layouts and preset belong to its subject, not yours.)
    - **Data model** — TypeScript interface signatures only (names + fields); one line: where seed lives.
-   - **Components** — `src/components/X.tsx` — one clause each; note the blocks/kit pieces it composes. NEVER plan a component a block already provides (header→NavBar, product card→MediaCard, empty→EmptyState).
+   - **Components** — `src/components/X.tsx` — one clause each; note the block pattern or kit pieces it starts from. Start from the block for each job (header→NavBar, brand→Logo, product card→MediaCard, empty→EmptyState) and plan an adaptation where the subject needs one — never a look-alike from scratch.
    - **State** — one line each: what's in App, what's in a hook, what persists.
    - **Out of scope** — a comma list (no backend, no auth, …).
    - **Backend** (ONLY if the app needs server persistence — INFER it: shared-across-devices/users,
@@ -87,9 +89,9 @@ seam and breaks real behavior (browser back button, offline fallback).
 Before replying, self-check PLAN.md — every box must hold or fix it first:
 - [ ] Under ~1800 characters / 45 lines. Terse fragments, zero prose paragraphs. (If over, CUT.)
 - [ ] All seven sections present.
-- [ ] A **Design** section EXISTS and names: `category:` + preset from src/themes/ + blocks per view + imagery source.
+- [ ] A **Design** section EXISTS and names: `category:` + preset from src/themes/ + the bands per view + imagery source.
 - [ ] Imagery is `<Photo web>` (grids) / `photoFor()` (one hero) / `<ArtImage>` (abstract) — NEVER emoji.
-- [ ] Views name BLOCKS (MediaCard, CartRow, StatCard…), not raw kit Cards, wherever a block exists.
+- [ ] Views name the block PATTERN per band (MediaCard, CartRow, StatCard…, adapted where needed), not raw kit Cards.
 - [ ] Every clarifying answer is reflected (each "no" appears under Out of scope).
 - [ ] Every View lists only components that exist in the Components section.
 - [ ] The data model covers every field any View displays.

@@ -11,13 +11,14 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { noResidue } from '../_lib/residue.mjs'
+import { productBuild } from '../_lib/productBuild.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const TEMPLATE = resolve(HERE, '..', '..', '..', 'packages', 'server', 'templates', 'react')
 
-const build = spawnSync(process.execPath, [join('node_modules', 'vite', 'bin', 'vite.js'), 'build'], { encoding: 'utf8', timeout: 180_000 })
+const build = productBuild(180_000)
 if (build.status !== 0) {
-	console.error('vite build FAILED:\n' + (build.stderr || build.stdout).slice(-1500))
+	console.error("npm run build FAILED (the product's own check: typecheck + bundle):\n" + (build.stdout + build.stderr).slice(-1500))
 	process.exit(1)
 }
 

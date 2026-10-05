@@ -28,7 +28,8 @@ A small **provider abstraction**, owned by us (not a library — see "Alternativ
 - Slightly more indirection than a direct call — worth it; this is the seam the whole model layer hangs on.
 
 ## Alternatives considered
-- **Vercel AI SDK / LangChain.js / official `openai` SDK with baseURL**: real libraries that do this.
+- **A multi-provider AI SDK / an LLM orchestration framework / the official `openai` SDK with baseURL**:
+  real libraries that do this.
   Rejected as the *primary* path because Cascade is a tutorial — a library hides streaming, tool-call
   accumulation, and translation, which are the lessons (Phase 2/4). Our abstraction is tiny anyway
   (one compat provider + a factory). A library could still be slotted *behind* one provider later.

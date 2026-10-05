@@ -50,7 +50,7 @@ describe('modelRegistry per-model params (ADR-067)', () => {
 	it('seeds defaults when no file exists', async () => {
 		const list = enabledModels()
 		expect(list.length).toBeGreaterThan(0)
-		expect(list.some((m) => m.provider === 'openai' && m.model === 'gpt-5.6-luna')).toBe(true)
+		expect(list.some((m) => m.provider === 'openai' && m.model === 'gpt-6-luna')).toBe(true)
 	})
 
 	it('setModelParams merges without clobbering other fields', async () => {

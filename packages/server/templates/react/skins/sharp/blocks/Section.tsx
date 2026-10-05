@@ -12,14 +12,31 @@ export interface SectionProps {
 	/** muted: a full-width tinted band that breaks up long pages · wash: a soft gradient field derived
 	 *  from the preset's primary/accent — atmosphere for a hero-adjacent or closing band. */
 	tone?: 'default' | 'muted' | 'wash'
+	/** A THIN band — a logo row, a stat strip, one quote: a shorter step, so it sits close under the band it
+	 *  supports (a thin band with a full step on both sides reads as empty). */
+	compact?: boolean
+	/** An in-page anchor (#pricing) goes ON the band — a wrapper div around a band breaks the rhythm. */
+	id?: string
 	children: ReactNode
 	className?: string
 }
 
-/** Page rhythm wrapper — sharp skin: rules do the separating that whitespace does in base. */
-export function Section({ eyebrow, heading, description, tone = 'default', children, className }: SectionProps) {
+/** Page rhythm wrapper — sharp skin: rules do the separating that whitespace does in base. A band: it owns
+ *  its vertical padding, and the band that follows decides the gap (src/index.css). */
+export function Section({ eyebrow, heading, description, tone = 'default', compact = false, id, children, className }: SectionProps) {
 	return (
-		<section data-block="section" className={cn(tone === 'muted' && 'border-y-2 bg-muted', tone === 'wash' && 'relative isolate overflow-hidden border-y-2', className)}>
+		<section
+			id={id}
+			data-block="section"
+			data-band={tone === 'default' ? 'plain' : tone}
+			data-compact={compact ? '' : undefined}
+			className={cn(
+				compact ? 'py-section-compact md:py-section-compact-lg' : 'py-section-y md:py-section-y-lg',
+				tone === 'muted' && 'border-y-2 bg-muted',
+				tone === 'wash' && 'relative isolate overflow-hidden border-y-2',
+				className,
+			)}
+		>
 			{tone === 'wash' ? (
 				<div
 					aria-hidden
@@ -30,7 +47,7 @@ export function Section({ eyebrow, heading, description, tone = 'default', child
 					}}
 				/>
 			) : null}
-			<div className="mx-auto max-w-6xl px-6 py-section-y md:py-section-y-lg">
+			<div className="mx-auto max-w-6xl px-6">
 				{eyebrow || heading || description ? (
 					<div className="mb-10 flex max-w-2xl flex-col gap-2.5 border-l-4 border-primary pl-4">
 						{eyebrow ? <span className="text-xs font-medium uppercase tracking-[0.14em] text-primary">{eyebrow}</span> : null}

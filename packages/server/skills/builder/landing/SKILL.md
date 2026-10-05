@@ -3,17 +3,18 @@ name: landing
 description: Landing pages that read as 2026, not 2021 — the band order, the four variants (SaaS, launch, portfolio, waitlist), the modern hero/bento/pricing/FAQ vocabulary, and real copy rules.
 whenToUse: Load BEFORE building any landing page, home page, marketing site, product page, hero section, pricing page, about page, portfolio, waitlist, or "coming soon" page.
 ---
-# Landing pages — structure sells, and the structure is a stack of blocks
+# Landing pages — structure sells, and the structure is a stack of bands
 
-Every band is a BLOCK with props. Hand-rolled marketing markup is how a page ends up looking generic —
-and it also breaks restyling, because only blocks follow the preset.
+Every band starts from a BLOCK pattern: use it as it is, or adapt it to THIS product — its structure, its
+content, its visual anchor (keep the `data-block` stamp and token-only styling, so it still follows the
+preset). A band that is a stock block with swapped copy is how a page ends up looking like every other one.
 
 ## The band order — the spine every variant bends
 
 ```
-<NavBar>                                  brand · 2–4 links · ONE primary Button
+<NavBar>                                  <Logo> · 2–4 links · ONE primary Button
 <Hero layout="collage">                   badge · TWO-TONE headline · subcopy · 2 actions · media
-<Section><LogoStrip>                      trust, immediately under the hero
+<Section compact><LogoStrip>              trust, close under the hero (a thin band is compact)
 <Section tone="muted"><BentoGrid>          the "why" — MIXED tiles, not a row of clones
 <Section><PricingTable>                    2–4 tiers, exactly ONE highlighted
 <Section tone="wash"><Testimonial>         one strong quote (variant="feature") or three cards
@@ -66,6 +67,9 @@ zero assets). Any grid of distinct subjects: `<Photo web="…" seed={item.id}>` 
 
 - [ ] Bands present in order: NavBar → Hero → (LogoStrip) → BentoGrid or FeatureGrid → PricingTable (if
       priced) → Testimonial → FAQ → CTASection → Footer. **≥5** bands total on a full landing page.
+- [ ] One rhythm: no padding or margins added between bands; every band carries an anchor (product
+      visual, data, image) — none is a heading and a grey line.
+- [ ] The brand: `<Logo name="…" />` (the name as a wordmark) in the NavBar and the Footer.
 - [ ] Headline ≤ 8 words and two-tone; subcopy is ONE sentence.
 - [ ] The hero carries REAL imagery — `<ArtImage>` or `photo()`/`photoFor()` — and any grid of distinct
       subjects uses `<Photo web="…" seed={item.id}>`. A page with zero imagery fails the design lint.

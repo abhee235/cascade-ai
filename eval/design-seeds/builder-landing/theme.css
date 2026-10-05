@@ -1,0 +1,135 @@
+/* THEME SEED: ferrite — the ADR-085 P0 oracle's "B" theme for builder-landing.
+
+   SOURCE: arm 3 of the 2026-09-27 design experiment (hosted model + ui-ux-pro-max, free design), file
+   src/themes/ferrite.css, finished by hand to the template's contract v2. Its identity is kept as is: a
+   dark-first operations page on slate, one red call to action, green = healthy, JetBrains Mono headlines
+   over IBM Plex Sans, 12 px radius, a spacious rhythm (96/128 px sections).
+
+   TRANSLATED to the template's role semantics (the frozen kit and blocks render these roles):
+   - Arm 3 used --accent as its CTA (54 bg-accent CTAs). In the template --primary IS the CTA and --accent is
+     the hover/selection wash, so the CTA red moves to --primary and --accent takes arm 3's own neutral
+     (it mapped --sidebar-accent to --muted itself). Its green stays on --secondary, --ring and the charts.
+   - --primary and --destructive are TEXT in the template too (eyebrows, links: text-primary; form errors:
+     text-destructive), so each must read at 4.5:1 as text on every surface AND carry its label. Arm 3's
+     #dc2626 is 3.0–3.7:1 as text on slate — it knew: it kept a red TEXT tint, --accent-text #f87171 ("this
+     tint is 6.4:1"). That tint becomes the red, with a dark label (6.5:1): arm 3's own red, where red is read.
+   - Headlines: arm 3 set its heading face on font-mono because ITS components used font-mono for headings;
+     the template's display role is font-serif (21 uses in blocks), so JetBrains Mono moves there.
+   - Removed (no contract role yet): --accent-hover (the kit darkens with /90), --warning (no status role),
+     --subtle (→ --muted-foreground); --accent-text becomes the red itself (above); --band becomes the .dark card.
+   - :root is arm 3's dark design unchanged (dark-first, as it chose). .dark is NEW: the deeper OLED variant
+     its style note names ("Dark Mode (OLED)"), contrast-checked.
+   Fonts: OFL 1.1, bundled (see ../assets/fonts/LICENSE-*.txt). */
+
+@font-face {
+	font-family: 'IBM Plex Sans Variable';
+	font-style: normal;
+	font-weight: 100 700;
+	font-display: swap;
+	src: url('../assets/fonts/ibm-plex-sans-var-latin.woff2') format('woff2-variations');
+}
+
+@font-face {
+	font-family: 'JetBrains Mono Variable';
+	font-style: normal;
+	font-weight: 100 800;
+	font-display: swap;
+	src: url('../assets/fonts/jetbrains-mono-var-latin.woff2') format('woff2-variations');
+}
+
+:root {
+	--preset: 'ferrite';
+	--radius: 0.75rem;
+
+	--section-y: 6rem;
+	--section-y-lg: 8rem;
+	--hero-y: 6rem;
+	--nav-h: 4.25rem;
+
+	--background: #0f172a;
+	--foreground: #f8fafc;
+	--card: #111827;
+	--card-foreground: #f8fafc;
+	--popover: #111827;
+	--popover-foreground: #f8fafc;
+
+	/* THE CTA — arm 3's red text tint, so it reads as text too (6.5:1 on slate), with a dark label (6.5:1). */
+	--primary: #f87171;
+	--primary-foreground: #0f172a;
+	--secondary: #22c55e;
+	--secondary-foreground: #0f172a;
+	--muted: #1e293b;
+	--muted-foreground: #cbd5e1;
+
+	/* The wash for hovers, selection and quiet chips — arm 3's own neutral slate, never the CTA. */
+	--accent: #1e293b;
+	--accent-foreground: #f8fafc;
+
+	--destructive: #f87171;
+	--destructive-foreground: #0f172a;
+
+	--border: #334155;
+	--input: #475569;
+	--ring: #16a34a;
+
+	--chart-1: #f87171;
+	--chart-2: #f59e0b;
+	--chart-3: #22c55e;
+	--chart-4: #94a3b8;
+	--chart-5: #334155;
+
+	--sidebar: var(--card);
+	--sidebar-foreground: var(--card-foreground);
+	--sidebar-primary: var(--primary);
+	--sidebar-primary-foreground: var(--primary-foreground);
+	--sidebar-accent: var(--muted);
+	--sidebar-accent-foreground: var(--foreground);
+	--sidebar-border: var(--border);
+	--sidebar-ring: var(--ring);
+
+	--font-sans: 'IBM Plex Sans Variable', ui-sans-serif, system-ui, sans-serif;
+	--font-serif: 'JetBrains Mono Variable', ui-monospace, 'Cascadia Code', Consolas, monospace;
+	--font-mono: 'JetBrains Mono Variable', ui-monospace, 'Cascadia Code', Consolas, monospace;
+
+	--shadow-color: #000000;
+	--shadow-opacity: 0.35;
+
+	--tracking-display: -0.045em;
+	--leading-display: 1.08;
+}
+
+.dark {
+	/* OLED: near-black paper; arm 3's deeper --band becomes the card. The CTA and status colors hold. */
+	--background: #020617;
+	--foreground: #f8fafc;
+	--card: #0b1120;
+	--card-foreground: #f8fafc;
+	--popover: #0b1120;
+	--popover-foreground: #f8fafc;
+
+	--primary: #f87171;
+	--primary-foreground: #020617;
+	--secondary: #22c55e;
+	--secondary-foreground: #020617;
+	--muted: #111827;
+	--muted-foreground: #cbd5e1;
+
+	--accent: #111827;
+	--accent-foreground: #f8fafc;
+
+	--destructive: #f87171;
+	--destructive-foreground: #020617;
+
+	--border: #1e293b;
+	--input: #475569;
+	--ring: #16a34a;
+
+	--chart-1: #f87171;
+	--chart-2: #f59e0b;
+	--chart-3: #22c55e;
+	--chart-4: #94a3b8;
+	--chart-5: #334155;
+
+	--shadow-color: #000000;
+	--shadow-opacity: 0.5;
+}

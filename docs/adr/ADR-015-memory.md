@@ -29,7 +29,7 @@ A **3-tier, self-curating** memory subsystem:
 
 **Self-curation** (revised — see `docs/learnings/memory-write-policy.md`): per-turn blind-append is the naive
 design (semantic duplicates, transient facts, memory poisoning + longitudinal drift). The real design is
-**event-driven + Mem0-style consolidation**: harvest durable facts when context is about to be discarded —
+**event-driven consolidation**: harvest durable facts when context is about to be discarded —
 at **compaction** (the chunk being summarized away) and **session-end** — and for each candidate run
 ADD/UPDATE/DELETE/NOOP against existing memory (semantic dedup), behind a strict durability/safety gate.
 This is **built in Phase 11 alongside compaction** (they couple naturally). In Phase 10 auto-curation ships

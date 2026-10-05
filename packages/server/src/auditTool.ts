@@ -14,7 +14,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { z } from 'zod'
 import type { Tool } from '@cascade/core'
-import { readResidueContract, shippedVariantPaths, type ResidueFinding } from './templates.js'
+import { readResidueContract, shippedTexts, type ResidueFinding } from './templates.js'
 
 const inputSchema = z.object({})
 
@@ -102,79 +102,30 @@ function scan(projectDir: string, findings: ResidueFinding[]): Hit[] {
  *  without turning a wholesale-untokenized file into a wall of numbers. */
 const RAW_COLOR_LINES_SHOWN = 8
 
-/** The shared layers a generated app COMPOSES but never owns. Mirrors the session's frozenPaths. */
-const FROZEN_DIRS = ['src/components/blocks', 'src/components/ui']
-
-/**
- * HARD findings for a shared layer that has been edited or extended. The session's frozenPaths guard is
- * the primary defence — this is the BACKSTOP, because the guard only exists for sessions that declare it
- * and cannot repair a project already damaged (a resumed build, a hand-edit, an older Cascade).
- *
- * Compared against the template's pristine copy, which lives outside the model's Read jail. A file the
- * template never shipped is a finding too: inventing `blocks/DangerZone.tsx` breaks the same contract as
- * editing `blocks/Hero.tsx` — both make the layer project-specific, and the whole point is that it is not.
- */
-function frozenLayerHits(projectDir: string, templateId: string): Hit[] {
-	const hits: Hit[] = []
-	for (const dir of FROZEN_DIRS) {
-		const abs = join(projectDir, dir)
-		if (!existsSync(abs)) continue
-		for (const f of walk(abs, abs)) {
-			if (!/\.tsx?$/.test(f)) continue
-			const rel = relative(projectDir, f).replaceAll('\\', '/')
-			// ANY shipped variant counts as pristine — the template base OR a skin's copy (design-overhaul
-			// P5): the Restyle tool legitimately swaps skin implementations into blocks/, and a swap the
-			// audit then flagged as "EDITED" would teach the model to undo the user's restyle. Only content
-			// matching NO shipped variant is a hand-edit.
-			const variants = shippedVariantPaths(templateId, rel).filter((p) => existsSync(p))
-			let why: string
-			if (variants.length === 0) {
-				why = 'a NEW file in a read-only shared layer — the template never shipped it'
-			} else {
-				try {
-					const b = readFileSync(f, 'utf8').replace(/\r\n/g, '\n')
-					if (variants.some((p) => readFileSync(p, 'utf8').replace(/\r\n/g, '\n') === b)) continue
-					why = 'EDITED — this file is shared and read-only; the app must compose it, not change it (to change the LOOK, use the Restyle tool)'
-				} catch {
-					continue
-				}
-			}
-			hits.push({
-				finding: {
-					kind: 'string',
-					why,
-					fix: `Restore it and move your change into your OWN component under src/components/. Blocks and the kit are frozen so every page stays composable (that is what makes a restyle or a preset swap work); a project-specific edit here silently breaks that for the whole app.`,
-				},
-				where: rel,
-			})
-		}
-	}
-	return hits
-}
-
-function styleSoftHits(projectDir: string): Hit[] {
+function styleSoftHits(projectDir: string, templateId: string): Hit[] {
 	const hits: Hit[] = []
 	const src = join(projectDir, 'src')
 	const raw = /\b(?:bg|text|border|from|to|ring)-(?:white|black|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone)-\d{2,3}\b/
-	let blockImportSeen = false
-	let firstView: string | undefined
+	const shipped = shippedTexts(templateId)
 	for (const f of walk(src, src)) {
 		if (!/\.tsx?$/.test(f)) continue
 		const rel = relative(projectDir, f).replaceAll('\\', '/')
-		if (rel.startsWith('src/components/ui/')) continue // the vendored kit is not the model's styling
 		let text: string
 		try {
 			text = readFileSync(f, 'utf8')
 		} catch {
 			continue
 		}
-		if (!blockImportSeen && text.includes('@/components/blocks/')) blockImportSeen = true
-		if (!firstView && rel.startsWith('src/') && rel.endsWith('.tsx')) firstView = rel
+		// ADR-086 P1 retired the frozen-layer HARD check: blocks are patterns the app may adapt, and the kit is
+		// editable as shadcn intends. What an edit ADDS is still judged: a raw-color line the shipped version of
+		// this file already carries is template code, not the model's styling (review, 2026-10-04: an edited kit
+		// file reported every line, the template's too). An untouched file therefore reports nothing.
+		const theirs = new Set((shipped(rel) ?? []).flatMap((t) => t.split('\n')).filter((l) => raw.test(l)).map((l) => l.trim()))
 		const lines = text.split('\n')
 		// EVERY raw-color line, not just the first. Measured (qwen36-agentic-iq4, builder-shop 2026-08-11):
 		// reporting one occurrence per file turned a two-instance file into a whack-a-mole — audit, fix :66,
 		// audit, fix :113 — three wasted turns for one class of defect. All the lines at once means one edit.
-		const rawLines = lines.flatMap((l, i) => (raw.test(l) ? [i + 1] : []))
+		const rawLines = lines.flatMap((l, i) => (raw.test(l) && !theirs.has(l.trim()) ? [i + 1] : []))
 		if (rawLines.length > 0) {
 			const shown = rawLines.slice(0, RAW_COLOR_LINES_SHOWN)
 			const more = rawLines.length - shown.length
@@ -237,9 +188,6 @@ function styleSoftHits(projectDir: string): Hit[] {
 			hits.push({ finding: { kind: 'string', why: 'photoFor inside a list render — the ~2-per-category pack repeats visibly on grids', fix: 'Use <Photo web="<subject>" seed={item.id}> per item (design skill IMAGERY ROUTING).' }, where: `${rel}:${photoForInMap + 1}` })
 		}
 	}
-	if (!blockImportSeen && firstView) {
-		hits.push({ finding: { kind: 'string', why: 'no @/components/blocks imports anywhere — pages are being hand-rolled instead of block-composed', fix: 'Assemble pages from NavBar/Hero/Section/MediaCard/EmptyState… (design skill §3).' }, where: firstView })
-	}
 	return hits
 }
 
@@ -268,8 +216,8 @@ export function createTemplateAuditTool(deps: AuditToolDeps): Tool | undefined {
 
 		async call() {
 			try {
-				const hard = [...scan(deps.projectDir, contract.hard), ...frozenLayerHits(deps.projectDir, deps.templateId)]
-				const soft = [...scan(deps.projectDir, contract.soft), ...styleSoftHits(deps.projectDir)]
+				const hard = scan(deps.projectDir, contract.hard)
+				const soft = [...scan(deps.projectDir, contract.soft), ...styleSoftHits(deps.projectDir, deps.templateId)]
 				if (hard.length === 0 && soft.length === 0) {
 					return { content: 'TemplateAudit clean — no template residue. The scaffold has been fully replaced by the app.' }
 				}

@@ -57,5 +57,5 @@ because local models won't reliably choose to call a search tool, so we retrieve
 - Archival dedups exact repeats; semantic dedup + ADD/UPDATE/DELETE/NOOP come with consolidation (Phase 11).
 
 ## Deferred to Phase 11 (coupled with compaction)
-Event-driven, Mem0-style **consolidating** self-curation; recall (raw-transcript search); per-user scoping
+Event-driven, **consolidating** self-curation (ADD/UPDATE/DELETE/NOOP); recall (raw-transcript search); per-user scoping
 for the web frontend.

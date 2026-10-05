@@ -20,15 +20,14 @@
 
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { SandboxEnforcement, SandboxPolicy } from '@cascade/core'
 import { canonicalPath, isConfined, writableRoots } from '@cascade/core'
 // Import-safe on every platform: winFence loads advapi32 LAZILY (only when a fence function first runs,
-// which is win32-only), and koffi's own native module loads cross-platform. Only the ACL GRANT is ever
-// called in-process here; token creation and the restricted spawn live in the runner subprocess.
-import { grantWriteAce } from './winFence.js'
-import { workspaceWriteSid } from './winFenceSid.js'
+// which is win32-only), and koffi's own native module loads cross-platform. Only the workspace LABEL is
+// ever set in-process here; token creation and the confined spawn live in the runner subprocess.
+import { hasLowLabel, labelLowIntegrity, unlabelLowIntegrity } from './winFence.js'
 
 export type LocalBackendId = 'seatbelt' | 'bwrap' | 'win-write-fence' | 'none'
 
@@ -126,8 +125,10 @@ export function wrapCommand(backend: LocalBackendId, command: string, policy: Sa
 const DENIAL_SIGNATURES: Record<Exclude<LocalBackendId, 'none'>, readonly string[]> = {
 	bwrap: ['read-only file system', 'permission denied'],
 	seatbelt: ['operation not permitted'],
-	// cmd: "Access is denied."; pwsh/.NET: "Access to the path '…' is denied."; node EACCES: "permission denied".
-	'win-write-fence': ['access is denied', 'access to the path', 'permission denied'],
+	// cmd: "Access is denied."; pwsh/.NET: "Access to the path '…' is denied."; node EACCES: "permission denied";
+	// node EPERM: "EPERM: operation not permitted, open '…'" (a denied write) and "spawn EPERM" (read-only's
+	// piped spawns) — unmatched until ADR-087, so a model saw a broken toolchain instead of the sandbox.
+	'win-write-fence': ['access is denied', 'access to the path', 'permission denied', 'operation not permitted', 'eperm'],
 }
 
 /** The write-fence runner's failure signature (the child never ran) — kept in sync with winFenceRunner. */
@@ -167,9 +168,11 @@ const PLATFORM_CHAINS: Record<string, readonly Exclude<LocalBackendId, 'none'>[]
 }
 
 /**
- * Functional write-fence probe: run the RUNNER itself, read-only, around `cmd /c exit 0`, with a bounded
- * timeout — exit 0 proves the whole production path works on this machine (runner host, koffi resolution,
- * token creation, and the console semantics a restricted child needs).
+ * Functional write-fence probe: run the RUNNER itself around `cmd /c exit 0` under workspace-write — the
+ * default mode and, since ADR-087, its own low-integrity token — with a bounded timeout. Exit 0 proves the whole
+ * production path on this machine (runner host, koffi resolution, token creation, the console semantics a
+ * confined child needs). ONE spawn, deliberately: the probe blocks its caller, and a second one per mode doubled
+ * that (review, 2026-10-04). read-only's token is the unchanged legacy path; if it ever fails it fails closed.
  *
  * Deliberately NOT in-process FFI. The server runs inside Electron's main thread in the packaged app; a
  * synchronous CreateProcessAsUser + WaitForSingleObject there can block the entire UI if the child never
@@ -179,7 +182,8 @@ const PLATFORM_CHAINS: Record<string, readonly Exclude<LocalBackendId, 'none'>[]
  */
 function defaultProbeWinFence(): boolean {
 	try {
-		const argv = [...fenceRunnerArgv(), '--workspace', process.cwd(), '--mode', 'read-only', '--', 'exit 0']
+		// No --temp-dir: the probe labels nothing and writes nothing — it proves the token spawns a child.
+		const argv = [...fenceRunnerArgv(), '--workspace', process.cwd(), '--mode', 'workspace-write', '--', 'exit 0']
 		const probe = spawnSync(argv[0], argv.slice(1), {
 			cwd: fileURLToPath(new URL('.', import.meta.url)), // where `tsx` resolves in dev; harmless when bundled
 			env: { ...process.env, ...fenceRunnerEnv() },
@@ -193,9 +197,9 @@ function defaultProbeWinFence(): boolean {
 	}
 }
 
-/** Grants applied this process lifetime, keyed by canonical workspace path — the standing-ACE reuse cache
- *  (a workspace's write ACE is an expensive full-tree propagation; do it once, never per exec). */
-const grantedWorkspaces = new Set<string>()
+/** Workspaces labeled this process lifetime, keyed by canonical path. The label itself STANDS on disk
+ *  (labelLowIntegrity skips a root that already carries it); this cache only saves the check per exec. */
+const labeledWorkspaces = new Set<string>()
 
 /**
  * The node that HOSTS the fence runner. The bundled portable node (`CASCADE_NODE_DIR/node.exe`, ADR-070
@@ -265,9 +269,10 @@ export function selectLocalBackend(internals: BackendInternals = {}): LocalBacke
 	return picked
 }
 
-/** The write-fence enforces WRITES only (reads/network/exec stay open) plus the documented Everyone and
- *  hard-link boundaries — so it is honestly `partial`. bwrap/Seatbelt govern every promised effect by
- *  construction, so they are `full`. */
+/** The write-fence enforces WRITES only (reads/network/exec stay open), with documented boundaries — hard
+ *  links; under workspace-write Windows' own low-integrity areas (LocalLow, AppDataLow) stay writable; under
+ *  read-only Everyone-writable objects do (ADR-087) — so it is honestly `partial`. bwrap/Seatbelt govern
+ *  every promised effect by construction, so they are `full`. */
 function enforcementOf(backend: Exclude<LocalBackendId, 'none'>): SandboxEnforcement {
 	return backend === 'win-write-fence' ? 'partial' : 'full'
 }
@@ -280,24 +285,75 @@ export function localBackendClaims(): { enforcement?: SandboxEnforcement; denial
 	return { enforcement: enforcementOf(backend), denialSignatures: DENIAL_SIGNATURES[backend] }
 }
 
-/** Ensure the workspace's write ACE exists, once per canonical path per process (the standing reuse cache). */
-function ensureWorkspaceGrant(workspaceRoot: string, sid: string): void {
+/** Ensure the workspace carries its low-integrity label, once per canonical path per process (ADR-087). */
+function ensureWorkspaceLabel(workspaceRoot: string): void {
 	const key = canonicalPath(workspaceRoot)
-	if (grantedWorkspaces.has(key)) return
-	grantWriteAce(key, sid)
-	grantedWorkspaces.add(key)
+	if (labeledWorkspaces.has(key)) return
+	labelLowIntegrity(key)
+	labeledWorkspaces.add(key)
+}
+
+/** Live sandboxes holding each workspace's label (ADR-087 amendment, 2026-10-06). The label is what lets a
+ *  low-integrity child write a tree — so a CLOSED project must not keep it, or a fenced command in any open
+ *  project could write it (review: the shared label let project A's commands write project B's files). */
+const labelHolders = new Map<string, number>()
+
+/** A sandbox ran a fenced workspace-write command here: count it, so the label stays while anyone needs it. */
+export function holdWorkspaceLabel(workspaceRoot: string): void {
+	const key = canonicalPath(workspaceRoot)
+	labelHolders.set(key, (labelHolders.get(key) ?? 0) + 1)
+}
+
+/** That sandbox is gone: the last one out takes the label off (one tree walk, like putting it on). A failure
+ *  is not thrown — closing a project must not fail on it — and the startup sweep retries. */
+export function releaseWorkspaceLabel(workspaceRoot: string): void {
+	const key = canonicalPath(workspaceRoot)
+	const left = (labelHolders.get(key) ?? 1) - 1
+	if (left > 0) {
+		labelHolders.set(key, left)
+		return
+	}
+	labelHolders.delete(key)
+	labeledWorkspaces.delete(key) // the next fenced command here labels it afresh
+	try {
+		unlabelLowIntegrity(key)
+	} catch {
+		/* left labeled; sweepWorkspaceLabels clears it at the next start */
+	}
+}
+
+/** Startup: take the label off every project under `root` that still carries one — the process that held it
+ *  crashed or was killed before its sandboxes were disposed. win32 only (nothing is labeled elsewhere). */
+export function sweepWorkspaceLabels(root: string): number {
+	if (process.platform !== 'win32') return 0
+	let swept = 0
+	let dirs: string[]
+	try {
+		dirs = readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => join(root, e.name))
+	} catch {
+		return 0
+	}
+	for (const dir of dirs) {
+		try {
+			if (!hasLowLabel(dir)) continue
+			unlabelLowIntegrity(dir)
+			swept++
+		} catch {
+			/* one unreadable project must not stop the sweep */
+		}
+	}
+	return swept
 }
 
 /** Build the write-fence's argv-form confinement: the runner prefix + policy flags + `--` + the model's
- *  command as ONE element (never reshelled). Under workspace-write it grants the workspace once and points
+ *  command as ONE element (never reshelled). Under workspace-write it labels the workspace once and points
  *  the child's TMP/TEMP at a workspace-private temp dir the runner creates. */
 function confineWithFence(command: string, policy: SandboxPolicy): ConfinedCommand {
 	const runner = fenceRunnerArgv()
 	const flags = ['--workspace', policy.workspaceRoot, '--mode', policy.mode]
 	if (policy.mode === 'workspace-write') {
-		const sid = workspaceWriteSid(policy.workspaceRoot)
-		ensureWorkspaceGrant(policy.workspaceRoot, sid)
-		flags.push('--write-sid', sid, '--temp-dir', join(policy.workspaceRoot, '.cascade', 'tmp'))
+		ensureWorkspaceLabel(policy.workspaceRoot)
+		flags.push('--temp-dir', join(policy.workspaceRoot, '.cascade', 'tmp'))
 	}
 	const argv = [...runner, ...flags, '--', command]
 	return {

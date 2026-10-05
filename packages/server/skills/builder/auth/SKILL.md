@@ -31,7 +31,7 @@ export function useAuth() {
 ## The screen — `<AuthCard>`, never a hand-rolled centred div
 
 ```tsx
-<AuthCard brand={<><Sparkles className="size-5 text-primary" /> Meridian</>}
+<AuthCard brand={<Logo name="Meridian" />}
   title="Welcome back" subtitle="Sign in to pick up where you left off."
   error={failed ? 'That email and password do not match.' : undefined}
   footer={<>No account? <button type="button" onClick={goSignUp} className="text-foreground underline underline-offset-4">Create one</button></>}>

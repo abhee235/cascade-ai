@@ -17,7 +17,7 @@ it truncates (`preview.slice(0,200)`) and omits the raw model I/O. A useful trac
 - session.submit / InboundMessage (user text, permission answer, abort), turn boundaries, errors
 
 ## Library vs self-code
-- **LLM-obs SaaS** (LangSmith, Langfuse, Helicone, Phoenix, Braintrust) — hosted servers, auth, cloud-LLM
+- **LLM-obs platforms** (hosted LLM-observability services, e.g. Langfuse, Phoenix) — hosted servers, auth, cloud-LLM
   assumptions; overkill and hides the mechanism. Defer.
 - **OpenTelemetry / OpenLLMetry** — vendor-neutral standard, the right answer *if you outgrow JSONL and
   want any backend*; SDK is heavy (span/context ceremony). Defer; note as the upgrade path.

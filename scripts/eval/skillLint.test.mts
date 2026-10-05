@@ -30,7 +30,7 @@ describe('skillLint — official checklist as code', () => {
 		expect(lintDoc(doc({ references: ['reference/components.md'] })).some((f) => f.rule === 'unadvertised-reference')).toBe(true)
 	})
 
-	it('workflow of 4+ numbered steps without a copyable checklist warns (skillify rule)', () => {
+	it('workflow of 4+ numbered steps without a copyable checklist warns (skill rule)', () => {
 		const steps = '# S\n1. a\n2. b\n3. c\n4. d\n'
 		expect(lintDoc(doc({ body: steps })).some((f) => f.rule === 'no-checklist')).toBe(true)
 		expect(lintDoc(doc({ body: `${steps}\n- [ ] a\n` })).some((f) => f.rule === 'no-checklist')).toBe(false)

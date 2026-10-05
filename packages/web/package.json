@@ -1,6 +1,7 @@
 {
   "name": "@cascade/web",
   "version": "0.0.0",
+  "license": "MIT",
   "description": "Cascade web — a browser frontend driving @cascade/core over WebSocket (the same engine the extension drives in-process). Grows into the app builder. (ADR-019)",
   "type": "module",
   "scripts": {

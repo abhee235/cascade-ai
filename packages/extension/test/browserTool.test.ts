@@ -21,6 +21,18 @@ function fakePage(over: Partial<PageLike> = {}): PageLike {
 const ctx = {} as never
 
 describe('extension Browser tool', () => {
+	it('dispose closes the headless browser once; the disposed tool launches no other (ADR-086 P0 leak)', async () => {
+		const close = vi.fn(async () => {})
+		const launch = vi.fn(async () => ({ page: fakePage(), close }))
+		const tool = createBrowserTool({ launch })
+		await tool.call({ op: 'open', url: 'http://localhost:5173' }, ctx)
+		await tool.dispose!()
+		await tool.dispose!()
+		expect(close).toHaveBeenCalledTimes(1)
+		expect((await tool.call({ op: 'open', url: 'http://localhost:5173' }, ctx)).isError).toBe(true)
+		expect(launch).toHaveBeenCalledTimes(1)
+	})
+
 	it('open requires a url the FIRST time (there is no fixed preview origin in the IDE)', async () => {
 		const tool = createBrowserTool({ launch: async () => ({ page: fakePage(), close: async () => {} }) })
 		const r = await tool.call({ op: 'open' }, ctx)

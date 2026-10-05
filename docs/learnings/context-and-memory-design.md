@@ -32,18 +32,18 @@ Checked **before every API call**, as a **pipeline of cheap→expensive reductio
 gets you under threshold, full summarization is skipped and granular context is preserved:
 ```
 msgs = messagesAfterLastBoundary(msgs)   # start past the last boundary marker
-msgs = toolResultBudget(msgs)             # per-message tool-output cap (separate layer, see below)
-msgs = snip(msgs)               # drop snippable items
-msgs = microcompact(msgs)                      # compress individual large items
+msgs = toolResultBudget(msgs)            # per-message tool-output cap (separate layer, see below)
+msgs = snip(msgs)                        # drop snippable items
+msgs = microcompact(msgs)                # compress individual large items
 msgs = collapse(msgs)
-{ result } = autocompact(msgs)                 # ← the summarize step, only if still over threshold
+{ result } = autocompact(msgs)           # ← the summarize step, only if still over threshold
 ```
 **Threshold:**
 ```
-RESERVED_FOR_SUMMARY = min(maxOutputTokens(model), 20_000)   # room to GENERATE the summary
-effectiveWindow      = contextWindow(model) - RESERVED_FOR_SUMMARY
-AUTOCOMPACT_BUFFER   = 13_000                                # headroom (check is pre-call; a full response can land between checks)
-threshold            = effectiveWindow - AUTOCOMPACT_BUFFER  # ≈ window − 33k on a 200k model (~83.5%)
+summaryReserve  = min(maxOutputTokens(model), 20_000)   # room to GENERATE the summary
+effectiveWindow = contextWindow(model) - summaryReserve
+buffer          = 13_000                                 # headroom (check is pre-call; a full response can land between checks)
+threshold       = effectiveWindow - buffer               # ≈ window − 33k on a 200k model (~83.5%)
 fires when tokenCount(msgs) >= threshold
 ```
 - **Circuit breaker**: stop after 3 consecutive autocompact failures so an irrecoverably-over-limit
@@ -51,31 +51,30 @@ fires when tokenCount(msgs) >= threshold
 - **Full vs partial**: the default replaces *everything* after the boundary with one summary, then **re-injects**
   the 5 most-recently-read files (≤5k tokens each, ≤50k total). A **partial** variant keeps a **verbatim recent
   segment** and summarizes only the older side of a pivot — *this is the model for small windows.*
-- **Structured 9-section summary** (`services/compact/prompt.ts`): the model emits `<analysis>…</analysis>`
-  (scratchpad, stripped) then `<summary>` with fixed sections: **1** Primary request & intent · **2** Key
-  technical concepts · **3** Files & code sections (+why each matters) · **4** Errors & fixes (+user feedback)
-  · **5** Problem solving · **6** All user messages · **7** Pending tasks · **8** Current work · **9** Next
-  step (with **verbatim quotes** of where work left off, to prevent drift). Tool use is **denied** during
-  summarization.
+- **Structured 9-section summary**: the model first drafts a scratchpad analysis (stripped before use), then
+  writes a summary with nine fixed sections: **1** the user's request & intent · **2** key technical concepts ·
+  **3** files & code (+why each matters) · **4** errors & fixes (+user feedback) · **5** problem solving ·
+  **6** every user message · **7** pending tasks · **8** current work · **9** the next step (quoting verbatim
+  where work left off, to prevent drift). Tool use is **denied** during summarization.
 - **The replacement = a boundary marker, not a delete**: the post-compact history is
-  `[boundaryMarker, ...summary, ...keptMessages, ...reInjectedFiles]`. The marker records the pre-compact token count
-  and the next loop only reads messages *after* it — the raw transcript file
-  is untouched. The summary is wrapped as a synthetic user message that tells the model the session
-  continues from an earlier conversation that ran out of context, and to resume directly.
+  `[boundaryMarker, ...summary, ...keptMessages, ...reInjectedFiles]`. The marker records the pre-compact token
+  count and the next loop only reads messages *after* it — the raw transcript file is untouched. The summary is
+  wrapped as a synthetic user message that tells the model the session continues from an earlier conversation
+  that ran out of context, and to resume directly.
 - Best practice: compact **proactively** (~60%) for a better summary while there's headroom.
 
 ### Tool-output handling — a SEPARATE, EARLIER layer (not part of summarize)
-- **Per-result**: any single tool result over 50k chars → written to disk, model
-  gets a **preview + file path**.
-- **Per-message**: a tool-result budget caps the *sum* of tool_results in one turn at `200_000` chars
-  (largest offloaded to disk first). Hard ceiling 100k tokens per tool result.
+- **Per-result**: any single tool result over 50k chars → written to disk, model gets a **preview + file
+  path**.
+- **Per-message**: a tool-result budget caps the *sum* of tool_results in one turn at 200k chars (largest
+  offloaded to disk first). Hard ceiling 100k tokens per tool result.
 - It's **head-preview + disk-offload**, not head+tail elision. (For Cascade: simple head+tail with a marker.)
 
 ### Is "summarize-keep-recent" best-in-world?
 **For coding agents, yes — it's the current consensus** (the major coding agents all converge on it). The
 honest caveats / frontier:
 - **Microcompaction** — compress *individual* large items rather than re-summarizing the whole history (less lossy).
-- **RAG/external recall** — for truly unbounded history, retrieve old turns on demand (Letta's "recall memory").
+- **RAG/external recall** — for truly unbounded history, retrieve old turns on demand (a "recall memory" tier).
 These are refinements, not replacements. The structured-summary approach is the sweet spot for our scope.
 
 ### Dynamic context sizing — NO hardcoded buffers (decided)
@@ -124,20 +123,20 @@ blow a small budget:
 | **File injected into the prompt** ⭐ | a memory file read each session, prepended to the system prompt | transparent, committable, no infra (the common project-instructions file) |
 | **Structured KV / JSON** | facts as entries | tidy, but rigid |
 | **Vector/semantic memory** | embed + retrieve relevant facts | scales, but needs an embedding store |
-| **Tiered self-editing (MemGPT/Letta)** | core (in-context) + archival (vector, tool-searched) + recall (history); the **agent curates its own memory via tools** | frontier; best when "what to remember" is itself the agent's decision |
+| **Tiered self-editing (OS-style)** | core (in-context) + archival (vector, tool-searched) + recall (history); the **agent curates its own memory via tools** | frontier; best when "what to remember" is itself the agent's decision |
 
-### The frontier: MemGPT / Letta ("LLM as an OS")
+### The frontier: tiered self-editing memory ("LLM as an OS")
 - **Core memory** = RAM: always in-context (persona + key user/project facts), **self-edited** by the agent.
 - **Archival memory** = disk: external vector store, queried via `archival_search` tool calls.
 - **Recall memory** = searchable conversation history.
-- The agent **moves facts between tiers** with tool calls, and (v1) even runs **sleeptime agents** to curate
+- The agent **moves facts between tiers** with tool calls, and can even run **sleep-time agents** to curate
   memory in the background. This is the best-in-world for *open-ended* memory.
 
 ### Is file-injected memory best-in-world?
 **For a coding agent's needs (preferences, project facts, conventions), file-injected "core memory" is the
 right call** — it's transparent, user-editable, version-controllable (project memory committed with the repo),
-and infra-free. It *is* essentially Letta's **core memory** tier, file-backed. The frontier adds **archival +
-self-editing + background curation** — worth it when memory is large/open-ended, deferrable for us.
+and infra-free. It *is* essentially the tiered design's **core memory** tier, file-backed. The frontier adds
+**archival + self-editing + background curation** — worth it when memory is large/open-ended, deferrable for us.
 
 ### How a mature file-based implementation does it
 Memory is a **stack of files**, loaded **lowest→highest priority** (later files weigh more), discovered by
@@ -157,11 +156,11 @@ Memory is a **stack of files**, loaded **lowest→highest priority** (later file
 - **`@import`**: files pull in others via `@path` (on leaf text nodes only — skipped in code/comments), with
   a max include depth of 5, circular-ref protection, a text-extension whitelist, and **user approval for
   external** (outside-CWD) imports.
-- **Updating** — *no `str_replace` memory tool in this build*; three write paths: (1) `/memory` command opens
+- **Updating** — *no `str_replace` memory tool*; three write paths: (1) a `/memory` command opens
   the file in `$EDITOR`; (2) **auto-extraction** — at the *end* of a completed loop a **forked agent** scans
   the transcript and writes durable facts into the auto-memory dir; (3) hand-edit via normal Edit/Write.
-- **Auto-memory index** (`MEMORY.md`, always injected) is capped at 200 lines /
-  25k bytes, trimmed at a newline boundary with a "too long" notice.
+- **Auto-memory index** (`MEMORY.md`, always injected) is capped at 200 lines / 25k bytes, trimmed at a
+  newline boundary with a "too long" notice.
 
 ### Cascade's design — BEST-IN-CLASS (3 tiers + self-curation, all local)
 A file-only design is **file-injected only**: always in-context (capped, costs tokens every turn), **no semantic
@@ -174,7 +173,8 @@ retrievable, self-maintaining per-project memory). See ADR-015.
   `~/.cascade/CASCADE.md`; **directory walk** CWD→root (monorepos); project/closer = higher priority.
 - **`@import`** (`@path`/`@./rel`/`@~/home`): depth cap, text-extension whitelist, circular-ref protection,
   external-import note. Injected under the **OVERRIDE header**, capped by lines+bytes.
-- **Structured self-edit tools**: `append` / `replace` / `forget` (not append-only) — MemGPT-style curation.
+- **Structured self-edit tools**: `append` / `replace` / `forget` (not append-only) — tiered-memory-style
+  self-curation.
 
 **Tier 2 — Archival memory** ⭐ *(beyond file-only memory)*: `memory/archival.ts`.
 - Unbounded store of facts the agent **writes and semantically searches on demand** (`memory_search`,
@@ -214,4 +214,4 @@ tuned for small local-model windows.
 - **Build:** `compactIfNeeded` (chars/4 estimate, tool-output truncation, structured summary, recent-window) ·
   file-backed core memory (project + user) injected into the system prompt · a `Memory` self-edit tool ·
   UI markers. ADR-012 (compaction) + ADR-015 (memory).
-- **Defer:** real tokenizer, hierarchical/microcompaction, vector/archival memory, sleeptime curation.
+- **Defer:** real tokenizer, hierarchical/microcompaction, vector/archival memory, sleep-time curation.

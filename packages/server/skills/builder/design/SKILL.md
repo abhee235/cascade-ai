@@ -1,9 +1,9 @@
 ---
 name: design
-description: The design system: theme presets, page blocks, the shadcn/ui kit, tokens, type, and imagery. How to make every screen look DESIGNED, not scaffolded. Includes generated references for the kit and the blocks.
-whenToUse: Load when the task mentions ANY of: page, screen, button, card, modal, dialog, menu, input, list, grid, layout, style, color, theme, preset, font, dark mode, icon, image, photo, hero, landing, polish, look and feel. If the task will render anything, load this first.
+description: The design system: theme presets, page block PATTERNS, the shadcn/ui kit, tokens, the spacing rhythm, the logo, type, and imagery. How to make every screen look DESIGNED, not scaffolded. Includes generated references for the kit and the blocks.
+whenToUse: Load when the task mentions ANY of: page, screen, button, card, modal, dialog, menu, input, list, grid, layout, spacing, style, color, theme, preset, font, dark mode, icon, logo, brand, image, photo, hero, landing, polish, look and feel. If the task will render anything, load this first.
 ---
-# Design — this project HAS a design system. Compose it; never improvise styling.
+# Design — this project HAS a design system: tokens, one rhythm, block patterns. Adapt them; never style outside the tokens.
 
 ## 1. The design system
 
@@ -31,14 +31,19 @@ you; colors, fonts, radius, shadows and density all follow, and nothing else cha
 
 Restyle has a second, independent axis: `Restyle {op: "skin", skin: "sharp"}` swaps the block
 STRUCTURE (card/nav/hero markup) for certified alternates with identical props — your pages and imports
-keep working untouched. `skin: "base"` restores the stock look; `components: ["MediaCard"]` swaps just
-one surface. Any preset composes with any skin. Never hand-edit `src/themes/`, the `@import` line, or
-`src/components/blocks/` to change a look — Restyle is the mechanism, and the blocks refuse edits anyway.
+keep working untouched. It swaps only the blocks you have NOT edited: an edited block keeps its markup
+and still follows the tokens. `skin: "base"` restores the stock look; `components: ["MediaCard"]` swaps just
+one surface. Any preset composes with any skin. Never hand-edit `src/themes/` or the `@import` line —
+Restyle is the mechanism for the look as a whole.
 
-## 3. Blocks — pages are BLOCK COMPOSITIONS
+## 3. Blocks — PATTERNS you adapt, stacked in one rhythm
 
-`src/components/blocks/` (READ-ONLY, like the kit) are the page sections. Assemble pages from blocks
-FIRST, then fill their slots with the kit:
+`src/components/blocks/` are the page patterns: tested, token-styled, accessible starting points. For each
+part of a page, start from the block for the job — use it as it is when it fits, EDIT it in place when this
+app needs something different (it is your code), or copy it into your own component and adapt it. When you
+adapt, keep two things: the `data-block="…"` stamp on its root (checks and the preview find sections by it)
+and token-only styling. The kit (`src/components/ui/`) is shadcn/ui — edit a component the way shadcn
+intends (in place, same API); never write a look-alike from scratch. The patterns:
 
 - `AppShell` — the chrome for any SIGNED-IN view (sidebar nav + sticky header + content well). A
   dashboard/admin/settings page belongs inside one; a bare centred column reads as a marketing page.
@@ -46,11 +51,12 @@ FIRST, then fill their slots with the kit:
   (`layout="split|centered|bleed|collage"`; **collage** layers the image over offset panels — the modern
   depth look, and it needs only ONE image).
 - `Section` — every content band (`tone="default|muted|wash"`; **wash** paints a soft gradient field from
-  the preset's own colors). `PageHeader` — app-view headers.
+  the preset's own colors; `compact` for a thin band). `PageHeader` — an app view's title row, the FIRST
+  child of its first Section. `Logo` — the brand mark in every `brand` slot (see *The brand* below).
 - `BentoGrid` — **the modern feature band**: MIXED-weight tiles (`media` anchor + `stat` numbers + ONE
   filled `accent` CTA + `plain`), not a row of identical cards. Reach for this before FeatureGrid on a
   landing page.
-- `LogoStrip` — social proof under the hero; plain TEXT wordmarks are the default (zero assets needed).
+- `LogoStrip` — social proof under the hero, in a `<Section compact>`; plain TEXT wordmarks are the default.
 - `FeatureGrid` — icon+title cards. `MediaCard` — product/article/listing cards. `StatStrip` — big numbers.
 - `EmptyState` — the list worked and has no data. `ErrorState` — the list FAILED (`code="404"` for a
   missing route). `SkeletonList` — the list is loading. Three different causes, three different blocks;
@@ -59,11 +65,36 @@ FIRST, then fill their slots with the kit:
   control right), stacked in a `divide-y` card.
 - `Photo` — a real photo per item in a grid (see Imagery). `ArtImage` — token-colored SVG art.
 
-**A modern landing reads: Hero(collage) → LogoStrip → Section+BentoGrid → Section+MediaCard grid →
-Section(tone="wash") → Footer.** Two-tone headlines are the current idiom — put the second clause in
-`<span className="text-muted-foreground">`.
+**A modern landing reads: Hero(collage) → Section compact+LogoStrip → Section+BentoGrid → Section+MediaCard
+grid → Section(tone="wash") → CTASection → Footer.** Two-tone headlines are the current idiom — put the
+second clause in `<span className="text-muted-foreground">`.
 
-**Never hand-roll a card grid or an empty state — these two are the workhorses, copy them:**
+### Rhythm — one owner per band
+
+A page is a stack of BANDS: `Hero`, `Section`, `CTASection`, then the `Footer`. Each band owns its vertical
+padding (the preset's density tokens), and the band that FOLLOWS decides the gap — `src/index.css` drops
+the padding two adjacent bands would otherwise stack. So: never add `py-*`, `my-*` or `mt-*` between or
+around bands, never wrap a band in a div (an in-page anchor goes ON the band: `<Section id="pricing">`),
+and inside a band space things with `gap-*`. A
+thin band — a logo row, a stat strip, one quote — is `<Section compact>`: it sits close under the band it
+supports. An app view is ONE Section that opens with its `PageHeader`.
+
+### Density — every band earns its space
+
+Each band carries a visual ANCHOR: the product itself (a screenshot, a live table), data (numbers, a
+chart), or an image. A band that is one heading and one grey line is a void — merge it into its neighbour
+or give it an anchor. Vary the layouts down the page: split (copy beside a visual), grid, a full-bleed
+image band, a stats row, a bento — never the same eyebrow + heading + three cards, band after band. No
+tile, card or band mostly empty. Every responsive grid starts from `grid-cols-1` (`grid grid-cols-1
+md:grid-cols-2`): without it one wide child — a product panel, a cart row — pushes a phone layout sideways.
+
+### The brand — the name, set well
+
+`<Logo name="…" />` goes in every `brand` slot (NavBar, Footer, AppShell, AuthCard): the app's name — or its
+short form — as a wordmark in the bold display face, with one detail in the primary color. That IS the brand:
+no icon mark (a logo is personal — the owner brings their own), and never a stock icon beside plain text.
+
+**Start every card grid and empty state from these two workhorses:**
 
 ```tsx
 import { MediaCard } from '@/components/blocks/MediaCard'
@@ -114,6 +145,10 @@ NO `bg-blue-600`, no `bg-white`/`bg-black`, no hex, no arbitrary values. **One s
 Common traps — the SUBSTITUTES are: star ratings → `text-primary` (never text-amber-*); success/"in
 stock" → `text-primary` or a `<Badge variant="secondary">` (never text-green-*); warnings/errors →
 `text-destructive` (never text-red-*).
+Contrast (measured failures): on a colored band (`bg-primary`, a full CTASection) every line uses the
+band's `-foreground` at FULL strength — secondary lines differ by size or weight, never by opacity
+(`text-primary-foreground/70` on a saturated band lands near 4:1). A role used as TEXT (`text-primary`,
+an accent) must reach 4.5:1 on its background in light AND dark.
 
 ### Tokens in JS (charts, canvas, inline styles)
 
@@ -135,9 +170,8 @@ uses `bg-chart-1`, so `--color-chart-1` does not exist at runtime and the chart 
 
 Display headlines (Hero, Section headings): `font-serif tracking-tight` — the serif is the personality;
 don't use it for body text. App views cap at `text-3xl`; only Hero goes `text-4xl/5xl`. Body = default
-sans. Muted small (`text-sm text-muted-foreground`) for meta/captions. Spacing: blocks encode the rhythm
-(Section = `py-16/20`, container `max-w-6xl px-6`) — don't fight it with custom margins; inside cards
-use `flex flex-col gap-*`, never margin stacks.
+sans. Muted small (`text-sm text-muted-foreground`) for meta/captions. Spacing: between bands, nothing —
+the rhythm in §3 owns it; inside a band or a card, `flex flex-col gap-*` / `grid gap-*`, never margin stacks.
 
 ## 6. Imagery — never an emoji, never a gray box
 
@@ -195,7 +229,9 @@ The `app-shell` skill has the full pattern, including 404s and filtered-empty.
 
 ## Design pass — run this checklist before calling any UI work done
 
-- [ ] Page assembled from blocks (NavBar + Hero/PageHeader + Sections + Footer where it's a landing)
+- [ ] Bands started from the patterns and adapted to THIS subject; one rhythm (no padding or margins added
+      between bands, thin bands `compact`); every band has an anchor (product, data, image)
+- [ ] The brand is `<Logo name="…" />` — the app's name as a wordmark, never a stock icon beside plain text
 - [ ] Zero raw colors in your diff (no bg-white/black, -500/-600 shades, hex — stars/stock/success = text-primary)
 - [ ] Every image is photo()/photoFor()/<Photo>/<ArtImage> — zero emoji-as-image; any GRID/LIST of distinct items uses `<Photo web="<subject>" seed={item.id}>` (distinct per item), NEVER photoFor (repeats) or abstract art
 - [ ] Opened the grid in the Browser and COUNTED: no two cards share a photo, and each photo matches its label

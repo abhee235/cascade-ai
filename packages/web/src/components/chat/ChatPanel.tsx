@@ -239,7 +239,7 @@ export function ChatPanel() {
         {busy && (
           <div className="my-1.5 flex h-10 flex-col justify-center overflow-hidden">
             {recovering ? (
-              <div className="flex items-center gap-2 text-[13px] text-yellow-600 dark:text-yellow-300">
+              <div className="flex items-center gap-2 text-[13px] text-warning">
                 <RefreshCw className="h-3.5 w-3.5 shrink-0 animate-spin" />
                 <span className="truncate">{recovering.reason === 'overflow' ? 'Context too large — compacting and retrying…' : "Can't reach the model — reconnecting…"}</span>
                 <span className="shrink-0 opacity-60">attempt {recovering.attempt}</span>
@@ -302,7 +302,7 @@ export function ChatPanel() {
                     </span>
                   )}
                   <span className="max-w-[120px] truncate text-muted-foreground">{a.name}</span>
-                  <button type="button" title="Remove" onClick={() => removeAttachment(a.id)} className="text-muted-foreground hover:text-red-500">
+                  <button type="button" title="Remove" onClick={() => removeAttachment(a.id)} className="text-muted-foreground hover:text-danger">
                     <X className="h-3.5 w-3.5" />
                   </button>
                 </div>
@@ -325,6 +325,7 @@ export function ChatPanel() {
             ref={taRef}
             rows={1}
             className="max-h-[200px] min-h-[24px] w-full resize-none bg-transparent text-sm leading-relaxed outline-none placeholder:text-muted-foreground"
+            aria-label="Message Cascade" // ADR-084 Phase 2: placeholder swaps with state; the name must not
             placeholder={connected ? 'Ask Cascade…' : 'connecting to server…'}
             value={input}
             onChange={(e) => {

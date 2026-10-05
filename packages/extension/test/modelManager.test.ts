@@ -91,8 +91,8 @@ describe('key handling + default catalogs', () => {
 		expect(error).toBeUndefined()
 		expect(note).toContain('known openai models')
 		expect(f).not.toHaveBeenCalled()
-		const luna = rows.find((r) => r.name === 'gpt-5.6-luna')!
-		expect(luna.contextWindow).toBe(1_048_576) // core MODEL_SPECS — byte-identical to the web manager
+		const luna = rows.find((r) => r.name === 'gpt-6-luna')!
+		expect(luna.contextWindow).toBe(1_050_000) // core MODEL_SPECS — byte-identical to the web manager
 		expect(luna.capabilities).toEqual(['tools', 'vision'])
 	})
 })

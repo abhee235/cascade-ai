@@ -36,7 +36,7 @@ function CopyButton({ text }: { text: string }) {
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="min-w-0" title={hint}>
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="text-xs uppercase tracking-wider text-muted-foreground">{label}</div>
       <div className="truncate font-mono text-sm">{value}</div>
     </div>
   )
@@ -54,7 +54,7 @@ function TextBlock({ label, value, tone }: { label: string; value: string; tone?
   return (
     <div className={cn('rounded-lg border', tone === 'reasoning' && 'border-violet-500/30 bg-violet-500/5')}>
       <div className={cn('flex items-center gap-2 border-b px-3 py-1.5', tone === 'reasoning' && 'border-violet-500/25')}>
-        <span className={cn('flex-1 text-[11px] font-semibold uppercase tracking-wide', tone === 'reasoning' ? 'text-violet-600 dark:text-violet-400' : 'text-muted-foreground')}>{label}</span>
+        <span className={cn('flex-1 text-xs font-semibold uppercase tracking-wide', tone === 'reasoning' ? 'text-violet-600 dark:text-violet-400' : 'text-muted-foreground')}>{label}</span>
         {isJson && (
           <div className="flex rounded-md border p-0.5">
             {([true, false] as const).map((mode) => (
@@ -62,7 +62,7 @@ function TextBlock({ label, value, tone }: { label: string; value: string; tone?
                 key={String(mode)}
                 type="button"
                 onClick={() => setFormatted(mode)}
-                className={cn('rounded px-1.5 py-0.5 text-[10px] transition-colors', formatted === mode ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}
+                className={cn('rounded px-1.5 py-0.5 text-xs transition-colors', formatted === mode ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}
               >
                 {mode ? 'Formatted' : 'Raw'}
               </button>
@@ -132,8 +132,8 @@ export function SpanDetail({ span }: { span: SpanInfo | null }) {
             the attribute list: the harness had to fix the model's arguments, or a human was asked. */}
         {Boolean(a.argsRepaired || a['cascade.permission_asked']) && (
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {a.argsRepaired ? <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">arguments repaired</span> : null}
-            {a['cascade.permission_asked'] ? <span className="rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">you were asked · {String(a['cascade.permission'])}</span> : null}
+            {a.argsRepaired ? <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-warning">arguments repaired</span> : null}
+            {a['cascade.permission_asked'] ? <span className="rounded bg-blue-500/15 px-1.5 py-0.5 text-xs font-medium text-blue-600 dark:text-blue-400">you were asked · {String(a['cascade.permission'])}</span> : null}
           </div>
         )}
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -170,13 +170,13 @@ export function SpanDetail({ span }: { span: SpanInfo | null }) {
           )}
         </div>
         {span.kind === 'LLM' && (a.promptEvalMs != null || a.model != null) && (
-          <div className="mt-2 font-mono text-[11px] text-muted-foreground">
+          <div className="mt-2 font-mono text-xs text-muted-foreground">
             {a.promptEvalMs != null && `prefill ${formatDuration(a.promptEvalMs as number)} · decode ${formatDuration(a.decodeMs as number | undefined)} · `}
             {a.provider ? `${a.provider}` : ''}
             {a.model ? `/${a.model}` : ''}
             {/* A nonzero load mid-session means the RUNNER was evicted and reloaded — which looks exactly
                 like a slow model until you can see this number, so it is called out rather than buried. */}
-            {a.modelLoadMs != null && <span className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-600 dark:text-amber-400">model reloaded ({formatDuration(a.modelLoadMs as number)})</span>}
+            {a.modelLoadMs != null && <span className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-warning">model reloaded ({formatDuration(a.modelLoadMs as number)})</span>}
           </div>
         )}
       </div>

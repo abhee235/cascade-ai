@@ -1,5 +1,4 @@
 // tools/runTool.ts — execute one tool call → a tool_result block.
-
 //
 // Pipeline: lookup by name → Zod validate → call → wrap result. Errors are RETURNED as the result
 // (isError:true), never thrown — so the model sees what went wrong and can self-correct (Phase 5 idea).

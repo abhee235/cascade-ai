@@ -7,7 +7,7 @@ export interface FooterColumn {
 }
 
 export interface FooterProps {
-	/** Brand name/mark, repeated small. */
+	/** The brand — the same <Logo> as the NavBar's. */
 	brand: ReactNode
 	/** One-line tagline under the brand. */
 	tagline?: string
