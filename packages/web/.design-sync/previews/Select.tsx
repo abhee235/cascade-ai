@@ -4,7 +4,7 @@ import {
 } from '@cascade/web'
 
 export const Open = () => (
-  <Select defaultValue="opus" defaultOpen>
+  <Select defaultValue="luna" defaultOpen>
     <SelectTrigger className="w-56"><SelectValue placeholder="Select a model" /></SelectTrigger>
     <SelectContent>
       <SelectGroup>
@@ -24,7 +24,7 @@ export const Open = () => (
 
 export const Triggers = () => (
   <div className="flex flex-col gap-3">
-    <Select defaultValue="opus">
+    <Select defaultValue="luna">
       <SelectTrigger className="w-56"><SelectValue /></SelectTrigger>
       <SelectContent>
         <SelectItem value="luna">gpt-6-luna</SelectItem>

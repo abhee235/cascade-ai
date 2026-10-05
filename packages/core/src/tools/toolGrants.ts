@@ -1,5 +1,5 @@
 // tools/toolGrants.ts — argument-scoped tool grants (ADR-056 rung 4). An agent's `tools:` allowlist
-// entry may be a bare name (`Write`) OR a scoped specifier (`Write(PLAN.md)`, `Bash(git:*)`), reusing
+// entry may be a bare name (`Write`) OR a rule-style specifier (`Write(PLAN.md)`, `Bash(git:*)`), reusing
 // the permission-rule grammar (permissions/rules.ts). A bare grant = the whole tool; a scoped grant =
 // the tool is available but its input must match the pattern, else a teaching denial with NO execution.
 //

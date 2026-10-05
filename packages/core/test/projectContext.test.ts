@@ -106,7 +106,6 @@ describe('memoryFiles — CASCADE.md only, project root only (prompt-audit findi
   // project, full stop — other tools' instruction files are other agents' contracts.
   it('never reads an instruction file that belongs to another tool (AGENTS.md) — only its own CASCADE.md', () => {
     const names = memoryFiles('/proj').map((f) => f.path)
-
     expect(names.some((p) => p.endsWith('AGENTS.md'))).toBe(false)
     expect(names.some((p) => p.endsWith('CASCADE.md'))).toBe(true)
     expect(names.some((p) => p.endsWith('CASCADE.local.md'))).toBe(true)

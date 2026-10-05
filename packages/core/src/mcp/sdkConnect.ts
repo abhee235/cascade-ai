@@ -1,4 +1,4 @@
-2// mcp/sdkConnect.ts — the REAL McpConnect, backed by @modelcontextprotocol/sdk.
+// mcp/sdkConnect.ts — the REAL McpConnect, backed by @modelcontextprotocol/sdk.
 //
 // Two transports: HTTP (streamable) — remote, no subprocess, SAFE on a hosted server — and stdio, which
 // spawns a subprocess and is therefore arbitrary code execution on the host. Whether stdio is allowed is a
@@ -7,7 +7,6 @@
 // escalation this guard exists to stop. The extension opts in (the user's own machine + user-authored
 // .mcp.json — the user trusts their own config); the web server stays refused unless CASCADE_ALLOW_STDIO_MCP is
 // set. Kept in its own file so the SDK loads only when a frontend wires MCP.
-
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'

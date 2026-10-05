@@ -122,7 +122,7 @@ export const WebFetchTool: Tool<z.infer<typeof inputSchema>> = {
     let current = url
     try {
       for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-        // Content-negotiate markdown FIRST (Qwen's trick): docs sites increasingly serve text/markdown, which
+        // Content-negotiate markdown FIRST: docs sites increasingly serve text/markdown, which
         // is already the ideal shape — no conversion, no boilerplate. HTML is the fallback we convert.
         const res = await fetch(current, { redirect: 'manual', signal, headers: { 'user-agent': 'CascadeBot/1.0', accept: 'text/markdown, text/html;q=0.9, text/plain;q=0.8, */*;q=0.1' } })
         if (res.status >= 300 && res.status < 400) {

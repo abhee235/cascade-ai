@@ -1,6 +1,5 @@
 // tools/builtins/Glob.ts — find files by glob pattern. Read-only.
 
-
 import { z } from 'zod'
 import fg from 'fast-glob'
 import type { Tool } from '../Tool'

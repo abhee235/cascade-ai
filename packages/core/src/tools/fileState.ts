@@ -1,5 +1,4 @@
 // tools/fileState.ts — the "read-before-edit" freshness cache (ADR-032).
-
 //
 // WHY this exists: the Edit tool replaces an exact `old_string` the model proposes from MEMORY. If the model
 // never actually Read the file, or the file changed since (user edit, a linter/formatter, an earlier tool),

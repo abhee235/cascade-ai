@@ -331,14 +331,14 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
   // IDENTICAL-CALL BREAKER. The signal the loop-detection literature calls definitional ("three identical
   // tool calls in one task IS a loop") and the one Cascade lacked — our read-loop/re-edit breakers are
   // per-FILE, so a model alternating across different files (or re-running the same non-file call) slipped
-  // through. Hashing name+args with a threshold of 5 is common; we use 3 because we NUDGE rather than halt,
-  // so firing early is cheap. Crucially the counters RESET on a mutation: `npm run build` repeated after each
+  // through. We key on name+args with a threshold of 3 (lower than a halting breaker would use) because we
+  // NUDGE rather than halt, so firing early is cheap. Crucially the counters RESET on a mutation: `npm run build` repeated after each
   // edit is PRODUCTIVE (same args, different result) and must never trip — the same reset rule the read-loop
   // breaker already uses.
   const repeatCallCounts = new Map<string, number>()
   const REPEAT_CALL_LIMIT = 3
   const MUTATING = new Set(['Write', 'Edit', 'MultiEdit'])
-  // PER-SUBMIT TOOL-CALL CAP (100 calls). Measured 2026-07-25: one submit ran
+  // PER-SUBMIT TOOL-CALL CAP. Measured 2026-07-25: one submit ran
   // 114 turns thrashing a bug it never solved. maxTurns (500) is a runaway backstop, not a work budget — this
   // is the "you are not converging, report what's blocking" checkpoint. Nudge once, never a hard stop.
   let toolCallsThisSubmit = 0

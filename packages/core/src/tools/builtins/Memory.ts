@@ -1,4 +1,4 @@
-// tools/builtins/Memory.ts — let the agent SELF-EDIT its durable core memory (ADR-015). MemGPT-style
+// tools/builtins/Memory.ts — let the agent SELF-EDIT its durable core memory (ADR-015). Tiered, self-edited
 // curation, file-backed: append / replace / forget facts in CASCADE.md. It's a file write, so it passes
 // the permission gate like any other write.
 

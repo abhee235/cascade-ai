@@ -1,5 +1,4 @@
 // tools/scheduler.ts — run a turn's tool calls with the right concurrency.
-
 //
 // Rule (ADR-008): consecutive concurrency-safe (read-only) tools run in PARALLEL; anything not safe
 // (a write) runs SOLO. Parallelism is a correctness choice — independent reads can't interfere, but

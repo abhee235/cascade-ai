@@ -528,7 +528,7 @@ export const useStore = create<UiState>((set, get) => {
           set({ thinkStartedAt: null, pendingTool: null })
           set((s) => {
             // Merge consecutive assistant steps (no tool/user turn between) into one flowing block, so a
-            // multi-step turn reads as a single response — like v0. A tool card between steps breaks the run.
+            // multi-step turn reads as a single response. A tool card between steps breaks the run.
             const last = s.items[s.items.length - 1]
             if (last && last.kind === 'assistant') {
               // Early-commit dedup: if this message's thinking was already committed verbatim at the

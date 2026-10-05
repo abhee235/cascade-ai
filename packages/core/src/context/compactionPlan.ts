@@ -23,7 +23,7 @@ export const WARN_BUFFER = 20_000
 /** Distance from effectiveWindow to hard. */
 export const HARD_BUFFER = 3_000
 
-// ── Small-window fallbacks ──────────────────────────────────────────────────────────────────
+// ── Small-window fallbacks ──────────────────────────────────────────────────────────────────────────────
 /** Proportional trigger used when the absolute branch goes degenerate on small windows. */
 export const DEFAULT_PROPORTIONAL_PCT = 0.7
 /** warn-pct = pct − this. */

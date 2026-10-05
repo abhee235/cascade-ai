@@ -249,7 +249,7 @@ export class CascadeViewProvider implements vscode.WebviewViewProvider {
         keepRecentRatio: cfg.get<number>('keepRecentRatio') || undefined,
 
         // ADR-078: compaction economics. 'auto' lets core detect (native Ollama ⇒ constrained deep
-        // compaction; hosted APIs ⇒ stop-at-auto).
+        // compaction; hosted APIs ⇒ incremental stop-at-auto).
         compactEconomics: (() => {
           const v = cfg.get<string>('compactEconomics', 'auto')
           return v === 'hosted' || v === 'constrained' ? v : undefined

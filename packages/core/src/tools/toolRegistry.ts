@@ -1,5 +1,4 @@
 // tools/toolRegistry.ts — assembles the active tool set + lookup by name.
-
 //
 // Phase 9: the active set is no longer a static array — it's builtins + whatever MCP tools are currently
 // ready. So we expose a `ToolRegistry` created per session (createRegistry) and injected by DI, exactly

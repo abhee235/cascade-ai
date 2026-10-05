@@ -1,6 +1,5 @@
 // core/session.ts — the frontend-agnostic entry point. — ADR-018.
 //
-
 // Phase 3: the session now keeps conversation HISTORY (a Message[]) and a system prompt. The model is
 // stateless — "memory" is just us resending the whole transcript every turn. submit() appends the user
 // turn, streams the reply (forwarding deltas live — ADR-013), then appends the assistant turn.
@@ -259,13 +258,13 @@ export function createSession(opts: SessionOptions): CascadeSession {
   // 32k. `let` so detection can replace it; the tier it carries also sizes the system prompt + tool descriptions.
   // ADR-078: pick the compaction cost model. A native-Ollama provider means a local KV wall — every prefix
   // rewrite is a full re-prefill at local speed — so it gets 'constrained' (deep, rare compactions) unless
-  // the caller overrides. Hosted APIs keep the standard 'hosted' economics byte-for-byte.
+  // the caller overrides. Hosted APIs keep the 'hosted' economics byte-for-byte.
   // 'constrained' = the LOCAL-server cost model (ADR-078: deep, rare compactions), and locality is a
   // property of WHERE the server runs, not which wire protocol it speaks. Keying this on OllamaProvider
   // alone gave a local vLLM the 'hosted' stop-at-trigger rule — measured thrashing: 18 compactions in 38
   // LLM calls, each freeing ~1k that regrew within a couple of turns. Self-hosted OpenAI-compat ids
   // (vllm, llamacpp, custom endpoints) get the same economics as Ollama; the true hosted gateways keep
-  // the standard behavior byte-for-byte.
+  // the 'hosted' behavior byte-for-byte.
   const hostedGateway = ['openai', 'groq', 'openrouter', 'nvidia'].includes(((opts.provider as { id?: string }).id ?? '').toLowerCase())
   const compactEconomics = opts.compactEconomics ?? (opts.provider instanceof OllamaProvider || !hostedGateway ? 'constrained' : 'hosted')
   // `'auto'` resolves against whatever window we end up confident about (pinned now, or detected later).

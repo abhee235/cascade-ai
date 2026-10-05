@@ -1,5 +1,4 @@
 // permissions/gate.ts — the gate between the model's INTENT (a tool_use) and its EFFECT (the tool running).
-
 //
 // `checkPermission` is PURE and SYNCHRONOUS — given a tool, its input, and the current state it returns
 // one verdict. That purity is deliberate: all the policy lives here (easy to unit-test), and the messy
