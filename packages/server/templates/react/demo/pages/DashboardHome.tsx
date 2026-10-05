@@ -8,13 +8,14 @@
 // trend as a badge, a two-line takeaway under each KPI, and a chart with a range control and no Y axis.
 
 import { useMemo, useState } from 'react'
-import { BarChart3, CreditCard, FileText, LayoutDashboard, LifeBuoy, Package, Settings, TrendingDown, Users } from 'lucide-react'
+import { CreditCard, FileText, LayoutDashboard, LifeBuoy, Package, Settings, TrendingDown, Users } from 'lucide-react'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AppShell } from '@/components/blocks/AppShell'
+import { Logo } from '@/components/blocks/Logo'
 import { ChartCard } from '@/components/blocks/ChartCard'
 import { DataTable, type DataColumn } from '@/components/blocks/DataTable'
 import { EmptyState } from '@/components/blocks/EmptyState'
@@ -85,11 +86,7 @@ export function DashboardHome() {
 
 	return (
 		<AppShell
-			brand={
-				<>
-					<BarChart3 className="size-4 text-primary" /> Cadence
-				</>
-			}
+			brand={<Logo name="Cadence" />}
 			groups={[
 				{
 					items: [
@@ -136,14 +133,14 @@ export function DashboardHome() {
 			}
 		>
 			<div className="flex flex-col gap-6">
-				<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
 					<StatCard label="Revenue (paid)" value={`$${revenue.toLocaleString()}`} delta={12.4} trendLabel="Trending up this month" note="Paid invoices in the current view" icon={CreditCard} />
 					<StatCard label="Runs" value="6,313" delta={8.1} trendLabel="Steady growth" note="Scheduled and manual, combined" icon={Package} />
 					<StatCard label="Active teams" value="248" delta={3.2} trendLabel="Retention holding" note="Teams with a run this week" icon={Users} />
 					<StatCard label="Failure rate" value="0.42%" delta={-1.1} trendLabel="Fewer failures" note="Retried before alerting" icon={TrendingDown} lowerIsBetter />
 				</div>
 
-				<div className="grid gap-4 xl:grid-cols-[2fr_1fr]">
+				<div className="grid grid-cols-1 gap-4 xl:grid-cols-[2fr_1fr]">
 					<ChartCard
 						title="Runs per day"
 						description="Scheduled and manual, combined."

@@ -4,7 +4,7 @@
 // The archetype, in order: Hero(collage) → LogoStrip → BentoGrid → PricingTable → Testimonial → FAQ →
 // CTASection → Footer. Every band is a block with props; there is no bespoke CSS on this page.
 
-import { GitBranch, Shield, Sparkles, Zap } from 'lucide-react'
+import { GitBranch, Shield, Sparkles } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { BentoGrid } from '@/components/blocks/BentoGrid'
@@ -12,6 +12,7 @@ import { CTASection } from '@/components/blocks/CTASection'
 import { FAQ } from '@/components/blocks/FAQ'
 import { Footer } from '@/components/blocks/Footer'
 import { Hero } from '@/components/blocks/Hero'
+import { Logo } from '@/components/blocks/Logo'
 import { LogoStrip } from '@/components/blocks/LogoStrip'
 import { PricingTable } from '@/components/blocks/PricingTable'
 import { Section } from '@/components/blocks/Section'
@@ -45,7 +46,7 @@ export function LandingSaaS() {
 				media={<img src={photo('workspace-code')} alt="The Cadence run timeline" />}
 			/>
 
-			<Section>
+			<Section compact>
 				<LogoStrip label="Running in production at" items={['Northwind', 'Kestrel', 'Bellhop', 'Trimble', 'Osmond', 'Fieldwire']} />
 			</Section>
 
@@ -59,7 +60,7 @@ export function LandingSaaS() {
 							description: 'Durations, retries, and the exact diff that changed behaviour.',
 							media: <img src={photo('workspace-office')} alt="Run timeline" />,
 						},
-						{ kind: 'stat', value: '99.98%', label: 'Scheduler uptime, trailing 90 days' },
+						{ kind: 'stat', value: '99.98%', label: 'Scheduler uptime, trailing 90 days', trend: [99.9, 99.95, 99.97, 99.99, 99.98, 100] },
 						{ kind: 'plain', icon: GitBranch, title: 'Branch-aware', description: 'Preview pipelines per PR, torn down on merge.' },
 						{ kind: 'plain', icon: Shield, title: 'Secrets stay yours', description: 'BYO KMS; we never store decrypted values.' },
 						{ kind: 'accent', title: 'Start with a template', description: 'Fourteen pipelines, ready to fork.', action: <Button variant="secondary">Browse templates</Button> },
@@ -137,11 +138,7 @@ export function LandingSaaS() {
 			/>
 
 			<Footer
-				brand={
-					<>
-						<Zap className="size-4 text-primary" /> Cadence
-					</>
-				}
+				brand={<Logo name="Cadence" />}
 				tagline="Scheduled data pipelines with receipts."
 				columns={[
 					{ heading: 'Product', links: ['Pipelines', 'Schedules', 'Alerting', 'Pricing'] },

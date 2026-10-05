@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { existsSync, mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BUILDER_BEHAVIOR, ProjectManager } from '../src/projectManager'
@@ -135,5 +135,21 @@ describe('BUILDER_BEHAVIOR — the prompt-audit shape contract (2026-08-11)', ()
 	it('shouting stays rationed: single-digit emphasis, not the old wall of caps', () => {
 		const shouts = BUILDER_BEHAVIOR.match(/\bNEVER\b|\bMANDATORY\b|\bDO NOT\b/g) ?? []
 		expect(shouts.length).toBeLessThanOrEqual(4) // was ~15 — uniform intensity reads as uniform priority
+	})
+})
+
+// ADR-086: the blank ("None") start creates an EMPTY project, stamped, with a baseline commit.
+describe('ProjectManager — the blank start', () => {
+	it('creates no scaffold: a .gitignore, the stamp, a git baseline — and React projects are stamped too', () => {
+		const { mgr, root } = manager()
+		const blank = mgr.create('Free App', 'none')
+		const dir = join(root, `free-app-${blank.id.slice(0, 8)}`)
+		expect(existsSync(join(dir, 'package.json'))).toBe(false)
+		expect(existsSync(join(dir, 'src'))).toBe(false)
+		expect(readFileSync(join(dir, '.gitignore'), 'utf8')).toBe('node_modules\ndist\n')
+		expect(JSON.parse(readFileSync(join(dir, '.cascade', 'template.json'), 'utf8'))).toEqual({ template: 'none' })
+		expect(existsSync(join(dir, '.git'))).toBe(true)
+		const react = mgr.create('Kit App', 'react')
+		expect(JSON.parse(readFileSync(join(root, `kit-app-${react.id.slice(0, 8)}`, '.cascade', 'template.json'), 'utf8'))).toEqual({ template: 'react' })
 	})
 })

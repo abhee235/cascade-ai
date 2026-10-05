@@ -38,6 +38,7 @@ interface UiState {
   // routing (lightweight in-store router)
   page: Page
   pendingPrompt: string | null // a Home prompt waiting for its project to be created
+  pendingImages: string[] | null // …and the images attached to it (ADR-086: the planner studies them first)
   pendingSlug: string | null // a /project/<slug> URL awaiting the projects list to resolve it
   slugNotFound: string | null // a /project/<slug> URL that failed to resolve (deleted/mistyped) → not-found view
   // connection + projects
@@ -192,7 +193,7 @@ interface UiState {
   openProjectPage: (id: string) => void
   initRouter: () => void // wire the address bar ↔ store (called once by App)
   reopenActive: () => void // re-send `open` for the active project after a (re)connect
-  startBuild: (prompt: string, templateId?: string) => void
+  startBuild: (prompt: string, templateId?: string, images?: string[]) => void
   toggleSidebar: () => void
   setRightTab: (t: RightTab) => void
   toggleTheme: () => void
@@ -348,6 +349,7 @@ export const useStore = create<UiState>((set, get) => {
   return {
     page: 'home',
     pendingPrompt: null,
+    pendingImages: null,
     pendingSlug: null,
     slugNotFound: null,
     connected: false,
@@ -641,9 +643,10 @@ export const useStore = create<UiState>((set, get) => {
           // Home flow: a project was just created for a build prompt — open it, go to its builder, send the prompt.
           const pending = get().pendingPrompt
           if (pending) {
-            set({ pendingPrompt: null })
+            const images = get().pendingImages ?? undefined
+            set({ pendingPrompt: null, pendingImages: null })
             get().openProjectPage(e.project.id)
-            get().submit(pending)
+            get().submit(pending, images)
           }
           break
         }
@@ -899,12 +902,13 @@ export const useStore = create<UiState>((set, get) => {
       const id = get().activeId
       if (id) get().send({ type: 'project', action: 'open', id })
     },
-    startBuild: (prompt, templateId) => {
+    startBuild: (prompt, templateId, images) => {
       const p = prompt.trim()
       if (!p || !get().connected) return
-      // Create a project (named from the prompt), then projectCreated → open + go to builder + send the prompt.
+      // Create a project (named from the prompt), then projectCreated → open + go to builder + send the prompt
+      // (with its images: the plan stage reads them first — ADR-086).
       const name = p.replace(/\s+/g, ' ').split(' ').slice(0, 6).join(' ').slice(0, 48) || 'New project'
-      set({ pendingPrompt: p })
+      set({ pendingPrompt: p, pendingImages: images?.length ? images : null })
       get().send({ type: 'project', action: 'create', name, templateId })
     },
     toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),

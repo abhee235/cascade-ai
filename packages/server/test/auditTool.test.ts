@@ -77,9 +77,9 @@ describe('TemplateAudit — style pre-flights', () => {
 		expect(out).toContain('photoFor inside a list render')
 	})
 
-	it('flags a page with zero block imports as hand-rolled', async () => {
+	it('no longer calls a page without block imports hand-rolled — adapting a pattern is the point (ADR-086 P1)', async () => {
 		const out = await audit({ 'src/App.tsx': 'export const App = () => <div className="p-4">hi</div>' })
-		expect(out).toContain('no @/components/blocks imports')
+		expect(out).not.toContain('block imports')
 	})
 
 	it('does not call an ordinary word residue without corroborating demo evidence', async () => {
@@ -146,30 +146,23 @@ describe('TemplateAudit — style pre-flights', () => {
 		expect(dashboard).not.toContain('no `media`')
 	})
 
-	it('flags an EDITED shared block as HARD residue', async () => {
-		// Measured (qwen3.5:9b 2026-08-13): two of three builds rewrote src/components/blocks — NavBar,
-		// Hero, LogoStrip — while the build stayed green. The session's frozenPaths guard is the primary
-		// defence; this is the backstop for projects it cannot reach (resumed builds, hand-edits).
+	it('an edited or added block is the app\'s own code now — never residue (ADR-086 P1, the open template)', async () => {
 		const out = await audit({
-			'src/components/blocks/Hero.tsx': 'export function Hero() { return <div>my own version</div> }',
+			'src/components/blocks/Hero.tsx': 'export function Hero() { return <section className="bg-primary">my own version</section> }',
+			'src/components/blocks/DangerZone.tsx': 'export const DangerZone = () => null',
 			'src/App.tsx': "import { Hero } from '@/components/blocks/Hero'\nexport const App = () => <Hero />",
 		})
-		expect(out).toContain('src/components/blocks/Hero.tsx')
-		expect(out).toMatch(/EDITED/)
-		expect(out).toContain('HARD') // blocks the done-ladder; not a suggestion
+		expect(out).not.toMatch(/EDITED|NEW file|read-only/)
+		expect(out).not.toMatch(/HARD residue \(/) // no HARD section at all
 	})
 
-	it('flags an INVENTED block — a new file in the shared layer breaks the same contract', async () => {
-		const out = await audit({ 'src/components/blocks/DangerZone.tsx': 'export const DangerZone = () => null' })
-		expect(out).toContain('DangerZone.tsx')
-		expect(out).toMatch(/NEW file/)
-	})
-
-	it('says nothing about a block the project left alone', async () => {
-		// The pristine template copy is ground truth; an untouched block must never be flagged.
-		const pristine = readFileSync(join(import.meta.dirname, '..', 'templates', 'react', 'src', 'components', 'blocks', 'Hero.tsx'), 'utf8')
-		const out = await audit({ 'src/components/blocks/Hero.tsx': pristine, 'src/App.tsx': 'export const App = () => null' })
-		expect(out).not.toContain('blocks/Hero.tsx')
+	it('reads an EDITED kit file for raw colors, and leaves an untouched one alone', async () => {
+		// What an edit ADDS is still judged; the shipped kit is template code, not the model's styling.
+		const pristine = readFileSync(join(import.meta.dirname, '..', 'templates', 'react', 'src', 'components', 'ui', 'button.tsx'), 'utf8')
+		expect(await audit({ 'src/components/ui/button.tsx': pristine })).not.toContain('ui/button.tsx')
+		const edited = await audit({ 'src/components/ui/button.tsx': `${pristine}\nexport const Danger = () => <b className="text-red-600" />` })
+		expect(edited).toContain('ui/button.tsx')
+		expect(edited).toContain('raw color')
 	})
 
 	it('directs the model to CALL the tool again, never to run it as a command', async () => {

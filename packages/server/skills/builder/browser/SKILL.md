@@ -84,7 +84,7 @@ you didn't look. A screenshot with zero problems named is a screenshot you waste
 - **Consistency across states.** Put the variants side by side: do all the difficulty/status BADGES share
   one style (all solid, or all outline — not "Medium" solid-purple next to "Hard" white-outline)? Do all
   cards share one height, radius, shadow? Drift between siblings is the tell.
-- **Composed from blocks** — real NavBar/hero/cards, not unstyled text or hand-rolled boxes.
+- **Designed bands** — real NavBar/hero/cards from the patterns, the name set as a wordmark, an even rhythm between bands — not unstyled text or hand-rolled boxes.
 - **Token colors only** — no raw white/black boxes, no default-blue links.
 - **One primary CTA** per screen; empty states show a designed EmptyState, not blank space.
 - **Spacing & alignment** — consistent gaps, nothing clipped, cramped, or overflowing.

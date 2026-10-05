@@ -45,23 +45,23 @@ export function Hero({ badge, headline, subcopy, actions, media, layout = 'split
 
 	if (layout === 'bleed') {
 		return (
-			<section data-block="hero" className={cn('relative overflow-hidden', className)}>
-				<div className="absolute inset-0 [&_img]:size-full [&_img]:object-cover">{media}</div>
+			<section data-block="hero" data-band="media" className={cn('relative overflow-hidden', className)}>
+				<div className="absolute inset-0 [&>img]:size-full [&>img]:object-cover">{media}</div>
 				<div className="absolute inset-0 bg-gradient-to-r from-foreground/80 via-foreground/40 to-transparent" />
-				<div className="relative mx-auto flex min-h-[420px] max-w-6xl items-center px-6 py-20">{text}</div>
+				<div className="relative mx-auto flex min-h-[420px] max-w-6xl items-center px-6 py-hero-y">{text}</div>
 			</section>
 		)
 	}
 	if (layout === 'collage') {
 		return (
-			<section data-block="hero" className={cn('mx-auto max-w-6xl px-6 py-section-y md:py-hero-y', className)}>
-				<div className="grid items-center gap-12 md:grid-cols-2">
+			<section data-block="hero" data-band="plain" className={cn('mx-auto max-w-6xl px-6 py-section-y md:py-hero-y', className)}>
+				<div className="grid grid-cols-1 items-center gap-12 md:grid-cols-2">
 					{text}
 					{media ? (
 						<div className="relative">
 							{/* The offset frame: one hard outline displaced behind the image — collage, flattened. */}
 							<div aria-hidden className="absolute -right-3 -top-3 h-full w-full border-2" />
-							<div className="relative overflow-hidden border-2 bg-card [&_img]:aspect-[4/3] [&_img]:size-full [&_img]:object-cover">{media}</div>
+							<div className="relative overflow-hidden border-2 bg-card [&>img]:aspect-[4/3] [&>img]:size-full [&>img]:object-cover">{media}</div>
 						</div>
 					) : null}
 				</div>
@@ -69,13 +69,13 @@ export function Hero({ badge, headline, subcopy, actions, media, layout = 'split
 		)
 	}
 	return (
-		<section data-block="hero" className={cn('mx-auto max-w-6xl px-6 py-section-y md:py-hero-y', className)}>
+		<section data-block="hero" data-band="plain" className={cn('mx-auto max-w-6xl px-6 py-section-y md:py-hero-y', className)}>
 			{layout === 'centered' ? (
 				<div className="flex flex-col items-center">{text}</div>
 			) : (
-				<div className="grid items-center gap-10 md:grid-cols-2">
+				<div className="grid grid-cols-1 items-center gap-10 md:grid-cols-2">
 					{text}
-					{media ? <div className="overflow-hidden border-2 [&_img]:aspect-[4/3] [&_img]:size-full [&_img]:object-cover">{media}</div> : null}
+					{media ? <div className="overflow-hidden border-2 [&>img]:aspect-[4/3] [&>img]:size-full [&>img]:object-cover">{media}</div> : null}
 				</div>
 			)}
 		</section>

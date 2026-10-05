@@ -1,8 +1,8 @@
 @import 'tailwindcss';
 @import './fonts.css';
 
-/* ACTIVE THEME PRESET — to change this app's whole personality (colors, fonts, radius, shadows),
-   edit ONLY the line below to another file from src/themes/ (see the design skill's preset menu).
+/* ACTIVE THEME PRESET — to change this app's whole personality (colors, fonts, radius, shadows), switch
+   it with the Restyle tool, which rewrites ONLY the line below (see the design skill's preset menu).
    Token values live in the preset; components must use token utilities (bg-primary, text-muted-foreground…)
    and never raw colors. Dark mode: toggle the `dark` class on <html> (works with every preset). */
 @import './themes/premium.css';
@@ -49,6 +49,9 @@
 	--spacing-section-y-lg: var(--section-y-lg);
 	--spacing-nav: var(--nav-h);
 	--spacing-hero-y: var(--hero-y);
+	/* ADR-086 P1: a THIN band's step (<Section compact>) — the same density, 60% of it. */
+	--spacing-section-compact: calc(var(--section-y) * 0.6);
+	--spacing-section-compact-lg: calc(var(--section-y-lg) * 0.6);
 	/* Display-heading letterspacing, preset-tunable (was declared-but-dead — now consumed by
 	   Hero/Section/PageHeader via the tracking-display utility). */
 	--tracking-display: var(--tracking-display);
@@ -76,6 +79,27 @@
 	--color-sidebar-primary: var(--sidebar-primary);
 	--color-sidebar-foreground: var(--sidebar-foreground);
 	--color-sidebar: var(--sidebar);
+}
+
+/* ONE RHYTHM (ADR-086 P1). A page is a stack of BANDS — Hero, Section, CTASection — each marked data-band with
+   its kind and owning its vertical padding. The band that FOLLOWS decides the gap: a band followed by one of the
+   same kind drops its bottom padding, so two paddings never stack (they did: 52 to 294 px between sections on
+   one page, up to 5.4× apart). A band with a surface of its own (a tint, a photo, the primary) keeps both, so its
+   edge sits one step from the content around it. Unlayered on purpose: it must win over the spacing utilities. */
+[data-band='plain']:has(+ [data-band='plain']),
+[data-band='muted']:has(+ [data-band='muted']),
+[data-band='wash']:has(+ [data-band='wash']) {
+	padding-bottom: 0;
+}
+
+/* …and through ONE wrapper, either side — measured (ADR-086 P1): a landing wrapped its bands in anchor divs
+   (<div id="faq"><Section/></div>) for its nav links, and the paddings stacked again (134 px against 56). An
+   anchor belongs ON the band (<Section id="faq">); this keeps the rhythm when it isn't. */
+[data-band='plain']:has(+ :not([data-band]) > [data-band='plain']:first-child),
+:not([data-band]):has(+ [data-band='plain'], + :not([data-band]) > [data-band='plain']:first-child) > [data-band='plain']:last-child,
+[data-band='muted']:has(+ :not([data-band]) > [data-band='muted']:first-child),
+:not([data-band]):has(+ [data-band='muted'], + :not([data-band]) > [data-band='muted']:first-child) > [data-band='muted']:last-child {
+	padding-bottom: 0;
 }
 
 @layer base {

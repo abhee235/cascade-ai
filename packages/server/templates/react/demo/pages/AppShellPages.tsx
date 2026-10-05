@@ -10,7 +10,7 @@
 // what they should do is retry. Different cause ⇒ different block ⇒ different way out.
 
 import { useMemo, useState } from 'react'
-import { ArrowLeft, Bell, CreditCard, LayoutDashboard, RefreshCw, Search, SearchX, Settings, ShieldAlert, Sparkles, User } from 'lucide-react'
+import { ArrowLeft, Bell, CreditCard, LayoutDashboard, RefreshCw, Search, SearchX, Settings, ShieldAlert, User } from 'lucide-react'
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -30,6 +30,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { AuthCard } from '@/components/blocks/AuthCard'
+import { Logo } from '@/components/blocks/Logo'
 import { EmptyState } from '@/components/blocks/EmptyState'
 import { ErrorState } from '@/components/blocks/ErrorState'
 import { FilterBar } from '@/components/blocks/FilterBar'
@@ -73,11 +74,7 @@ export function AppShellPages() {
 	if (section === 'signin') {
 		return (
 			<AuthCard
-				brand={
-					<>
-						<Sparkles className="size-5 text-primary" /> Meridian
-					</>
-				}
+				brand={<Logo name="Meridian" />}
 				title="Welcome back"
 				subtitle="Sign in to pick up where you left off."
 				footer={
@@ -120,11 +117,7 @@ export function AppShellPages() {
 
 	return (
 		<AppShell
-			brand={
-				<>
-					<Sparkles className="size-4 text-primary" /> Meridian
-				</>
-			}
+			brand={<Logo name="Meridian" />}
 			groups={[
 				{ items: [{ label: 'Overview', icon: LayoutDashboard }, nav('search', 'Search', Search)] },
 				{
@@ -162,7 +155,7 @@ export function AppShellPages() {
 									Change photo
 								</Button>
 							</div>
-							<div className="grid gap-4 sm:grid-cols-2">
+							<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 								<div className="grid gap-1.5">
 									<Label htmlFor="name">Full name</Label>
 									<Input id="name" defaultValue="Priya Raman" />
@@ -330,7 +323,7 @@ export function AppShellPages() {
 					<p className="text-muted-foreground">What a data view shows when it isn't showing data.</p>
 					{/* items-start: each state box keeps its natural height instead of stretching to match the
 					    tallest cell in its row — a stretched EmptyState reads as a layout bug. */}
-					<div className="grid items-start gap-6 lg:grid-cols-2">
+					<div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
 						<div className="flex flex-col gap-2">
 							<span className="text-sm font-medium text-muted-foreground">Loading — a skeleton in the shape of the content</span>
 							<SkeletonList count={3} />

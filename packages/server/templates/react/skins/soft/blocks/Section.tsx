@@ -12,12 +12,20 @@ export interface SectionProps {
 	/** muted: a full-width tinted band that breaks up long pages · wash: a soft gradient field derived
 	 *  from the preset's primary/accent — atmosphere for a hero-adjacent or closing band. */
 	tone?: 'default' | 'muted' | 'wash'
+	/** A THIN band — a logo row, a stat strip, one quote: a shorter step, so it sits close under the band it
+	 *  supports (a thin band with a full step on both sides reads as empty). */
+	compact?: boolean
+	/** An in-page anchor (#pricing) goes ON the band — a wrapper div around a band breaks the rhythm. */
+	id?: string
 	children: ReactNode
 	className?: string
 }
 
-/** Page rhythm wrapper — soft skin: toned bands float as rounded insets rather than cutting the page. */
-export function Section({ eyebrow, heading, description, tone = 'default', children, className }: SectionProps) {
+/** Page rhythm wrapper — soft skin: toned bands float as rounded insets rather than cutting the page. Every
+ *  band is transparent here (the inset panel is its content), so every band is `plain`: it owns the step, and
+ *  the band that follows decides the gap (src/index.css). */
+export function Section({ eyebrow, heading, description, tone = 'default', compact = false, id, children, className }: SectionProps) {
+	const step = compact ? 'py-section-compact md:py-section-compact-lg' : 'py-section-y md:py-section-y-lg'
 	const header =
 		eyebrow || heading || description ? (
 			<div className="mb-10 flex max-w-2xl flex-col gap-3">
@@ -29,8 +37,8 @@ export function Section({ eyebrow, heading, description, tone = 'default', child
 
 	if (tone === 'default') {
 		return (
-			<section data-block="section" className={className}>
-				<div className="mx-auto max-w-6xl px-6 py-section-y md:py-section-y-lg">
+			<section id={id} data-block="section" data-band="plain" data-compact={compact ? '' : undefined} className={cn(step, className)}>
+				<div className="mx-auto max-w-6xl px-6">
 					{header}
 					{children}
 				</div>
@@ -38,7 +46,7 @@ export function Section({ eyebrow, heading, description, tone = 'default', child
 		)
 	}
 	return (
-		<section data-block="section" className={cn('mx-auto max-w-6xl px-6 py-6', className)}>
+		<section id={id} data-block="section" data-band="plain" data-compact={compact ? '' : undefined} className={cn('mx-auto max-w-6xl px-6', step, className)}>
 			<div
 				className={cn('relative isolate overflow-hidden rounded-3xl px-6 py-section-y sm:px-10', tone === 'muted' && 'bg-muted')}
 				style={

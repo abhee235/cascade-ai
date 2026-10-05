@@ -273,6 +273,25 @@ describe('planQualityIssues — the pinned contract must be usable (35B forensic
 		expect(planQualityIssues(good + '\n- 🛍️ 🛒 ✅ product art\n').some((i) => i.includes('EMOJI'))).toBe(true)
 	})
 
+	it('does not flag a plan that BANS emoji — the planner echoing the rule (ADR-086 P0: 3 of 7 revise rounds)', () => {
+		const withImagery = (s: string) => good.replace('<Photo web> per item', s)
+		const emojiIssue = (s: string) => planQualityIssues(withImagery(s)).some((i) => i.includes('EMOJI'))
+		// Measured phrasings from the Luna plans and the planners' own checklists:
+		expect(emojiIssue('one real photo per item (ImageSearch); never emoji or placeholder imagery')).toBe(false)
+		expect(emojiIssue('real photos or drawn illustration, NEVER emoji.')).toBe(false)
+		expect(emojiIssue('<Photo web> per item (no emoji)')).toBe(false)
+		expect(emojiIssue('<Photo web> per item — avoid emojis')).toBe(false)
+		// A ban written AFTER the word, or with "zero" (review, 2026-10-04):
+		expect(emojiIssue('<Photo web> per item (emoji-free)')).toBe(false)
+		expect(emojiIssue('<Photo web> per item. Emoji: none')).toBe(false)
+		expect(emojiIssue('<Photo web> per item, zero emoji')).toBe(false)
+		expect(emojiIssue('<Photo web> per item; emojis are banned')).toBe(false)
+		// …while a planned emoji still is one, even next to a ban on something else:
+		expect(emojiIssue('emoji-only product images')).toBe(true)
+		expect(emojiIssue('never stock photos; an emoji per category card')).toBe(true)
+		expect(emojiIssue('no photos: emojis for each product')).toBe(true)
+	})
+
 	it('accepts the BOLD-label section form the planner template actually uses (no false positive)', () => {
 		// planner.md writes `**Design:** …`, not `## Design`. A heading-only check would have flagged the
 		// measured 35B plan — which was correct — and burned a revise round on it.
@@ -323,5 +342,41 @@ describe('planQualityIssues — the pinned contract must be usable (35B forensic
 		const nudge = planReviseNudge(['it is too long', 'it has no Design section'])
 		expect(nudge).toContain('it is too long')
 		expect(nudge).toContain('Skill {name: "design"}')
+	})
+})
+
+// ADR-086: a blank project's plan has no presets or blocks to name — its Design section IS the theme.
+describe('planQualityIssues — the blank start', () => {
+	const plan = (design: string) => `# Shop — Plan\n**Goal** — sell beans\n**Views** — catalog\n**Design** — ${design}\n**Stack** — Vite + React\n**Out of scope** — auth\n`
+
+	it('accepts a direction with a palette in hex and both faces — no preset required', () => {
+		expect(planQualityIssues(plan('category: commerce; palette: bg #faf7f2, cta #9a3f1e; type: Fraunces / Inter; density: standard'), 'none')).toEqual([])
+	})
+
+	it('sends back a mood board: no hex palette, no faces', () => {
+		const issues = planQualityIssues(plan('category: commerce; mood: warm, crafted; layout: a grid'), 'none')
+		expect(issues).toHaveLength(1)
+		expect(issues[0]).toMatch(/no a palette with hex values and no the two faces/)
+	})
+
+	it('reads a `## Design` section through its sub-headings and colour lines (review, 2026-10-04)', () => {
+		// The old cut stopped at `### Palette` and at a line starting `#FAF7F2`, so a complete plan drew a revise round.
+		const md = '# Shop — Plan\n## Goal\nsell beans\n## Design\ncategory: commerce\n### Palette\n#FAF7F2 background, #9A3F1E cta\n### Type\nFraunces display, Inter body\n## Views\ncatalog, cart\n'
+		expect(planQualityIssues(md, 'none')).toEqual([])
+		// …and it still ENDS at the next same-level heading: a palette that only appears under Views does not count.
+		const elsewhere = '# Shop — Plan\n## Design\ncategory: commerce\nmood: warm\n## Views\ncatalog in #FAF7F2, type: Inter\n'
+		expect(planQualityIssues(elsewhere, 'none')[0]).toMatch(/no a palette with hex values and no the two faces/)
+	})
+
+	it('asks a blank plan with no Design section for a direction, not a preset', () => {
+		const [issue] = planQualityIssues('# Shop — Plan\n**Goal** — sell beans\n**Category** — category: commerce\n', 'none')
+		expect(issue).toMatch(/palette \(each role with a hex value\)/)
+		expect(issue).not.toMatch(/src\/themes/)
+	})
+
+	it('does not apply the React-only photo rule, and points the revise nudge at the direction method', () => {
+		expect(planQualityIssues(plan('category: commerce; palette: #fff #000; type: Inter / Inter; imagery: photoFor per product in the grid'), 'none')).toEqual([])
+		expect(planReviseNudge(['x'], 'none')).toMatch(/how the design direction is written/)
+		expect(planReviseNudge(['x'])).toMatch(/presets, the blocks/)
 	})
 })

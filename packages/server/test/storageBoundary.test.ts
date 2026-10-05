@@ -72,6 +72,9 @@ const PROJECT_FILES_OK = new Set([
   'modelCaps.ts',
   'modelSpecs.ts',
   'planStage.ts',
+  // ADR-085 P0: the plan stage's quality read of the PROJECT's PLAN.md moved here from wsServer.ts (already
+  // listed) — the same read, now shared with the bench. Project content, not app state.
+  'builderSession.ts',
   'visualEdit.ts',
   'fileService.ts', // the project's own file tree — Sandbox-backed, not app state
 ])

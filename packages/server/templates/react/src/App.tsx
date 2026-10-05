@@ -1,14 +1,16 @@
 // The BLANK composition root — your app replaces everything marked data-placeholder (the TemplateAudit
 // tool holds you to it; "done" requires zero placeholders left). House architecture, keep it: App stays a
 // small composition root; views switch via a discriminated union through useHistoryView (browser
-// back/forward works, no router); pages are assembled from blocks (src/components/blocks) + the ui kit,
-// styled ONLY with design tokens. The dark-mode block below is load-bearing — carry it into your rewrite.
+// back/forward works, no router); pages start from the block PATTERNS (src/components/blocks — use, edit,
+// or adapt them) + the ui kit, styled ONLY with design tokens. The dark-mode block below is load-bearing.
 
 import { useEffect, useState } from 'react'
 import { Moon, Rocket, Sun } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/blocks/EmptyState'
+import { Logo } from '@/components/blocks/Logo'
 import { NavBar } from '@/components/blocks/NavBar'
+import { Section } from '@/components/blocks/Section'
 import { useHistoryView } from '@/lib/useHistoryView'
 
 // Grow this union as you add views, e.g. 'catalog' | 'detail' | 'cart' — or object entries like
@@ -31,7 +33,7 @@ export default function App() {
 			<NavBar
 				brand={
 					<span data-placeholder="brand">
-						<Rocket className="size-4 text-primary" /> App
+						<Logo name="App" />
 					</span>
 				}
 				actions={
@@ -41,13 +43,15 @@ export default function App() {
 				}
 			/>
 			{view === 'home' && (
-				<div data-placeholder="scaffold" className="mx-auto max-w-6xl px-6 py-16">
-					<EmptyState
-						icon={Rocket}
-						title="Blank scaffold"
-						description="This screen is the placeholder the builder replaces with your app's first real view."
-					/>
-				</div>
+				<Section>
+					<div data-placeholder="scaffold">
+						<EmptyState
+							icon={Rocket}
+							title="Blank scaffold"
+							description="This screen is the placeholder the builder replaces with your app's first real view."
+						/>
+					</div>
+				</Section>
 			)}
 		</main>
 	)

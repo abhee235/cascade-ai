@@ -34,7 +34,7 @@ const rows = useMemo(() => {
 const revenue = useMemo(() => rows.filter((r) => r.status === 'paid').reduce((s, r) => s + r.amount, 0), [rows])
 
 <AppShell
-  brand={<><BarChart3 className="size-4 text-primary" /> Cadence</>}
+  brand={<Logo name="Cadence" />}
   groups={[
     { items: [{ label: 'Overview', icon: LayoutDashboard, active: view === 'overview', onClick: () => setView('overview') }] },
     { heading: 'Billing', items: [{ label: 'Invoices', icon: FileText, onClick: () => setView('invoices') }] },

@@ -7,11 +7,12 @@
 // skill owns the canvas/rAF patterns for real mechanics; these screens wrap ANY of them unchanged.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Gamepad2, RotateCcw, Trophy, Zap } from 'lucide-react'
+import { RotateCcw, Trophy, Zap } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/blocks/EmptyState'
 import { Hero } from '@/components/blocks/Hero'
+import { Logo } from '@/components/blocks/Logo'
 import { NavBar } from '@/components/blocks/NavBar'
 import { Section } from '@/components/blocks/Section'
 import { StatCard } from '@/components/blocks/StatCard'
@@ -103,11 +104,7 @@ export function GameArcade() {
 	return (
 		<div>
 			<NavBar
-				brand={
-					<>
-						<Gamepad2 className="size-4 text-primary" /> Pulse Arcade
-					</>
-				}
+				brand={<Logo name="Pulse Arcade" />}
 				actions={phase.kind === 'playing' ? <Badge variant="secondary">Round {round}/{ROUNDS}</Badge> : undefined}
 			/>
 

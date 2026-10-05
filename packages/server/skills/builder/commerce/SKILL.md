@@ -54,7 +54,7 @@ so it cannot drift from reality. Read it when a view fights you; copy its SHAPE,
 const [view, setView] = useHistoryView<View>('catalog')   // 'catalog' | { kind:'detail', id } | 'cart'
 
 <NavBar
-  brand={<><Store className="size-4 text-primary" /> Cascade Shop</>}
+  brand={<Logo name="Harbor & Pine" />}   // your app's name, set as the brand
   links={<><button onClick={() => setView('catalog')}>Shop</button></>}
   actions={<Button variant="outline" onClick={() => setView('cart')}>
     <ShoppingCart className="size-4" /> Cart {count > 0 && <Badge className="ml-1">{count}</Badge>}

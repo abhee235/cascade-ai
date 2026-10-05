@@ -43,25 +43,25 @@ export function Hero({ badge, headline, subcopy, actions, media, layout = 'split
 
 	if (layout === 'bleed') {
 		return (
-			<section data-block="hero" className={cn('mx-auto max-w-6xl px-6 py-6', className)}>
+			<section data-block="hero" data-band="plain" className={cn('mx-auto max-w-6xl px-6 py-6', className)}>
 				<div className="relative overflow-hidden rounded-3xl shadow-lg shadow-foreground/10">
-					<div className="absolute inset-0 [&_img]:size-full [&_img]:object-cover">{media}</div>
+					<div className="absolute inset-0 [&>img]:size-full [&>img]:object-cover">{media}</div>
 					<div className="absolute inset-0 bg-gradient-to-r from-foreground/80 via-foreground/40 to-transparent" />
-					<div className="relative flex min-h-[420px] items-center px-8 py-20">{text}</div>
+					<div className="relative flex min-h-[420px] items-center px-8 py-hero-y">{text}</div>
 				</div>
 			</section>
 		)
 	}
 	if (layout === 'collage') {
 		return (
-			<section data-block="hero" className={cn('mx-auto max-w-6xl px-6 py-section-y md:py-hero-y', className)}>
-				<div className="grid items-center gap-12 md:grid-cols-2">
+			<section data-block="hero" data-band="plain" className={cn('mx-auto max-w-6xl px-6 py-section-y md:py-hero-y', className)}>
+				<div className="grid grid-cols-1 items-center gap-12 md:grid-cols-2">
 					{text}
 					{media ? (
 						<div className="relative isolate">
 							<div aria-hidden className="absolute -right-4 -top-6 -z-10 h-full w-3/4 rounded-[2.5rem] bg-primary/10" />
 							<div aria-hidden className="absolute -bottom-6 -left-5 -z-10 h-2/3 w-2/3 rounded-[2.5rem] bg-accent" />
-							<div className="overflow-hidden rounded-3xl shadow-lg shadow-foreground/10 [&_img]:aspect-[4/3] [&_img]:size-full [&_img]:object-cover">{media}</div>
+							<div className="overflow-hidden rounded-3xl shadow-lg shadow-foreground/10 [&>img]:aspect-[4/3] [&>img]:size-full [&>img]:object-cover">{media}</div>
 						</div>
 					) : null}
 				</div>
@@ -69,13 +69,13 @@ export function Hero({ badge, headline, subcopy, actions, media, layout = 'split
 		)
 	}
 	return (
-		<section data-block="hero" className={cn('mx-auto max-w-6xl px-6 py-section-y md:py-hero-y', className)}>
+		<section data-block="hero" data-band="plain" className={cn('mx-auto max-w-6xl px-6 py-section-y md:py-hero-y', className)}>
 			{layout === 'centered' ? (
 				<div className="flex flex-col items-center">{text}</div>
 			) : (
-				<div className="grid items-center gap-10 md:grid-cols-2">
+				<div className="grid grid-cols-1 items-center gap-10 md:grid-cols-2">
 					{text}
-					{media ? <div className="overflow-hidden rounded-3xl shadow-lg shadow-foreground/10 [&_img]:aspect-[4/3] [&_img]:size-full [&_img]:object-cover">{media}</div> : null}
+					{media ? <div className="overflow-hidden rounded-3xl shadow-lg shadow-foreground/10 [&>img]:aspect-[4/3] [&>img]:size-full [&>img]:object-cover">{media}</div> : null}
 				</div>
 			)}
 		</section>

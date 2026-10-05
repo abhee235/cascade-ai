@@ -5,14 +5,13 @@
 //   skin   — STRUCTURE (the block markup itself: a stacked card becomes a row). Certified alternate
 //            implementations copied over src/components/blocks from the template's skins/ dir.
 //
-// This tool is the COMPLEMENT of the frozen-path guard, and the pair is the whole design: the model can
-// never hand-edit a block (measured: a 9B rewrote three of them and broke the app), but it CAN swap whole
-// certified implementations — the parity checker guarantees every skin block honours the exact base
-// interface, so app code renders unchanged under any skin. The freeze is what makes the swap safe; the
-// swap is why the freeze costs the model nothing it legitimately needs.
+// The parity checker guarantees every skin block honours the exact base interface, so app code renders
+// unchanged under any skin. ADR-086 P1 opened the blocks — they are patterns the model may adapt — so a swap
+// covers only the blocks the project left untouched: an edited block is the project's own code, keeps its
+// markup, and still follows the preset's tokens (applySkin names it). Presets stay a pure token swap.
 //
 // packTool idiom: server-owned content, injected per-session via extraTools, fs writes that bypass the
-// model's file tools (and therefore the frozen-path guard — that is not a loophole, it is the point).
+// model's file tools.
 
 import { z } from 'zod'
 import type { Tool } from '@cascade/core'
@@ -45,9 +44,9 @@ export function createRestyleTool(deps: RestyleToolDeps): Tool | undefined {
 	const tool: Tool<z.infer<typeof inputSchema>> = {
 		name: 'Restyle',
 		description:
-			'Change this app\'s whole look MECHANICALLY — never edit src/themes/, src/index.css\'s @import, or src/components/blocks by hand. ' +
+			'Change this app\'s whole look MECHANICALLY — never edit src/themes/ or src/index.css\'s @import by hand. ' +
 			`Two independent axes. op "preset" swaps the design tokens (colors, fonts, radius, density) — available: ${presets.map((p) => `"${p}"`).join(', ')}. ` +
-			`op "skin" swaps the block STRUCTURE (card/nav/hero markup) — available: ${skinList}. ` +
+			`op "skin" swaps the block STRUCTURE (card/nav/hero markup) — available: ${skinList}. It swaps only blocks this project has not edited; an edited block keeps its markup and still follows the tokens. ` +
 			'They compose: any preset with any skin. App code does not change in either case — blocks keep identical props. ' +
 			'Call it when the user asks for a different look/theme/style/vibe; afterwards verify in the browser (the change is visual).',
 		inputSchema,

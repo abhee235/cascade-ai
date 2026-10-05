@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Composer } from '@/components/blocks/Composer'
 import { EmptyState } from '@/components/blocks/EmptyState'
 import { FeedPost } from '@/components/blocks/FeedPost'
+import { Logo } from '@/components/blocks/Logo'
 import { NavBar } from '@/components/blocks/NavBar'
 import { Photo } from '@/components/blocks/Photo'
 import { ProfileHeader } from '@/components/blocks/ProfileHeader'
@@ -125,7 +126,7 @@ export function SocialFeed() {
 	return (
 		<div>
 			<NavBar
-				brand="Murmur"
+				brand={<Logo name="Murmur" />}
 				actions={
 					<Button variant="outline" size="sm" onClick={() => setView({ kind: 'profile', handle: ME.handle })}>
 						My profile

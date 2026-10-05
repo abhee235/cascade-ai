@@ -21,7 +21,7 @@ the copy, and the data must all come from the user's brief.
 // cart badge in the header is part of the archetype.)
 
 import { useMemo, useState } from 'react'
-import { ArrowLeft, ShoppingCart, Store } from 'lucide-react'
+import { ArrowLeft, ShoppingCart } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -29,6 +29,7 @@ import { Label } from '@/components/ui/label'
 import { CartRow } from '@/components/blocks/CartRow'
 import { CheckoutPanel } from '@/components/blocks/CheckoutPanel'
 import { EmptyState } from '@/components/blocks/EmptyState'
+import { Logo } from '@/components/blocks/Logo'
 import { MediaCard } from '@/components/blocks/MediaCard'
 import { NavBar } from '@/components/blocks/NavBar'
 import { PageHeader } from '@/components/blocks/PageHeader'
@@ -92,11 +93,7 @@ export function ShopCatalog() {
 	return (
 		<div>
 			<NavBar
-				brand={
-					<>
-						<Store className="size-4 text-primary" /> Cascade Shop
-					</>
-				}
+				brand={<Logo name="Harbor & Pine" />}
 				links={
 					<button type="button" onClick={() => setView('catalog')} className="text-sm text-muted-foreground transition-colors hover:text-foreground">
 						Shop
@@ -112,7 +109,7 @@ export function ShopCatalog() {
 
 			{view === 'catalog' ? (
 				<Section eyebrow="The collection" heading="Autumn, in six pieces" description="Small runs. Made to be used, not stored.">
-					<div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+					<div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
 						{CATALOG.map((p) => (
 							<MediaCard
 								key={p.id}
@@ -141,7 +138,7 @@ export function ShopCatalog() {
 					<Button variant="ghost" size="sm" className="mb-6" onClick={() => setView('catalog')}>
 						<ArrowLeft className="size-4" /> Back to the collection
 					</Button>
-					<div className="grid gap-10 md:grid-cols-2">
+					<div className="grid grid-cols-1 gap-10 md:grid-cols-2">
 						<div className="overflow-hidden rounded-xl border [&_img]:aspect-[4/3] [&_img]:size-full [&_img]:object-cover">
 							<Photo web={detail.image} seed={detail.id} kind="product" alt={detail.name} />
 						</div>
@@ -163,7 +160,7 @@ export function ShopCatalog() {
 				</Section>
 			) : (
 				<Section>
-					<PageHeader title="Your cart" description={lines.length ? `${count} item${count > 1 ? 's' : ''}` : undefined} className="px-0 pt-0" />
+					<PageHeader title="Your cart" description={lines.length ? `${count} item${count > 1 ? 's' : ''}` : undefined} />
 					{placed !== null ? (
 						<EmptyState
 							title="Order confirmed"

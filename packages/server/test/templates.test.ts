@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { applyPack, applyTemplate, isPackApplied, listPacks, listTemplates, readAiRules } from '../src/templates'
+import { writeFileSync } from 'node:fs'
+import { applyPack, applyTemplate, ensureVisualEditConfig, isPackApplied, listPacks, listTemplates, projectStart, readAiRules, stampStart } from '../src/templates'
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'cascade-tpl-'))
 
@@ -99,4 +100,29 @@ describe('templates (Phase 15)', () => {
       expect(apiSrc, `api storage missing ${method}`).toMatch(new RegExp(`\\b${method}\\b`))
     }
   })
+})
+
+
+// ADR-086: the blank ("None") start.
+describe('the blank start', () => {
+	it('is listed after React (React stays the default), with no files behind it', () => {
+		const ids = listTemplates().map((t) => t.id)
+		expect(ids.slice(0, 2)).toEqual(['react', 'none'])
+	})
+
+	it('stamps the start, and reads a project with no stamp as React (the only start there was)', () => {
+		const dir = mkdtempSync(join(tmpdir(), 'cascade-start-'))
+		expect(projectStart(dir)).toBe('react')
+		stampStart(dir, 'none')
+		expect(projectStart(dir)).toBe('none')
+		expect(JSON.parse(readFileSync(join(dir, '.cascade', 'template.json'), 'utf8'))).toEqual({ template: 'none' })
+	})
+
+	it("never overwrites a blank project's own vite.config.ts with the React template's", () => {
+		const dir = mkdtempSync(join(tmpdir(), 'cascade-start-'))
+		stampStart(dir, 'none')
+		writeFileSync(join(dir, 'vite.config.ts'), "export default {} // the model's own config\n")
+		ensureVisualEditConfig(dir)
+		expect(readFileSync(join(dir, 'vite.config.ts'), 'utf8')).toBe("export default {} // the model's own config\n")
+	})
 })
