@@ -16,8 +16,7 @@ first-class discovery; (2) immutability needs a sync-and-overwrite hack; (3) it'
 and extension sessions get nothing. Mature agents treat skills as an ENGINE: markdown +
 frontmatter (`name`, `description`, `whenToUse`), loaded from directories (bundled + user), surfaced as
 a frontmatter-only index (cheap tokens), invoked via a **Skill tool** that injects the content on
-demand. Cascade's charter is learning that
-algorithm — this is a core-parity piece, not builder plumbing.
+demand. Cascade's charter is learning that algorithm — this is a core engine piece, not builder plumbing.
 
 ## Decision (proposed)
 

@@ -19,9 +19,9 @@ model, the less its compliance with prompt-stated rules can be trusted, so the f
 - Config in settings: per-event list of `{ matcher, hooks: [{ type:'command', command, timeout? }] }`;
   matcher = `*`/empty (all) | exact/pipe-separated names | regex.
 - Wire protocol: hook receives **JSON on stdin** (`hook_event_name`, `tool_name`, `tool_input`, …);
-  decides via **exit code** — 0 = ok, **2 = block, stderr fed back to the MODEL** ("treat feedback from
-  hooks as coming from the user"), other = non-critical (user-visible only) — or via **JSON stdout**
-  (`hookSpecificOutput.permissionDecision: allow|deny|ask` + reason; hooks.ts:552, 2647).
+  decides via **exit code** — 0 = ok, **2 = block, stderr fed back to the MODEL** (which is told to treat
+  hook feedback as coming from the user), other = non-critical (user-visible only) — or via **JSON stdout**
+  (`hookSpecificOutput.permissionDecision: allow|deny|ask` + reason).
 - Placement: PreToolUse runs after mode/rule checks, **before** the user prompt — it can pre-empt the
   prompt in both directions. Hooks per event run in parallel; deny wins. Timeout default 10 min.
 
@@ -31,7 +31,7 @@ A small hook engine in core + wiring at the scheduler gate. **Default-off by abs
 `.cascade/hooks.json` in the project ⇒ zero code path (the same discipline as every guard we ship).
 
 1. **Config** — `.cascade/hooks.json` in the project root (the TodoStore precedent: core reads
-   `cwd/.cascade/*` directly), in the common shape for least surprise:
+   `cwd/.cascade/*` directly), shaped like the established hook config for least surprise:
    ```json
    { "PreToolUse":  [ { "matcher": "Write|Edit", "hooks": [ { "command": "node guards/no-env.mjs" } ] } ],
      "PostToolUse": [ { "matcher": "Edit",       "hooks": [ { "command": "node guards/lint.mjs", "timeout": 30 } ] } ] }

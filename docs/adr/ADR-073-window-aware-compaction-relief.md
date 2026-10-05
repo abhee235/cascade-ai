@@ -28,8 +28,8 @@ to a 65k window produced **19–30 compactions and ~25 min of compaction-induced
 Confirmed on three fronts:
 - **Code:** the stop-early loop above.
 - **Math:** the 3k headroom table.
-- **Literature:** context-engineering guidance (Spheron 2026, TokenPilot arXiv 2606.17016, Zylos) — *"constant
-  layout mutation shatters prompt prefix continuity, and the resulting pre-fill penalties and cache
+- **Literature:** context-engineering guidance (TokenPilot arXiv 2606.17016, two 2026 engineering write-ups)
+  — *"constant layout mutation shatters prompt prefix continuity, and the resulting pre-fill penalties and cache
   invalidations override any financial savings from text reduction."*
 
 **Hosted frontier agents avoid this two ways** and therefore never need the fix: (1) their auto-compaction

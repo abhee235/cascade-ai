@@ -1,7 +1,8 @@
 # ADR-078 — KV-wall-aware deep compaction (branched: hosted vs constrained)
 
 Status: **Accepted — implemented 2026-07-25** (validation A/B pending: first long constrained build vs the
-measured hosted baseline). Deferred to follow-up rungs: post-compact file re-attachment (the FILE LEDGER covers the gap initially) and ingestion-side output caps (Rung 2).
+measured hosted baseline). Deferred to follow-up rungs: post-compact file re-attachment (the FILE LEDGER covers the gap initially) and ingestion-side output caps
+(Rung 2).
 
 ## The measured pathology (2026-07-25, remote 131k build, trace `fc8cfdf9/builder-…22-09-56`)
 
@@ -38,23 +39,23 @@ instinct, and correct.
   that never enter never need compacting and never break cache), (b) **conservative BATCHED eviction**
   (every B=3 turns, not per-turn — amortize the cache break), (c) **byte-stable prefixes**. Result:
   cache-hit 38.7%→79.2%, 56–87% cost reduction, no accuracy loss.
-- **OpenHands condenser** — on trigger, summarizes a **large fraction** of the compressible region in one
-  event (default ratio 0.75) into a structured summary, keeping a pinned head + verbatim tail. One deep
+- **An open-source agent platform's condenser** — on trigger, summarizes a **large fraction** of the
+  compressible region in one event (default ratio 0.75) into a structured summary, keeping a pinned head + verbatim tail. One deep
   event, long gap — the amortized shape.
-- **MemGPT/Letta** — external memory + retrieval; heavyweight, but validates the "harvest durable facts
+- **MemGPT-style tiered memory** — external memory + retrieval; heavyweight, but validates the "harvest durable facts
   out of context" direction we already have (ADR-074 curation).
 - **An open-source coding CLI** (its compression service, read 2026-07-25) —
-  the strongest confirmation: the same kind of threshold ladder we use, but on trigger it compresses the
-  ENTIRE older history into one structured 9-section `<state_snapshot>` (requests+intent, key concepts,
+  the strongest confirmation: the same kind of threshold ladder we use, but on trigger it compresses
+  the ENTIRE older history into one structured 9-section state snapshot (requests+intent, key concepts,
   files+code, errors+fixes, problem solving, all user messages, pending tasks, current work, next step) —
   the deep single-shot shape, not cheap-layer nibbling. Three ideas worth adopting outright:
-  1. **Post-compact file re-attachment** (`postCompactAttachments.ts`): after the summary replaces history,
+  1. **Post-compact file re-attachment**: after the summary replaces history,
      the N most-recent files (default 5) are RESTORED verbatim into context. This is a stronger antidote to
      the re-read storm than a ledger alone — the files the model is actively editing come back for free,
      without a Read round-trip. Adopt: ledger for the long tail + verbatim restore for the top-N recent.
   2. **`<analysis>` scratchpad, then strip**: the summarizer first drafts chronological reasoning in an
      `<analysis>` block that is deleted before the summary is used — a cheap quality lever precisely for
-     WEAK models writing summaries (our constrained-mode case). Adopt verbatim.
+     WEAK models writing summaries (our constrained-mode case). Adopt outright.
   3. **Failure circuit breaker** (3 consecutive failures): consecutive summarize failures stop
      auto-compaction attempts until a successful forced pass resets it — prevents a wedged local backend
      from paying a failed side-query every turn. Adopt.
@@ -64,7 +65,7 @@ instinct, and correct.
 
 `CompactionPlan` gains `mode: 'hosted' | 'constrained'`.
 
-- **hosted** — current behavior, byte-for-byte (proven on frontier APIs with server prompt caching).
+- **hosted** — current behavior, byte-for-byte (proven by hosted frontier agents; frontier APIs, server prompt caching).
 - **constrained** — selected when the provider is local/native-Ollama, or window < 64k, or explicitly set.
   Same layers, inverted stopping rule: **compact rarely, compact DEEP.**
 

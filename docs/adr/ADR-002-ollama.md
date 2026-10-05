@@ -22,7 +22,7 @@ Use the **OpenAI-compatible** endpoint: `POST {baseUrl}/v1/chat/completions`.
 
 ## Consequences for Windows
 Use `127.0.0.1`, not `localhost` — on Windows `localhost` can resolve to IPv6 `::1`, which Ollama
-doesn't listen on. (Same issue handled in the reference repo's `scripts/ollama-proxy.ts`.)
+doesn't listen on. (A common pitfall for local proxies in front of Ollama, too.)
 
 ## Prior art
 Agents built on a single vendor's API commonly call it through one isolated client module (a plain

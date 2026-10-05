@@ -96,17 +96,17 @@ cascade/  (npm/pnpm workspaces)
 │   └─ src/
 │       ├─ session.ts          CascadeSession: submit()→AsyncIterable<ActivityEvent>
 │       ├─ agent/
-│       │   ├─ agentLoop.ts     runAgentLoop()                  (cf. query.ts queryLoop :241)
-│       │   ├─ conversation.ts  internal message model          (cf. types/message.ts)
-│       │   └─ systemPrompt.ts  buildSystemPrompt()             (cf. context.ts)
+│       │   ├─ agentLoop.ts     runAgentLoop()
+│       │   ├─ conversation.ts  internal message model
+│       │   └─ systemPrompt.ts  buildSystemPrompt()
 │       ├─ llm/
 │       │   ├─ modelClient.ts   streamCompletion() + bridge
 │       │   └─ resilience.ts    withRecovery()
 │       ├─ tools/
-│       │   ├─ Tool.ts          contract                        (cf. Tool.ts :362)
-│       │   ├─ toolRegistry.ts  buildRegistry()/findTool()      (cf. tools.ts)
-│       │   ├─ runTool.ts       executeTool()                  
-│       │   ├─ scheduler.ts     scheduleTools()                
+│       │   ├─ Tool.ts          contract
+│       │   ├─ toolRegistry.ts  buildRegistry()/findTool()
+│       │   ├─ runTool.ts       executeTool()
+│       │   ├─ scheduler.ts     scheduleTools()
 │       │   └─ builtins/        Read, Glob, Grep, Bash, Edit, Write, Subagent
 │       ├─ permissions/gate.ts  checkPermission()
 │       ├─ memory/memoryStore.ts loadMemory()/updateMemory()
@@ -114,7 +114,7 @@ cascade/  (npm/pnpm workspaces)
 │       ├─ context/compactor.ts compactIfNeeded()
 │       └─ protocol.ts          ActivityEvent + Inbound types (the WIRE protocol)
 │
-├─ packages/extension/   VS Code frontend — embeds @cascade/core IN-PROCESS            ← Ink CLI frontend
+├─ packages/extension/   VS Code frontend — embeds @cascade/core IN-PROCESS
 │   ├─ src/{extension.ts, CascadeViewProvider.ts}   drives a CascadeSession directly
 │   └─ ui/{Transcript.tsx, ActivityView.tsx}        React webview
 │
@@ -145,7 +145,7 @@ client — in *any* frontend — sees that one provider-neutral shape.
 - **Language:** TypeScript (strict). **Extension:** VS Code API; `contributes.views` sidebar.
 - **UI:** React in a `WebviewView`; host↔webview via `postMessage`. Bundled with esbuild.
 - **LLM:** Ollama OpenAI-compat `http://127.0.0.1:11434/v1/chat/completions` (stream + tools).
-- **Schemas:** Zod → JSON Schema (cf. `src/utils/zodToJsonSchema.ts`).
+- **Schemas:** Zod → JSON Schema.
 - **MCP:** `@modelcontextprotocol/sdk` (stdio first), connected lazily.
 - **Model:** a tool-capable Ollama model (e.g. `qwen2.5-coder` / `qwen36-agentic`).
 
@@ -396,7 +396,6 @@ Cascade sidebar (React chat box) and echoes through a **`CascadeSession` stub fr
 headless package the extension merely *drives*, so a web app can later drive the same package.
 **The idea:** Establish the seams first: `core` exposes `createSession()` (stub that echoes); `extension`
 consumes it in-process and renders via webview `postMessage`. Everything rides on these seams.
-
 ```
 cascade/
 ├─ package.json                 (workspaces: packages/*)
@@ -424,7 +423,6 @@ cascade/
 **Goal:** Send text to Ollama, render the full reply.
 **🎯 You'll understand:** the model is just an HTTP endpoint; "AI" is one POST with a messages array.
 **The idea:** `POST /v1/chat/completions` `{model,messages}`; reply in `choices[0].message.content`.
-
 **Build checklist:**
 - [ ] `llm/modelClient.ts`: `{stream:false}` call → text.
 - [ ] Map `{role,content}` → OpenAI messages.
@@ -469,7 +467,6 @@ expandable thinking summary.
 prompt grounds the agent (identity + cwd/OS/date).
 **The idea:** Model is stateless — resend full history each turn; store it as content blocks; translate to
 OpenAI only in the client.
-
 **Build checklist:**
 - [ ] `agent/conversation.ts` types.
 - [ ] `toProviderMessages()` translator (isolated).
@@ -488,7 +485,6 @@ OpenAI only in the client.
 **🎯 You'll understand:** "agentic" = a `while` loop around a stateless model. You implement the exact recurse that *is* the agent.
 **The idea:** Read the Deep-dive above, then build `runAgentLoop`. Send tool schemas; accumulate streamed
 tool-call JSON by index; on `done`, run tools if present, append results, loop; else render the answer.
-
 **Build checklist:**
 - [ ] `tools/Tool.ts` (name, description, inputSchema, activitySummary, call).
 - [ ] `tools/builtins/Read.ts`.
@@ -508,7 +504,6 @@ tool-call JSON by index; on `done`, run tools if present, append results, loop; 
 **🎯 You'll understand:** the defensive gap between "model asked" and "tool ran", and why feeding
 validation errors *back* makes the agent self-correcting (part of the error-recovery you admire).
 **The idea:** Never trust model output. lookup → `safeParse` → on failure return error result → call.
-
 **Build checklist:**
 - [ ] `tools/toolRegistry.ts` `buildRegistry()`/`findTool()`.
 - [ ] `tools/runTool.ts` `executeTool()`; error→tool_result.
@@ -526,7 +521,6 @@ validation errors *back* makes the agent self-correcting (part of the error-reco
 **Goal:** Several tool calls per turn; read-only parallel, writes serial. Add `Write`, `Edit`.
 **🎯 You'll understand:** the concurrency rule is a *correctness* decision (reads safe, writes race), not just speed.
 **The idea:** Tag tools `isReadOnly`/`isConcurrencySafe`; group safe → `Promise.all`; others serial; preserve order.
-
 **Build checklist:**
 - [ ] Add flags to contract; set per builtin.
 - [ ] `tools/scheduler.ts` `scheduleTools()`.
@@ -543,7 +537,6 @@ validation errors *back* makes the agent self-correcting (part of the error-reco
 **Goal:** allow/ask/deny before a tool runs; webview approval card; modes + rules.
 **🎯 You'll understand:** how an agent stays safe with a not-fully-trusted model — the gate between intent and effect.
 **The idea:** `checkPermission` per tool; read auto-allow, writes/Bash ask; "ask" blocks the loop on a card; modes/rules shortcut.
-
 **Build checklist:**
 - [ ] `permissions/gate.ts` `checkPermission()`.
 - [ ] Read auto-allow; Write/Edit/Bash → ask.
@@ -564,7 +557,6 @@ finalize the `ActivityEvent` protocol. Add `Bash`. (Still no prose streaming —
 activity protocol that shows "what it's doing" without painting prose.
 **The idea:** As a concurrency-safe tool's block closes, dispatch it; stream its `toolProgress`; one
 `AbortController` stops stream + tools.
-
 **Build checklist:**
 - [ ] `tools/builtins/Bash.ts`: spawn shell, stream stdout/stderr via `onProgress`.
 - [ ] Dispatch safe tools at `block_stop`.
@@ -614,7 +606,6 @@ and how they combine so the agent "remembers" across sessions without unbounded 
 **The idea:** Estimate tokens; over threshold, summarize older messages into a compact boundary and
 continue. Add `memory/memoryStore.ts`: a project memory file injected into the system prompt; a `Memory`
 tool (or auto-update) lets the agent persist durable facts.
-
 **Build checklist:**
 - [ ] `context/compactor.ts` `compactIfNeeded()` (summarize-old-into-boundary).
 - [ ] `memory/memoryStore.ts` `loadMemory()`/`updateMemory()`; inject memory into `buildSystemPrompt()`.
@@ -633,7 +624,6 @@ tool (or auto-update) lets the agent persist durable facts.
 **The idea:** Wrap the model call in `withRecovery()`: retry transient failures with backoff, fall back on
 overload, recover from context overflow by compacting then retrying, and honor abort. Add
 `tools/builtins/Subagent.ts` that calls `runAgentLoop` with a sub-prompt + tool subset, returning a summary.
-
 **Build checklist:**
 - [ ] `llm/resilience.ts` `withRecovery()`: retry+backoff, fallback model, abort, overflow→`compactIfNeeded`→retry.
 - [ ] `maxTurns` guard with a clear end reason.
@@ -657,7 +647,6 @@ and how one agent can be served to a terminal, a web client, and remote sessions
 forwards events: browser `submit` → WS → `server` calls `session.submit()` → streams `ActivityEvent`s back
 over WS → web renders the *same* activity timeline + final message. Permission prompts and abort travel the
 same socket. The extension keeps using the core in-process — both frontends share the engine and protocol.
-
 **Build checklist:**
 - [ ] `packages/server/src/wsServer.ts`: on each WS connection, `createSession()`; map inbound `{submit|permission|abort}` → session calls; stream `ActivityEvent`s out as JSON.
 - [ ] Session lifecycle: one session per connection; clean up on disconnect/abort.

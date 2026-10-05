@@ -103,7 +103,7 @@ Industry check (the plan modes of hosted app builders): production plan-vs-build
 by *removing the code-write capability* in the planning phase, never by prompting (their documented
 plan modes bar the agent from changing any code and limit it to inspecting, searching and answering).
 So Cascade gets the same wall, generic: **arg-scoped tool grants** (`tools/toolGrants.ts`). An agent's
-`tools:` entry may now carry a scoped specifier — `Write(PLAN.md)`, `Bash(git:*)` — reusing the
+`tools:` entry may now carry a permission-rule-style specifier — `Write(PLAN.md)`, `Bash(git:*)` — reusing the
 existing permission-rule grammar (`permissions/rules.ts`: glob for file tools, segment-split for Bash).
 A tool granted only with patterns is *wrapped*: input that doesn't match returns a teaching denial with
 no execution. The planner's grant is `Write(PLAN.md)` — writing `src/App.tsx` is now physically

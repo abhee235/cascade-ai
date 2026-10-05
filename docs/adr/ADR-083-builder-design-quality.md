@@ -197,7 +197,7 @@ earlier ones measure.
 | web-interface-guidelines | block internals, TemplateAudit, the reviewer checklist | a pinned subset; no runtime fetch |
 | building-components | how we author blocks | a contributor standard; not shipped |
 | ui-ux-pro-max | the productType table, band recipes, font research | a small data file; no Python, no BM25 |
-| sleek | the brief's mood field; full-height review | two rules |
+| mobile-design skill pack | the brief's mood field; full-height review | two rules |
 
 ### Non-goals
 

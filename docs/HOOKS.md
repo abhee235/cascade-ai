@@ -14,6 +14,8 @@ This documents the **finite vocabulary** of coding-agent primitives we use to *d
 | **Settings** | `settings.json` | config: permissions, env, hooks, model | always |
 | **Plugins** | a bundle | distributing the above | when installed |
 
+`<agent-dir>` = the dev agent's config folder (project-level in the repo, user-level in your home dir).
+
 Key facts: **custom commands merged into skills** (a skill *is* a `/command`); only `SKILL.md` loads
 when a skill activates — companion files (`lesson.md`, `example.md`, `reference/*`) are pulled in with
 the Read tool, so each `SKILL.md` opens with a "Read these first" block. **Additional dirs load only

@@ -115,7 +115,7 @@ What each source contributes instead (all MIT/Apache-2.0; ported data keeps its 
 | frontend-design | Subject-grounded direction; the list of default looks to refuse | planner brief (P3); never-list checks and foundry intake (P1, P4, P6b) |
 | web-interface-guidelines | Accessibility and polish rules | built into every block (P1, P4) and mechanical checks (P1–P2) |
 | building-components | Component-authoring standard (cva, `data-slot`, a11y) | how *we* write blocks (P1, P4) — never shown to the builder |
-| sleek | "Personality in color, type and imagery, not layout"; full-height review | preset/recipe design (P3–P5); capture method (P0) |
+| the mobile-design skill pack | Personality expressed through color, type and imagery rather than layout; full-height review | preset/recipe design (P3–P5); capture method (P0) |
 
 **Where the skills are used as skills: at development time.** They are installed globally for the
 development-time coding agent (`~/.agents/skills`, linked into that agent's user skills directory). A

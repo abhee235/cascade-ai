@@ -17,11 +17,11 @@ How mature production coding agents compact:
   wasting ~250K API calls/day) — don't retry a doomed compaction every turn.
 - **Cheap→expensive pipeline**: snip → tool-result budget → microcompact → collapse → *then*
   summarize. If a cheap step gets under threshold, summarization is skipped (granular context preserved).
-- **Structured summary** (`prompt.ts`): a `NO_TOOLS` preamble + an `<analysis>` scratchpad (stripped) + the
-  **9-section** summary (intent, concepts, files+snippets, errors+fixes, problem-solving, ALL user messages,
-  pending tasks, current work, next step **with verbatim quotes** to prevent drift). BASE vs **PARTIAL**
+- **Structured summary**: a no-tools preamble + an `<analysis>` scratchpad (stripped) + the
+  summary under fixed headings — revised 2026-10 to seven: goal, state of the work, files, decisions and
+  constraints, problems and fixes, every user message, next step **with a verbatim quote** to prevent drift. BASE vs **PARTIAL**
   variant (partial keeps a recent segment verbatim, summarizes only the older side).
-- **Boundary, not delete** (`compact.ts`): `[boundaryMarker, summary, ...keptMessages, ...reInjectedFiles]`;
+- **Boundary, not delete**: `[boundaryMarker, summary, ...keptMessages, ...reInjectedFiles]`;
   the loop reads only post-boundary messages; the raw transcript stays on disk. Recent files re-injected.
 - **Session-memory-compaction tried first** (experiment) — i.e. production agents already couple memory +
   compaction.
@@ -29,7 +29,7 @@ How mature production coding agents compact:
 2026 research adds two cheap techniques worth stealing:
 - **Observation masking** — replace *old tool outputs* with placeholders (keep the reasoning trace).
   *Matches* LLM-summarization's task-completion on SWE-bench at **~half the cost** — often you don't need to
-  summarize at all, just mask tool spew. [arxiv 2601.07190, Morph]
+  summarize at all, just mask tool spew. [arxiv 2601.07190]
 - **Two-phase surgical** — prune verbose tool outputs beyond the recent N tokens, *then* summarize only if
   still over. (The snip/budget steps above are this.)
 
@@ -43,7 +43,7 @@ A **layered, ratio-sized** compactor, `context/compactor.ts → compactIfNeeded(
    recent window) with a `[output masked — N chars]` placeholder, keeping the assistant's reasoning. Often
    enough on its own.
 3. **Phase B — partial summarize (only if still ≥ compactAt):** split `[older, recent]` at `keepRecent`;
-   ask the model (tools denied) for the **9-section** summary of `older` (`<analysis>` stripped); emit
+   ask the model (tools denied) for the structured summary of `older` (`<analysis>` stripped); emit
    `[boundaryMarker, summaryMessage, ...recent]`. Loop continues from the summary; transcript + JSONL trace
    stay intact.
 4. **Coupled curation:** before discarding `older`, harvest durable facts from it via the Phase-10

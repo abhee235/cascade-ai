@@ -1,7 +1,7 @@
 # ADR-037 — Tier-aware, sectioned system prompt (CORE-PARITY A6; consumes ADR-038/039 window tiers)
 
 > **Status:** accepted; **implemented** — tier-aware system prompt + window tiers + the coding-qwen36 window
-> fix + **per-tool prompt enrichment** (Bash/Write/Edit/Read/Grep/Glob to full-grade content; TodoWrite/Memory/
+> fix + **per-tool prompt enrichment** (Bash/Write/Edit/Read/Grep/Glob to production-grade content; TodoWrite/Memory/
 > MemorySearch/Subagent were already rich) + a **subagent-specific prompt** (G8). Deferred: git-status/dir-tree
 > context injection (G7), and wiring the real ADR-038 profile (num_ctx auto-detection).
 

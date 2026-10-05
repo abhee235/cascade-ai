@@ -94,7 +94,7 @@ Each = a **system prompt + a tool subset**. The `subagent_type` selects which.
    parent's memory.
 
 ### Cascade design
-`tools/builtins/Subagent.ts` — `Task` tool `{ description, prompt, subagent_type? }`. `call()`:
+`tools/builtins/Subagent.ts` — `Subagent` tool `{ description, prompt, subagent_type? }`. `call()`:
 - guard depth (`ctx.depth ?? 0` ≥ cap → error result);
 - build a child registry = parent tools **minus Subagent** (and minus writes for read-only types);
 - `recent = []`; `yield*`/await a nested `runAgentLoop([{role:user, content: prompt}], { provider, model, cwd,

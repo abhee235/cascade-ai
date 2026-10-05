@@ -80,7 +80,7 @@ edit cards → Git checkpoints + **M6** → Terminal + **M7**. After that: promp
 
 ---
 
-## 5. Core-parity enhancements (post-Phase-13, tracked in `docs/CORE-PARITY.md`)
+## 5. Core-capability enhancements (post-Phase-13, tracked in `docs/CORE-PARITY.md`)
 
 Making the engine best-in-class across **all** model sizes (multi-provider), not just feature-complete.
 

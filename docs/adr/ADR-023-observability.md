@@ -23,9 +23,9 @@ Add a **self-coded JSONL tracer**, injected by DI like the provider (ADR-020):
 - The extension constructs a `JsonlTracer` behind a `cascade.trace` setting, writing
   `<workspace>/.cascade/trace-<timestamp>.jsonl` (`.cascade/` is git-ignored).
 
-**Why not a library?** LLM-obs SaaS (LangSmith/Langfuse/Helicone/Phoenix) are hosted, assume cloud LLMs,
-and hide the mechanism. OpenTelemetry/OpenLLMetry is the right *standard* if we outgrow JSONL, but its
-span/context SDK is heavy ceremony for a tutorial. Logging libs (pino/winston) solve levels/transports,
+**Why not a library?** Hosted LLM-observability SaaS products assume cloud LLMs and hide the mechanism.
+OpenTelemetry (with its LLM semantic conventions) is the right *standard* if we outgrow JSONL, but its
+span/context SDK is heavy ceremony for a tutorial. General logging libraries solve levels/transports,
 not structured events. JSONL is ~40 lines, zero deps, greppable, and teaches the idea. See
 `docs/learnings/observability-and-tracing.md`.
 
