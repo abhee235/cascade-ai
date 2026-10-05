@@ -10,8 +10,8 @@
 | **Edge or Chrome** | for the agent's visual checks (no extra download — it drives a browser you already have) |
 
 ```bash
-git clone https://github.com/abhee235/cascade.git
-cd cascade
+git clone https://github.com/abhee235/cascade-ai.git
+cd cascade-ai
 npm install
 ollama pull qwen3:8b          # any tool-capable model
 ```

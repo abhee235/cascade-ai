@@ -113,4 +113,11 @@ npm test        # vitest (FakeLLM; no Ollama/Docker needed). Docker/live tests a
 
 ---
 
+## Contributing & license
+
+Contributions are welcome — start with [CONTRIBUTING.md](CONTRIBUTING.md) for the setup, the test commands,
+and the ground rules. Cascade is released under the [MIT license](LICENSE).
+
+---
+
 *Built as a learning project. Ollama-native, local-first.*
