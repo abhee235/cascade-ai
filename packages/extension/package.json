@@ -3,6 +3,7 @@
   "displayName": "Cascade",
   "description": "Cascade — an Ollama-native AI coding agent for VS Code.",
   "version": "0.0.0",
+  "license": "MIT",
   "private": true,
   "publisher": "cascade-dev",
   "engines": {
@@ -130,7 +131,7 @@
           "type": "string",
           "enum": ["auto", "hosted", "constrained"],
           "default": "auto",
-          "description": "Compaction cost model (ADR-078). auto: native Ollama gets 'constrained' (compact rarely but DEEP — each full re-prefill is expensive on a KV-wall backend), hosted APIs get 'hosted' (incremental). Override only to experiment."
+          "description": "Compaction cost model (ADR-078). auto: native Ollama gets 'constrained' (compact rarely but DEEP — each full re-prefill is expensive on a KV-wall backend), hosted APIs get 'hosted' (incremental, at the auto threshold). Override only to experiment."
         },
         "cascade.maxTurns": {
           "type": "number",

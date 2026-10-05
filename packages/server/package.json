@@ -1,6 +1,7 @@
 {
   "name": "@cascade/server",
   "version": "0.0.0",
+  "license": "MIT",
   "description": "Cascade server — hosts @cascade/core and relays the ActivityEvent protocol over WebSocket. The remote frontend (web app) drives the SAME engine the extension drives in-process. (ADR-018)",
   "type": "module",
   "main": "./src/main.ts",

@@ -1,6 +1,7 @@
 {
   "name": "@cascade/storage",
   "version": "0.0.0",
+  "license": "MIT",
   "description": "Storage PORTS (interfaces) only \u00e2\u20ac\u201d ChatStore/ConfigStore/TraceStore/BlobStore. ADR-081: the server takes these by injection so a desktop (SQLite) and a hosted (Postgres/S3) deployment differ only in the adapter. Depends on nothing; contains no I/O.",
   "type": "module",
   "main": "./dist/index.js",
