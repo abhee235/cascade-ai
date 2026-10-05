@@ -148,6 +148,15 @@ downgrade, never an implicit one):
 **The Windows write-fence rung (`win-write-fence`)** — the new design, an unprivileged userspace runner
 built on OS token semantics (prior art: the public `windows-acl-restrict-poc` pattern):
 
+> **Amended by ADR-087 (2026-09-29).** `workspace-write` now runs at **low integrity**: a privilege-stripped
+> child token lowered to Low, and a standing, inheritable Low label on the workspace instead of the
+> workspace-SID ACE (steps 2–4's SIDs and ACE are retired for that mode; the private temp stays, inside the
+> workspace). The `WRITE_RESTRICTED` token below remains for `read-only` only. Why: under it every child
+> spawned with piped stdio failed (`spawn EPERM` — node's stdio pipes are named pipes whose fixed default
+> DACL no restricting SID can write), so `vite build` and npm scripts could never run inside the fence.
+> The `partial` list changes accordingly: piped spawns work under workspace-write and Everyone-writable
+> objects are no longer writable there; Windows' own low-integrity areas (LocalLow, AppDataLow) are.
+
 1. Duplicate the caller's token via `CreateRestrictedToken` with **`WRITE_RESTRICTED`** (+ `LUA_TOKEN`,
    `DISABLE_MAX_PRIVILEGE`): Windows then checks every *write* twice — the object's normal DACL **and**
    the token's restricting-SID list. Reads are untouched, which is precisely why arbitrary toolchains

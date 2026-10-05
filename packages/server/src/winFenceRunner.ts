@@ -1,11 +1,12 @@
-// winFenceRunner.ts — the write-fence RUNNER (ADR-070 step 6). Spawned by the win32 rung of
+// winFenceRunner.ts — the write-fence RUNNER (ADR-070 step 6, ADR-087). Spawned by the win32 rung of
 // sandboxBackends as an argv-prefix wrapper — the same shape as bwrap/sandbox-exec, so the backend seam
-// needs no special case. It builds the WRITE_RESTRICTED token, redirects the child's TMP/TEMP **and npm's
-// cache** into a workspace-private temp dir (so npm/build tools' writes land inside the granted tree rather
-// than being denied outside it), spawns the wrapped command under the token, and mirrors its exit code.
+// needs no special case. It builds the mode's token (low integrity for workspace-write, WRITE_RESTRICTED for
+// read-only), redirects the child's TMP/TEMP **and npm's cache** into a workspace-private temp dir (so
+// npm/build tools' writes land inside the labeled tree rather than being denied outside it), spawns the
+// wrapped command under the token, and mirrors its exit code. The server labels the workspace beforehand.
 //
 //   node --import tsx winFenceRunner.ts --workspace <dir> --mode <read-only|workspace-write>
-//        [--write-sid <S-1-4-…>] [--temp-dir <dir>] -- <command...>
+//        [--temp-dir <dir>] -- <command...>
 //
 // Every runner-side failure prints `cascade-fence: <detail>` to stderr and exits 127 — the backend's
 // runnerFailureSignatures match that, so a runner refusal is NEVER misread as a policy denial (the child
@@ -22,7 +23,6 @@ export const RUNNER_FAILURE_SIGNATURE = 'cascade-fence:'
 interface Parsed {
 	workspace: string
 	mode: 'read-only' | 'workspace-write'
-	writeSid?: string
 	tempDir?: string
 	command: string[]
 }
@@ -42,9 +42,7 @@ export function parseRunnerArgs(argv: string[]): Parsed {
 	const mode = get('--mode')
 	if (!workspace) throw new Error('missing --workspace')
 	if (mode !== 'read-only' && mode !== 'workspace-write') throw new Error(`invalid --mode: ${mode}`)
-	const writeSid = get('--write-sid')
-	if (mode === 'workspace-write' && !writeSid) throw new Error('workspace-write requires --write-sid')
-	return { workspace, mode, writeSid, tempDir: get('--temp-dir'), command }
+	return { workspace, mode, tempDir: get('--temp-dir'), command }
 }
 
 /** The child command line for cmd.exe. The command arrives as one element (no reshell); wrap it in
@@ -65,7 +63,7 @@ export function buildChildCommandLine(command: string[]): string {
  * so `npm install` — the first thing any build does — failed outright on the host tier, and the model's
  * only visible recourse was to escalate to danger-full-access for a cache directory. Exactly the same bug
  * the WSL rung had (`EROFS /root/.npm/_cacache`); the two runtimes now answer it the same way. Nothing is
- * widened: this dir is inside the workspace ACE, so it needs no new grant.
+ * widened: this dir is inside the workspace, so it inherits the workspace's low label (ADR-087).
  *
  * Exported and returning what it set so a test can pin the contract without Win32. read-only gets nothing —
  * a mode that forbids writes must forbid cache writes too.
@@ -90,10 +88,9 @@ export function runFence(argv: string[]): number {
 		return RUNNER_FAILURE_EXIT
 	}
 	try {
-		// Private temp + npm cache INSIDE the workspace (the workspace ACE already grants both).
+		// Private temp + npm cache INSIDE the workspace (its low label covers both).
 		redirectChildWrites(parsed)
-		const grants = parsed.mode === 'workspace-write' && parsed.writeSid ? [{ dir: parsed.workspace, sid: parsed.writeSid }] : []
-		const { token } = buildRestrictedToken({ mode: parsed.mode, grants })
+		const { token } = buildRestrictedToken({ mode: parsed.mode })
 		return spawnUnderToken(token, buildChildCommandLine(parsed.command), parsed.workspace)
 	} catch (e) {
 		process.stderr.write(`${RUNNER_FAILURE_SIGNATURE} ${(e as Error).message}\n`)

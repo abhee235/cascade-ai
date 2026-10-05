@@ -22,7 +22,7 @@ import { join } from 'node:path'
 import type { ExecOptions, ExecResult } from '@cascade/core'
 import { devServerRefusal } from './dockerSandbox.js'
 import { type ProjectRuntime, stripAnsi } from './projectRuntime.js'
-import { confineHostCommand, localBackendClaims } from './sandboxBackends.js'
+import { confineHostCommand, holdWorkspaceLabel, localBackendClaims, releaseWorkspaceLabel } from './sandboxBackends.js'
 import { ensureProjectToolchainConfig, installProjectToolchains, toolchainEnv } from './toolchains.js'
 
 /** Where a detached dev server's output goes. Inside the project so it travels with it, and so a user can
@@ -80,6 +80,8 @@ export class HostSandbox implements ProjectRuntime {
 	readonly shell = isWindows && !hostBash ? ('win32' as const) : ('posix' as const)
 
 	private dev?: { pid: number; port: number }
+	/** The workspace whose fence label this sandbox holds (ADR-087 amendment), released on dispose. */
+	private labelHeld?: string
 	private reservedPort?: number
 
 	constructor(private readonly projectDir: string) {
@@ -108,6 +110,12 @@ export class HostSandbox implements ProjectRuntime {
 		// (installDependencies, startDev, stopDev's taskkill) which call run() directly are deliberately
 		// NOT confined: they are ours, not the model's.
 		const confined = confineHostCommand(command, opts.policy)
+		// ADR-087 amendment: a fenced workspace-write command needs the workspace's label — hold it (once per
+		// sandbox) until dispose, so a CLOSED project never stays writable to another project's commands.
+		if (confined.backend === 'win-write-fence' && opts.policy?.mode === 'workspace-write' && !this.labelHeld) {
+			holdWorkspaceLabel(opts.policy.workspaceRoot)
+			this.labelHeld = opts.policy.workspaceRoot
+		}
 		// The fence uses argv form: spawn its runner from runnerCwd (where `tsx` resolves), NOT the project
 		// workspace — the runner sets the CHILD's cwd to the workspace itself via its --workspace flag.
 		if (confined.argv) return run(confined.command, confined.runnerCwd ?? this.projectDir, { ...opts, env: confined.env }, confined.argv)
@@ -221,7 +229,17 @@ export class HostSandbox implements ProjectRuntime {
 		try {
 			if (isWindows) {
 				// A detached npm spawns a child vite; /T takes the tree, which is what actually frees the port.
-				await run(`taskkill /PID ${dev.pid} /T /F`, this.projectDir, {})
+				// ARGV form, never a shell string: run() spawns strings through Git Bash when it exists, whose path
+				// conversion turned `/PID` into `C:/Program Files/Git/PID` — taskkill refused every call, and no dev
+				// server was ever stopped on a machine with Git for Windows (measured, ADR-086 P0).
+				// /T /F takes a whole tree, so only a tree that still runs THIS project (see treeIsOurs).
+				if (await treeIsOurs(dev.pid, this.projectDir)) await run('taskkill', this.projectDir, {}, ['taskkill', '/PID', String(dev.pid), '/T', '/F'])
+				// The recorded pid is the shell — a DIRECT child of the process that started it, and Node on Windows
+				// kills direct children (only) when that process exits. After a server restart the shell is gone while
+				// npm → vite live on, orphaned, out of the tree kill's reach (measured, ADR-086 P0: five such trees
+				// after one bench arm). So if the port is still held, end its listener — only when its command line
+				// names THIS project's directory, never a stranger that took the port. Its orphaned parents then exit.
+				if (!(await portFreed(dev.port))) await killListenerIfOurs(dev.port, this.projectDir)
 			} else {
 				// Negative pid = the group created by detached:true. Fall back to the bare pid if the process
 				// was not group-leader (it always is here, but a failed setsid must not leave it running).
@@ -298,6 +316,10 @@ export class HostSandbox implements ProjectRuntime {
 
 	async dispose(): Promise<void> {
 		await this.stopDev()
+		if (this.labelHeld) {
+			releaseWorkspaceLabel(this.labelHeld) // the last holder out takes the workspace label off
+			this.labelHeld = undefined
+		}
 	}
 }
 
@@ -355,6 +377,62 @@ function isListening(port: number): Promise<boolean> {
 		sock.once('timeout', () => done(false))
 		sock.once('error', () => done(false))
 	})
+}
+
+/** Did the port close within `ms`? A killed dev server releases it within a beat. */
+async function portFreed(port: number, ms = 1_000): Promise<boolean> {
+	const end = Date.now() + ms
+	while (await isListening(port)) {
+		if (Date.now() >= end) return false
+		await new Promise((r) => setTimeout(r, 200))
+	}
+	return true
+}
+
+/** Windows: does the live process tree under `pid` still run THIS project? A dev server's does — its vite's command
+ *  line names `<dir>\node_modules\…`. A recorded pid reused by an unrelated process (a reboot, a crash) heads a
+ *  tree that does not, and `/T /F` must never take that tree (review, 2026-10-04: the port check alone let a
+ *  stranger's pid through whenever anything held the port). A child counts only if it was created AFTER its parent:
+ *  an orphan keeps its dead parent's id, so a reused pid could otherwise "adopt" our old orphans. One CIM snapshot. */
+async function treeIsOurs(pid: number, projectDir: string): Promise<boolean> {
+	const query = "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine,@{n='Created';e={$_.CreationDate.ToFileTimeUtc()}} | ConvertTo-Json -Compress"
+	const { output } = await run('powershell', projectDir, {}, ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', query])
+	let procs: { ProcessId: number; ParentProcessId: number; CommandLine: string | null; Created: number }[]
+	try {
+		procs = JSON.parse(output)
+	} catch {
+		return false // no snapshot, no kill: a missed stop leaves a server running; a wrong one kills a stranger
+	}
+	const byId = new Map(procs.map((p) => [p.ProcessId, p]))
+	if (!byId.has(pid)) return false // dead: its orphans, if any, are reclaimed by port (killListenerIfOurs)
+	const norm = (s: string) => s.replace(/\//g, '\\').toLowerCase()
+	const tree = new Set([pid])
+	for (let grew = true; grew; ) {
+		grew = false
+		for (const p of procs) {
+			const parent = byId.get(p.ParentProcessId)
+			if (!tree.has(p.ProcessId) && parent && tree.has(parent.ProcessId) && p.Created >= parent.Created) {
+				tree.add(p.ProcessId)
+				grew = true
+			}
+		}
+	}
+	return procs.some((p) => tree.has(p.ProcessId) && norm(p.CommandLine ?? '').includes(norm(projectDir)))
+}
+
+/** Windows: end the process listening on `port`, but only if its command line names `projectDir` — a dev
+ *  server's does (`<dir>\node_modules\…\vite.js`); a stranger's that took the port does not. Argv form. */
+async function killListenerIfOurs(port: number, projectDir: string): Promise<void> {
+	const { output } = await run('netstat', projectDir, {}, ['netstat', '-ano'])
+	// `TCP  [::]:5173  [::]:0  LISTENING  1234` — a listener's foreign address ends in :0 (locale-proof, unlike the state).
+	const row = output.split('\n').map((l) => l.trim().split(/\s+/)).find((c) => c[0] === 'TCP' && c[1]?.endsWith(`:${port}`) && /:0$/.test(c[2] ?? ''))
+	const pid = row?.[4]
+	if (!pid || !/^\d+$/.test(pid)) return
+	const query = `(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}').CommandLine`
+	const cmdline = (await run('powershell', projectDir, {}, ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', query])).output
+	const norm = (s: string) => s.replace(/\//g, '\\').toLowerCase()
+	if (!norm(cmdline).includes(norm(projectDir))) return
+	await run('taskkill', projectDir, {}, ['taskkill', '/PID', pid, '/T', '/F'])
 }
 
 /** Ask the OS for an unused port by binding 0 and reading what it gave us. Exported for WslSandbox,

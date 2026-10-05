@@ -5,6 +5,7 @@
 // nobody published for it.
 
 import { describe, expect, it } from 'vitest'
+import { spawn } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -14,6 +15,16 @@ import { devServerError } from '../src/previewManager'
 
 const project = () => mkdtempSync(join(tmpdir(), 'cascade-host-'))
 const isWindows = process.platform === 'win32'
+
+/** A real listening process standing in for a dev server; `extra` lands in its command line. */
+async function listener(extra: string[] = []) {
+	const script = "require('net').createServer().listen(0, '127.0.0.1', function () { console.log(this.address().port) })"
+	const child = spawn(process.execPath, ['-e', script, ...extra], { detached: !isWindows, stdio: ['ignore', 'pipe', 'ignore'] })
+	const port = await new Promise<number>((r) => child.stdout!.once('data', (d) => r(Number(String(d).trim()))))
+	const exited = new Promise<void>((r) => child.once('exit', () => r()))
+	const within = (ms: number) => Promise.race([exited, new Promise((_, reject) => setTimeout(() => reject(new Error('the dev server is still running')), ms))])
+	return { child, port, within, alive: () => child.exitCode === null && child.signalCode === null }
+}
 
 describe('HostSandbox', () => {
 	it('reports the shell run() actually spawns, so the loop advertises the right syntax', () => {
@@ -173,6 +184,70 @@ describe('HostSandbox', () => {
 		await expect(new HostSandbox(project()).stopDev()).resolves.toBeUndefined()
 		await expect(new HostSandbox(project()).dispose()).resolves.toBeUndefined()
 	})
+
+	it('actually ENDS a recorded dev server (through Git Bash, `taskkill /PID` became a path and never ran)', async () => {
+		// Measured (ADR-086 P0): run() spawns shell strings through Git Bash when it exists, whose path conversion
+		// turned `/PID` into `C:/Program Files/Git/PID` — taskkill refused every call, so no dev server was ever
+		// stopped (project close, preview restart, the startup sweep). The reclaim test above records a dead pid
+		// and cannot see that; this one ends a real process.
+		const dir = project()
+		mkdirSync(join(dir, '.cascade'), { recursive: true })
+		// Its command line names the project, as a real dev tree's vite does (`<dir>\node_modules\…\vite.js`).
+		const dev = await listener([dir])
+		writeFileSync(join(dir, '.cascade', 'dev.json'), JSON.stringify({ pid: dev.child.pid, port: dev.port }))
+		try {
+			await new HostSandbox(dir).stopDev()
+			await dev.within(4_000)
+		} finally {
+			if (dev.alive()) dev.child.kill() // never leak it from a failing run
+		}
+	}, 15_000)
+
+	it.runIf(isWindows)('never force-kills a recorded pid that now belongs to a STRANGER, even while the port is held', async () => {
+		// Review (2026-10-04): after a reboot the recorded pid can be reused by an unrelated process, and "something
+		// listens on the recorded port" is no proof the pid is ours — `/T /F` would take the stranger's whole tree.
+		const dir = project()
+		mkdirSync(join(dir, '.cascade'), { recursive: true })
+		const stranger = await listener() // its command line does not name the project
+		writeFileSync(join(dir, '.cascade', 'dev.json'), JSON.stringify({ pid: stranger.child.pid, port: stranger.port }))
+		try {
+			await new HostSandbox(dir).stopDev()
+			await new Promise((r) => setTimeout(r, 300))
+			expect(stranger.alive()).toBe(true)
+		} finally {
+			if (stranger.alive()) stranger.child.kill()
+		}
+	}, 15_000)
+
+	it.runIf(isWindows)('reclaims an ORPHANED dev server whose recorded shell died with the old server — by its port', async () => {
+		// Node on Windows kills a process's DIRECT children when it exits (the recorded shell), not npm → vite beneath
+		// it (measured, ADR-086 P0: five orphaned trees after one bench arm). This listener is that orphaned vite: the
+		// recorded pid is dead, and its command line names the project directory, as `<dir>\node_modules\…` does.
+		const dir = project()
+		mkdirSync(join(dir, '.cascade'), { recursive: true })
+		const dev = await listener([dir])
+		writeFileSync(join(dir, '.cascade', 'dev.json'), JSON.stringify({ pid: 999_999_999, port: dev.port }))
+		try {
+			await new HostSandbox(dir).stopDev()
+			await dev.within(4_000)
+		} finally {
+			if (dev.alive()) dev.child.kill()
+		}
+	}, 15_000)
+
+	it.runIf(isWindows)('never ends a stranger that took the recorded port — its command line does not name the project', async () => {
+		const dir = project()
+		mkdirSync(join(dir, '.cascade'), { recursive: true })
+		const stranger = await listener()
+		writeFileSync(join(dir, '.cascade', 'dev.json'), JSON.stringify({ pid: 999_999_999, port: stranger.port }))
+		try {
+			await new HostSandbox(dir).stopDev()
+			await new Promise((r) => setTimeout(r, 300))
+			expect(stranger.alive()).toBe(true)
+		} finally {
+			if (stranger.alive()) stranger.child.kill()
+		}
+	}, 15_000)
 })
 
 async function waitFor(pred: () => boolean, timeoutMs = 8000): Promise<void> {

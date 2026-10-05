@@ -1,38 +1,26 @@
-// winFence.test.ts — ADR-070 step 6: the write-fence's pure parts (SID, runner argv, backend wiring).
-import { afterEach, describe, expect, it } from 'vitest'
+// winFence.test.ts — ADR-070 step 6 / ADR-087: the write-fence's pure parts (runner argv, backend wiring, dialect).
+import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { SandboxPolicy } from '@cascade/core'
-import { tempWriteSid, workspaceWriteSid } from '../src/winFenceSid.js'
 import { buildChildCommandLine, parseRunnerArgs, redirectChildWrites } from '../src/winFenceRunner.js'
 import { confineHostCommand, resetBackendCache, selectLocalBackend } from '../src/sandboxBackends.js'
 
 const ws = mkdtempSync(join(tmpdir(), 'winfence-'))
 const wsWrite: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: ws }
 const readOnly: SandboxPolicy = { mode: 'read-only', workspaceRoot: ws }
-
-describe('SID derivation — deterministic, path-scoped, domain-separated', () => {
-	it('the same canonical workspace path always yields the same SID (the standing-ACE reuse cache)', () => {
-		expect(workspaceWriteSid(ws)).toBe(workspaceWriteSid(ws))
-	})
-	it('different workspaces yield different SIDs', () => {
-		const other = mkdtempSync(join(tmpdir(), 'winfence2-'))
-		expect(workspaceWriteSid(ws)).not.toBe(workspaceWriteSid(other))
-	})
-	it('workspace SIDs are S-1-4-a-b; temp SIDs add a third subauthority so they can never collide', () => {
-		expect(workspaceWriteSid(ws)).toMatch(/^S-1-4-\d+-\d+$/)
-		expect(tempWriteSid(ws)).toMatch(/^S-1-4-\d+-\d+-1$/)
-	})
-})
+// confineHostCommand labels this workspace on win32 (ADR-087) — leave no labeled folder behind in %TEMP%.
+afterAll(() => rmSync(ws, { recursive: true, force: true }))
 
 describe('parseRunnerArgs — the runner contract', () => {
 	it('parses a workspace-write invocation', () => {
-		const p = parseRunnerArgs(['--workspace', ws, '--mode', 'workspace-write', '--write-sid', 'S-1-4-1-2', '--temp-dir', 'T', '--', 'npm test'])
-		expect(p).toMatchObject({ workspace: ws, mode: 'workspace-write', writeSid: 'S-1-4-1-2', tempDir: 'T', command: ['npm test'] })
+		const p = parseRunnerArgs(['--workspace', ws, '--mode', 'workspace-write', '--temp-dir', 'T', '--', 'npm test'])
+		expect(p).toMatchObject({ workspace: ws, mode: 'workspace-write', tempDir: 'T', command: ['npm test'] })
 	})
-	it('requires a write-sid under workspace-write', () => {
-		expect(() => parseRunnerArgs(['--workspace', ws, '--mode', 'workspace-write', '--', 'x'])).toThrow(/requires --write-sid/)
+	it('workspace-write needs no SID — the workspace label grants the tree (ADR-087); a stale --write-sid is ignored', () => {
+		expect(parseRunnerArgs(['--workspace', ws, '--mode', 'workspace-write', '--', 'x']).mode).toBe('workspace-write')
+		expect(parseRunnerArgs(['--workspace', ws, '--mode', 'workspace-write', '--write-sid', 'S-1-4-1-2', '--', 'x'])).not.toHaveProperty('writeSid')
 	})
 	it('read-only needs no sid', () => {
 		expect(parseRunnerArgs(['--workspace', ws, '--mode', 'read-only', '--', 'ls']).mode).toBe('read-only')
@@ -59,25 +47,35 @@ describe('backend selection — win32 chain', () => {
 })
 
 describe('confineHostCommand — the fence is argv-form, partial, with a runner-failure signature', () => {
-	it('workspace-write: argv runs the runner with the workspace SID + temp-dir; command is ONE trailing element', () => {
+	it('workspace-write: argv runs the runner with the private temp-dir and no SID; command is ONE trailing element', () => {
 		const c = confineHostCommand('npm run build', wsWrite, { platform: 'win32', probeWinFence: () => true })
 		resetBackendCache()
 		expect(c.backend).toBe('win-write-fence')
-		expect(c.enforcement).toBe('partial') // honest: writes only, plus Everyone/hard-link boundaries
+		expect(c.enforcement).toBe('partial') // honest: writes only, plus the documented boundaries
 		expect(c.argv).toBeDefined()
 		const argv = c.argv!
-		expect(argv).toContain('--write-sid')
-		expect(argv).toContain(workspaceWriteSid(ws))
-		expect(argv).toContain('--temp-dir')
+		expect(argv).not.toContain('--write-sid') // the label, not a SID, grants the tree (ADR-087)
+		expect(argv[argv.indexOf('--temp-dir') + 1]).toBe(join(ws, '.cascade', 'tmp'))
 		expect(argv[argv.length - 2]).toBe('--')
 		expect(argv[argv.length - 1]).toBe('npm run build') // never split/reshelled
 		expect(c.runnerFailureSignatures).toContain('cascade-fence:')
 	})
-	it('read-only: argv carries no write-sid (nothing is grantable)', () => {
+	it('read-only: no temp-dir and no SID (nothing is writable)', () => {
 		const c = confineHostCommand('ls', readOnly, { platform: 'win32', probeWinFence: () => true })
 		resetBackendCache()
 		expect(c.argv).not.toContain('--write-sid')
+		expect(c.argv).not.toContain('--temp-dir')
 		expect(c.argv![c.argv!.length - 1]).toBe('ls')
+	})
+	it("the dialect classifies node's EPERM — a denied write and a denied spawn (unmatched before ADR-087)", () => {
+		const c = confineHostCommand('ls', readOnly, { platform: 'win32', probeWinFence: () => true })
+		resetBackendCache()
+		const matches = (out: string) => (c.denialSignatures ?? []).some((s) => out.toLowerCase().includes(s))
+		// Verbatim from the P2 trace (2026-09-28) and the fenced tsc -b run (2026-09-29).
+		expect(matches('failed to load config from vite.config.ts\nerror during build:\nError: spawn EPERM')).toBe(true)
+		expect(matches("error TS5033: Could not write file 'tsconfig.tsbuildinfo': EPERM: operation not permitted, open 'x'")).toBe(true)
+		expect(matches('Access is denied.')).toBe(true)
+		expect(matches('src/App.tsx(3,1): error TS2304: Cannot find name')).toBe(false) // an ordinary failure stays ordinary
 	})
 	it('danger-full-access is never confined', () => {
 		expect(confineHostCommand('rm -rf /', { mode: 'danger-full-access', workspaceRoot: ws }, { platform: 'win32', probeWinFence: () => true }).backend).toBe('none')
