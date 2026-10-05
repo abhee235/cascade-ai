@@ -4,7 +4,6 @@
 // enough does it fall back to the LLM summary (the older half → one message, recent half kept verbatim).
 // Returns NEW messages; the raw transcript + JSONL trace are untouched (the session swaps its history array).
 
-
 import type { Message } from '../protocol'
 import type { ModelProvider } from '../llm/provider'
 import { completeWithRecovery } from '../llm/resilience'
