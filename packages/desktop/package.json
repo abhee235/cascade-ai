@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "license": "MIT",
   "private": true,
+  "repository": "https://github.com/abhee235/cascade-ai",
   "description": "Cascade desktop (ADR-081 \u00a77): boots the server in-process and opens a window on the built web bundle.",
   "main": "dist/main.cjs",
   "scripts": {
