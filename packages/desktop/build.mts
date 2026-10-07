@@ -38,8 +38,14 @@ const DIST = join(HERE, 'dist')
  * copied out beside the others below.
  *
  * All four stay real dependencies, so the packager copies them intact.
+ *
+ * `cpu-features` and any other `*.node` file are left out for a different reason: `ssh2` (pulled in by
+ * the Docker client) loads its optional native speed-ups — `sshcrypto.node`, `cpu-features` — inside
+ * try/catch and falls back to plain JS without them. npm compiles them on macOS and Linux (not on a
+ * Windows box without build tools), and esbuild has no loader for a compiled `.node`, so bundling them
+ * failed the build there. Left external they are simply absent at runtime, which ssh2 already handles.
  */
-const EXTERNAL = ['electron', 'playwright-core', 'typescript', 'koffi']
+const EXTERNAL = ['electron', 'playwright-core', 'typescript', 'koffi', 'cpu-features', '*.node']
 
 rmSync(DIST, { recursive: true, force: true })
 mkdirSync(DIST, { recursive: true })
