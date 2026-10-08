@@ -102,6 +102,40 @@ function scan(projectDir: string, findings: ResidueFinding[]): Hit[] {
  *  without turning a wholesale-untokenized file into a wall of numbers. */
 const RAW_COLOR_LINES_SHOWN = 8
 
+/** ADR-090 §4: an effect whose arrow body is an EXPRESSION returns that expression's value, and React calls a
+ *  returned value as the cleanup. Measured (v0.1.0 VM chatbot): `useEffect(() => ref.current?.scrollIntoView(…))`
+ *  — Chrome 154's scrollIntoView returns a Promise, so the first re-render threw "o is not a function" and blanked
+ *  the app; tsc passed because lib.dom still types it `void`. `() => () => cleanup()` (returns a function) is fine.
+ *  The whitespace sits INSIDE the lookahead: `\s*` before it would backtrack to zero and let `{` through. */
+const EXPR_EFFECT = /\buse(?:Layout)?Effect\(\s*\(\s*\)\s*=>(?!\s*(?:\{|\(\s*\)\s*=>))/
+
+function effectReturnHits(projectDir: string): Hit[] {
+	const hits: Hit[] = []
+	const src = join(projectDir, 'src')
+	for (const f of walk(src, src)) {
+		if (!/\.[jt]sx?$/.test(f)) continue
+		let text: string
+		try {
+			text = readFileSync(f, 'utf8')
+		} catch {
+			continue
+		}
+		const lines = text.split('\n')
+		for (let i = 0; i < lines.length; i++) {
+			if (!EXPR_EFFECT.test(lines[i])) continue
+			hits.push({
+				finding: {
+					kind: 'string',
+					why: 'an effect with an expression body returns that value, and React calls it as the cleanup — a call that returns anything (scrollIntoView now returns a Promise) crashes the app on the next render',
+					fix: 'Wrap the body in braces: `useEffect(() => { … }, deps)`. Return only a cleanup function, if any.',
+				},
+				where: `${relative(projectDir, f).replaceAll('\\', '/')}:${i + 1}`,
+			})
+		}
+	}
+	return hits
+}
+
 function styleSoftHits(projectDir: string, templateId: string): Hit[] {
 	const hits: Hit[] = []
 	const src = join(projectDir, 'src')
@@ -216,7 +250,7 @@ export function createTemplateAuditTool(deps: AuditToolDeps): Tool | undefined {
 
 		async call() {
 			try {
-				const hard = scan(deps.projectDir, contract.hard)
+				const hard = [...scan(deps.projectDir, contract.hard), ...effectReturnHits(deps.projectDir)]
 				const soft = [...scan(deps.projectDir, contract.soft), ...styleSoftHits(deps.projectDir, deps.templateId)]
 				if (hard.length === 0 && soft.length === 0) {
 					return { content: 'TemplateAudit clean — no template residue. The scaffold has been fully replaced by the app.' }

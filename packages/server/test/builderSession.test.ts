@@ -184,7 +184,8 @@ describe('the blank start', () => {
 		// The React builder's prompt prefix (KV cache). If you change BUILDER_BEHAVIOR on purpose, update this.
 		// Changed on purpose by ADR-086 P1 (was 72683b22d3c85219): the blocks are patterns, not a frozen library;
 		// then the brand became the app's name as a wordmark (the user's call: a logo is personal).
-		expect(createHash('sha256').update(BUILDER_BEHAVIOR).digest('hex').slice(0, 16)).toBe('ec70a054fa385d7b')
+		// Changed on purpose by ADR-090 (was ec70a054fa385d7b): done now includes USING the main flow once in the browser.
+		expect(createHash('sha256').update(BUILDER_BEHAVIOR).digest('hex').slice(0, 16)).toBe('d580bd03b327822b')
 		for (const rule of ['- Never end your turn to ask a question', '- No broad process kills', '- PLAN.md (pinned below) is the contract']) {
 			expect(BUILDER_BEHAVIOR_FREE).toContain(BUILDER_BEHAVIOR.split('\n').find((l) => l.startsWith(rule))!)
 		}

@@ -42,3 +42,27 @@ describe('devServerRefusal — the preview owns the dev server', () => {
 		}
 	})
 })
+
+// ADR-089 §1 — the Preview pane stops waiting the moment the launch has died, and shows the log's reason.
+describe('PreviewManager — a dead launch fails fast with its cause', () => {
+	it('reports the log line within seconds, not after 60', async () => {
+		const { PreviewManager } = await import('../src/previewManager')
+		const runtime = {
+			kind: 'host',
+			hasDependencies: async () => true,
+			installDependencies: async () => true,
+			previewPort: async () => 1, // nothing answers on port 1
+			startDev: async () => {},
+			stopDev: async () => {},
+			devExited: () => true,
+			devLog: async () => "'npm.cmd' is not recognized as an internal or external command,",
+			followDevLog: () => {},
+		}
+		const states: { status: string; error?: string }[] = []
+		const t0 = Date.now()
+		await new PreviewManager().start('p1', runtime as never, (st) => states.push(st))
+		expect(Date.now() - t0).toBeLessThan(5_000)
+		expect(states.at(-1)?.status).toBe('error')
+		expect(states.at(-1)?.error).toContain("'npm.cmd' is not recognized")
+	}, 15_000)
+})

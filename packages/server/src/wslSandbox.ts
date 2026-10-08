@@ -276,7 +276,7 @@ export class WslSandbox implements ProjectRuntime {
 	}
 
 	async exec(command: string, opts: ExecOptions = {}): Promise<ExecResult> {
-		const refusal = devServerRefusal(command)
+		const refusal = devServerRefusal(command, 'wsl')
 		if (refusal) return { output: refusal, exitCode: 1 }
 		return this.run(buildExecScript(this.projectDir, this.key, command, opts.policy, bwrapInside()), { signal: opts.signal, onData: opts.onData })
 	}

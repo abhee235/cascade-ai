@@ -172,3 +172,30 @@ describe('TemplateAudit — style pre-flights', () => {
 		expect(out).not.toMatch(/\brun TemplateAudit\b/)
 	})
 })
+
+// ADR-090 §4 — the v0.1.0 VM chatbot's crash line, and the shapes that must NOT be flagged.
+describe('TemplateAudit — effects that implicitly return a value', () => {
+	it('flags an expression-bodied effect as HARD, with its line', async () => {
+		const out = await audit({
+			'src/components/ChatView.tsx': "import { useEffect } from 'react'\nexport function C() {\n\tuseEffect(() => end.current?.scrollIntoView({ behavior: 'smooth' }), [m])\n\treturn null\n}\n",
+		})
+		expect(out).toContain('HARD residue')
+		expect(out).toContain('src/components/ChatView.tsx:3')
+		expect(out).toContain('Wrap the body in braces')
+	})
+	it('leaves braced bodies, returned cleanups and React.useLayoutEffect blocks alone', async () => {
+		const out = await audit({
+			'src/hooks/a.ts': [
+				'useEffect(() => { end.current?.scrollIntoView() }, [m])',
+				'useEffect(() => () => window.clearTimeout(t.current), [])',
+				'React.useLayoutEffect(() => {',
+				'useEffect( ()=>{ go() }, [])',
+			].join('\n'),
+		})
+		expect(out).not.toContain('expression body')
+	})
+	it('flags React.useLayoutEffect with an expression body too', async () => {
+		const out = await audit({ 'src/x.tsx': 'React.useLayoutEffect(() => el.focus(), [])\n' })
+		expect(out).toContain('src/x.tsx:1')
+	})
+})

@@ -17,13 +17,17 @@
 
 import { z } from 'zod'
 import type { Tool } from '@cascade/core'
+import { connect } from 'node:net'
+import { devServerError } from './previewManager.js'
 import type { ProjectRuntime } from './projectRuntime.js'
 
 const inputSchema = z.object({
-	op: z.enum(['open', 'snapshot', 'screenshot', 'probe', 'click', 'press', 'audit']).describe('open = load the app (do this first) · snapshot = accessibility tree as text (structure — cheap, prefer this) · screenshot = image for VISUAL judgment (vision models ONLY — errors without vision; expensive — budget these) · probe = evaluate a JS expression in the live page and get JSON back (RUNTIME state — games/canvas/dynamic behavior that snapshots cannot see) · audit = scroll the WHOLE page and report content stuck invisible (opacity 0) + whether CSS loaded + console errors. ALWAYS run audit before declaring the page done.'),
+	op: z.enum(['open', 'snapshot', 'screenshot', 'probe', 'click', 'type', 'press', 'audit']).describe('open = load the app (do this first) · type = fill an input/textarea (`target` = its label, placeholder or a CSS selector; `text`; `submit:true` presses Enter) — use it with click/press to USE the main flow once · snapshot = accessibility tree as text (structure — cheap, prefer this) · screenshot = image for VISUAL judgment (vision models ONLY — errors without vision; expensive — budget these) · probe = evaluate a JS expression in the live page and get JSON back (RUNTIME state — games/canvas/dynamic behavior that snapshots cannot see) · audit = scroll the WHOLE page and report content stuck invisible (opacity 0) + whether CSS loaded + console errors. ALWAYS run audit before declaring the page done.'),
 	path: z.string().optional().describe('Route to open, e.g. "/" or "/settings". Only with op:"open"; the app origin is fixed.'),
 	expr: z.string().optional().describe('JS expression for op:"probe", evaluated in the page, result JSON-returned. E.g. "__DEBUG__.state()" or "(__DEBUG__.step(60), __DEBUG__.state().ball)". Canvas/game apps expose window.__DEBUG__ (see the game-dev skill).'),
-	target: z.string().optional().describe('For op:"click": visible text of the element (e.g. "START GAME") or a CSS selector. For op:"press": a key name, e.g. "ArrowLeft", "Space", "Enter", "Escape".'),
+	text: z.string().optional().describe('For op:"type": the text to enter.'),
+	submit: z.boolean().optional().describe('For op:"type": press Enter after typing (send the message / submit the form).'),
+	target: z.string().optional().describe('For op:"type": the field\'s label, placeholder or a CSS selector. For op:"click": visible text of the element (e.g. "START GAME") or a CSS selector. For op:"press": a key name, e.g. "ArrowLeft", "Space", "Enter", "Escape".'),
 })
 
 /** Where the dev server writes its log inside the container (same file PreviewManager tails). */
@@ -33,17 +37,44 @@ const MAX_SCREENSHOTS = 8
 const SNAPSHOT_MAX_CHARS = 8_000
 const PROBE_MAX_CHARS = 4_000
 
-async function waitForHttp(url: string, timeoutMs: number): Promise<boolean> {
+/** Does the dev server answer HTTP? ADR-089 §3: tries 127.0.0.1 AND localhost each round — a server bound to IPv4
+ *  only missed a single `localhost` fetch that resolved to ::1, and the miss got a working server killed. Stops early
+ *  when `stop()` says the launch already died. */
+async function waitForHttp(port: number, timeoutMs: number, stop?: () => boolean): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs
-	while (Date.now() < deadline) {
-		try {
-			await fetch(url, { signal: AbortSignal.timeout(2000) })
-			return true
-		} catch {
-			await new Promise((r) => setTimeout(r, 1000))
+	do {
+		if (stop?.()) return false
+		for (const host of ['127.0.0.1', 'localhost']) {
+			try {
+				// A refused connection fails instantly, so a long per-request budget costs nothing — and a fixed 2 s one
+				// meant a server slower than that to answer (a cold Vite on a slow VM) could NEVER count as up.
+				const budget = Math.max(500, Math.min(10_000, deadline - Date.now()))
+				await fetch(`http://${host}:${port}/`, { signal: AbortSignal.timeout(budget) })
+				return true
+			} catch {
+				/* try the other name, then wait */
+			}
 		}
-	}
+		await new Promise((r) => setTimeout(r, 500))
+	} while (Date.now() < deadline)
 	return false
+}
+
+/** Is ANYTHING accepting connections on the port, on IPv4 or IPv6? The adopt-don't-kill check (ADR-089 §3). */
+async function isListeningAny(port: number): Promise<boolean> {
+	const one = (host: string) =>
+		new Promise<boolean>((resolve) => {
+			const sock = connect({ port, host })
+			const done = (v: boolean) => {
+				sock.destroy()
+				resolve(v)
+			}
+			sock.setTimeout(500)
+			sock.once('connect', () => done(true))
+			sock.once('timeout', () => done(false))
+			sock.once('error', () => done(false))
+		})
+	return (await one('127.0.0.1')) || (await one('::1'))
 }
 
 /** Minimal Playwright surface the tool needs — injectable for tests (real impl: playwright-core). */
@@ -55,6 +86,8 @@ export interface PageLike {
 	screenshot(opts: { type: 'jpeg'; quality: number }): Promise<Buffer>
 	evaluate(expr: string): Promise<unknown>
 	clickText(target: string): Promise<void>
+	/** ADR-090: fill a field found by label → placeholder → selector; Enter when `submit`. Optional for fakes. */
+	typeInto?(target: string, text: string, submit: boolean): Promise<void>
 	press(key: string): Promise<void>
 	/** Console error lines collected since open (wired by launchPage; optional for test fakes). */
 	consoleErrors?(): string[]
@@ -94,7 +127,9 @@ const AUDIT_EXPR = `(async () => {
 		bodyFont: (bodyCS.fontFamily || '').split(',')[0].trim(),
 		bodyBg: bodyCS.backgroundColor,
 	}
-	return { pageHeight: H, steps, stuckSamples: [...stuck.keys()], css }
+	// ADR-090 §3: a crash (React unmounts the whole root) or an empty root leaves almost no text.
+	const textLen = (document.body.innerText || '').trim().length
+	return { pageHeight: H, steps, stuckSamples: [...stuck.keys()], css, textLen }
 })()`
 
 async function launchPage(): Promise<{ page: PageLike; close: () => Promise<void> }> {
@@ -141,6 +176,17 @@ async function launchPage(): Promise<{ page: PageLike; close: () => Promise<void
 		return raw.locator(target).first().click({ timeout: 5_000 })
 	}
 	page.press = (key: string) => raw.keyboard.press(key)
+	page.typeInto = async (target: string, text: string, submit: boolean) => {
+		const candidates = [raw.getByLabel(target, { exact: false }), raw.getByPlaceholder(target, { exact: false }), raw.locator(target)]
+		for (const c of candidates) {
+			const el = c.first()
+			if (!(await el.count().catch(() => 0))) continue
+			await el.fill(text, { timeout: 5_000 })
+			if (submit) await el.press('Enter')
+			return
+		}
+		throw new Error(`no field matching "${target}" (tried label, placeholder, CSS selector)`)
+	}
 	page.consoleErrors = () => errors
 	return { page, close: () => browser!.close() }
 }
@@ -150,6 +196,10 @@ export interface BrowserHost {
 	getHostPort(): Promise<number>
 	exec(command: string): Promise<unknown>
 	execDetached(command: string): Promise<unknown>
+	/** ADR-089: the launch already died (see ProjectRuntime.devExited). Optional. */
+	devExited?(): boolean
+	/** The dev log's last lines, so a failure can state its cause. Optional. */
+	devLog?(lines: number): Promise<string>
 }
 
 /** Adapt ANY runtime to BrowserHost. Docker IS the shape; every other runtime is built from the
@@ -175,6 +225,8 @@ export function browserHostFor(runtime: ProjectRuntime | undefined): BrowserHost
 			if (!(await runtime.hasDependencies())) await runtime.installDependencies()
 			await runtime.startDev({})
 		},
+		devExited: () => runtime.devExited?.() ?? false,
+		devLog: (lines) => runtime.devLog(lines),
 	}
 }
 
@@ -217,12 +269,25 @@ export function createBrowserTool(deps: BrowserToolDeps): Tool {
 					// The dev server may not be running (the user hasn't opened the Preview pane). Start it the
 					// same way PreviewManager does — detached, logged — and wait for the port. Idempotent: if
 					// it's already up, the port answers before the exec matters.
-					if (!(await waitForHttp(origin, 3_000))) {
-						// ADR-066: reap any stale dev/API process from a prior submit before starting a fresh one.
-						await deps.sandbox.exec('pkill -f "vite" ; pkill -f "tsx.*server" ; true').catch(() => {})
-						await deps.sandbox.execDetached(`CHOKIDAR_USEPOLLING=true npm run dev > ${DEV_LOG} 2>&1`)
-						if (!(await waitForHttp(origin, 30_000))) {
-							return { content: `The dev server did not answer on ${origin} within 30s. Run \`npm run dev\` with Bash, check its output for errors, then try Browser open again.`, isError: true }
+					if (!(await waitForHttp(port, 3_000))) {
+						// ADR-089 §3: something already LISTENING is a server that is still warming up (or answered a name we
+						// did not try) — give it time instead of restarting, which killed a working server on the v0.1.0 VM.
+						const live = await isListeningAny(port)
+						if (!live) {
+							// ADR-066: reap any stale dev/API process from a prior submit before starting a fresh one.
+							await deps.sandbox.exec('pkill -f "vite" ; pkill -f "tsx.*server" ; true').catch(() => {})
+							await deps.sandbox.execDetached(`CHOKIDAR_USEPOLLING=true npm run dev > ${DEV_LOG} 2>&1`)
+						}
+						const died = () => deps.sandbox.devExited?.() ?? false
+						if (!(await waitForHttp(port, 30_000, died))) {
+							// ADR-089 §2: state the cause from the log, and only a next step that exists.
+							const log = (await deps.sandbox.devLog?.(60).catch(() => '')) ?? ''
+							const cause = devServerError(log) ?? log.trim().split('\n').slice(-8).join('\n')
+							const head = died() ? 'The dev server could not start — its process exited.' : `The dev server did not answer on ${origin} within 30s.`
+							return {
+								content: `${head}${cause ? ` Its log says:\n${cause}\n` : ' Its log is empty.\n'}Fix that error (a missing package → \`npm install <pkg>\`; a missing tool → see # Environment), then call Browser {op:"open"} again. Do not start the dev server yourself — the Preview owns it.`,
+								isError: true,
+							}
 						}
 					}
 					session ??= await (deps.launch ?? launchPage)()
@@ -279,6 +344,13 @@ ${cut}` }
 					await new Promise((r) => setTimeout(r, 300)) // let the app react
 					return { content: `Clicked "${input.target}". Use op:"snapshot" or op:"probe" to observe the result.` }
 				}
+				if (input.op === 'type') {
+					if (!input.target?.trim() || input.text === undefined) return { content: 'op:"type" needs `target` (the field\'s label, placeholder or a CSS selector) and `text`.', isError: true }
+					if (!session.page.typeInto) return { content: 'op:"type" is not available in this browser session.', isError: true }
+					await session.page.typeInto(input.target, input.text, input.submit === true)
+					await new Promise((r) => setTimeout(r, 400)) // let the app react
+					return { content: `Typed into "${input.target}"${input.submit ? ' and pressed Enter' : ''}. Now op:"audit" — console errors or a blank page after an interaction mean the flow is broken.` }
+				}
 				if (input.op === 'press') {
 					if (!input.target?.trim()) return { content: 'op:"press" needs `target` — a key name like "ArrowLeft", "Space", "Enter".', isError: true }
 					await session.page.press(input.target)
@@ -292,7 +364,9 @@ ${cut}` }
 						steps: { y: number; visible: number; invisible: number }[]
 						stuckSamples: string[]
 						css?: { sheets: number; bodyFont: string; bodyBg: string }
+						textLen?: number
 					}
+					const blank = report.textLen !== undefined && report.textLen < 20
 					const errs = session.page.consoleErrors?.() ?? []
 					const totalStuck = report.steps.reduce((a, s) => a + s.invisible, 0)
 					const cssDead = report.css !== undefined && report.css.sheets === 0
@@ -309,9 +383,10 @@ ${cut}` }
 							`FAIL: ${totalStuck} content elements are stuck at opacity 0 after scrolling — real visitors see blank sections. Usual cause: a scroll-reveal (IntersectionObserver / whileInView) that never fires. Samples: ${report.stuckSamples.map((s) => JSON.stringify(s)).join(', ')}. Fix the reveal (or remove it) and re-run audit.`,
 						)
 					}
+					if (blank) lines.push('FAIL: the page rendered (almost) nothing — a crash unmounted the app or its root is empty. The console errors below name the cause; fix it, rebuild, re-open and re-run the flow.')
 					if (errs.length) lines.push(`Console errors (${errs.length}): ${errs.slice(0, 5).join(' | ')}`)
-					if (totalStuck === 0 && errs.length === 0 && !cssDead) lines.push('PASS: all content renders while scrolling; styles loaded; no console errors.')
-					return { content: lines.join('\n'), isError: totalStuck > 0 || cssDead }
+					if (totalStuck === 0 && errs.length === 0 && !cssDead && !blank) lines.push('PASS: all content renders while scrolling; styles loaded; no console errors.')
+					return { content: lines.join('\n'), isError: totalStuck > 0 || cssDead || blank }
 				}
 
 				// screenshot

@@ -47,8 +47,16 @@ export async function dockerAvailable(): Promise<boolean> {
  *  Detached starts (execDetached) are OURS and bypass this — it only guards the model's `exec` path. */
 const DEV_SERVER_RE = /(^|[;&|]|&&)\s*(npx\s+)?(vite|next|nuxt)\b(?!.*\b(build|preview)\b)|(^|[;&|]|&&)\s*(npm|pnpm|yarn|bun)\s+(run\s+)?(dev|start)\b/i
 
-export function devServerRefusal(command: string): string | undefined {
+export function devServerRefusal(command: string, kind: 'docker' | 'host' | 'wsl' = 'docker'): string | undefined {
   if (!DEV_SERVER_RE.test(command)) return undefined
+  // ADR-089 §4: the container text below was false in host mode (no container) and claimed a server was running
+  // when the launch had failed — sending the agent back to a Browser tool that sent it here.
+  if (kind !== 'docker')
+    return (
+      'Refused: the Preview pane owns the dev server — a second one would fight it for the port. Use ' +
+      'Browser {op:"open"}: it starts the dev server and, if it cannot start, returns the error from its log. Fix ' +
+      'that error, then open again. Use Bash for `npm run build`, `npx tsc --noEmit` and tests.'
+    )
   return (
     'Refused: the dev server is managed by the Preview pane — it is already running on the one port this ' +
     'container publishes, and a second server would bind a port that is published NOWHERE (unreachable from ' +

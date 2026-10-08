@@ -319,3 +319,86 @@ describe('Browser dispose (the leaked headless browser)', () => {
 		f.mockRestore()
 	})
 })
+
+// ADR-089 — measured on the v0.1.0 VM: 8 opens × 33–45 s with no cause given, and one open that killed the
+// agent's working server. These use REAL sockets (no fetch stub).
+describe('Browser open — preview lifecycle (ADR-089)', () => {
+	const freePort = async () => {
+		const { createServer } = await import('node:net')
+		return new Promise<number>((r) => {
+			const srv = createServer().listen(0, '127.0.0.1', () => {
+				const port = (srv.address() as { port: number }).port
+				srv.close(() => r(port))
+			})
+		})
+	}
+
+	it('a launch that died returns the cause from the log at once — never "run npm run dev"', async () => {
+		const port = await freePort()
+		const execDetached = vi.fn(async () => undefined)
+		const sandbox = {
+			getHostPort: async () => port,
+			exec: async () => ({ output: '', exitCode: 0 }),
+			execDetached,
+			devExited: () => true,
+			devLog: async () => "'npm.cmd' is not recognized as an internal or external command,\noperable program or batch file.",
+		}
+		const tool = createBrowserTool({ sandbox: sandbox as never, launch: async () => ({ page: fakePage(), close: async () => {} }) })
+		const t0 = Date.now()
+		const res = await tool.call({ op: 'open' }, {} as never)
+		expect(Date.now() - t0).toBeLessThan(8_000) // the 3 s readiness probe, then no 30 s wait
+		expect(res.isError).toBe(true)
+		expect(res.content).toContain("'npm.cmd' is not recognized")
+		expect(res.content).toContain('process exited')
+		expect(res.content).not.toMatch(/with Bash/)
+	}, 15_000)
+
+	it('a server that is listening but slow to answer is adopted, not restarted', async () => {
+		const { createServer } = await import('node:http')
+		const srv = createServer((_req, res) => setTimeout(() => res.end('<title>ok</title>'), 4_000))
+		const port = await new Promise<number>((r) => srv.listen(0, '127.0.0.1', () => r((srv.address() as { port: number }).port)))
+		try {
+			const execDetached = vi.fn(async () => undefined)
+			const sandbox = { getHostPort: async () => port, exec: async () => ({ output: '', exitCode: 0 }), execDetached }
+			const tool = createBrowserTool({ sandbox: sandbox as never, launch: async () => ({ page: fakePage(), close: async () => {} }) })
+			const res = await tool.call({ op: 'open' }, {} as never)
+			expect(res.isError).toBeFalsy()
+			expect(execDetached).not.toHaveBeenCalled() // the restart path is what killed the VM agent's Vite
+		} finally {
+			srv.closeAllConnections()
+			srv.close()
+		}
+	}, 20_000)
+})
+
+// ADR-090 §1/§3 — USE the main flow once: type into a field, then an audit that catches a page the crash blanked.
+describe('Browser type + blank-page audit (ADR-090)', () => {
+	it('type fills the field and presses Enter when submit is set', async () => {
+		const f = stubFetch(true)
+		const typeInto = vi.fn(async () => undefined)
+		const tool = createBrowserTool({ sandbox: fakeSandbox(), launch: async () => ({ page: fakePage({ typeInto }), close: async () => {} }) })
+		await tool.call({ op: 'open' }, {} as never)
+		const res = await tool.call({ op: 'type', target: 'Message your assistant', text: 'what is this?', submit: true }, {} as never)
+		expect(res.isError).toBeFalsy()
+		expect(typeInto).toHaveBeenCalledWith('Message your assistant', 'what is this?', true)
+		expect(res.content).toContain('pressed Enter')
+		const missing = await tool.call({ op: 'type', target: 'x' }, {} as never)
+		expect(missing.isError).toBe(true) // no text
+		f.mockRestore()
+	})
+	it('audit FAILS a page that rendered nothing and shows the console error', async () => {
+		const f = stubFetch(true)
+		const page = fakePage({
+			evaluate: async () => ({ pageHeight: 0, steps: [{ y: 0, visible: 0, invisible: 0 }], stuckSamples: [], css: { sheets: 1, bodyFont: 'Geist', bodyBg: 'rgb(255,255,255)' }, textLen: 0 }),
+			consoleErrors: () => ['TypeError: o is not a function'],
+		})
+		const tool = createBrowserTool({ sandbox: fakeSandbox(), launch: async () => ({ page, close: async () => {} }) })
+		await tool.call({ op: 'open' }, {} as never)
+		const res = await tool.call({ op: 'audit' }, {} as never)
+		expect(res.isError).toBe(true)
+		expect(res.content).toContain('rendered (almost) nothing')
+		expect(res.content).toContain('o is not a function')
+		expect(res.content).not.toContain('PASS')
+		f.mockRestore()
+	})
+})

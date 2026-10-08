@@ -66,7 +66,9 @@ export class PreviewManager {
 			await runtime.startDev(env)
 
 			const url = `http://localhost:${hostPort}` // direct url; wsServer rewrites it to the proxy origin
-			if (await waitForHttp(url, 60_000)) return set({ status: 'running', url })
+			// ADR-089 §1: stop waiting the moment the launch has died — its log already holds the reason.
+			const died = () => runtime.devExited?.() ?? false
+			if (await waitForHttp(url, 60_000, died)) return set({ status: 'running', url })
 
 			// The dev server did not answer where we asked. On the HOST that is recoverable: `--port` is only a
 			// request, and a dev script that is not bare `vite` (a `concurrently` wrapper, say) never forwards
@@ -75,7 +77,7 @@ export class PreviewManager {
 			// container publishes exactly one port, so anywhere else is reachable from nowhere.
 			// WSL drifts like the host: localhostForwarding serves whatever port Vite actually bound, so a
 			// drifted port is still reachable — follow the log's truth rather than declaring failure.
-			if (runtime.kind === 'host' || runtime.kind === 'wsl') {
+			if (!died() && (runtime.kind === 'host' || runtime.kind === 'wsl')) {
 				const actual = parseDevPort(await runtime.devLog(40).catch(() => ''))
 				if (actual && actual !== hostPort) {
 					const actualUrl = `http://localhost:${actual}`
@@ -137,9 +139,10 @@ export function devServerError(log: string): string | undefined {
 }
 
 /** Poll a URL until it answers (any HTTP response = the dev server is listening) or we time out. */
-async function waitForHttp(url: string, timeoutMs: number): Promise<boolean> {
+async function waitForHttp(url: string, timeoutMs: number, stop?: () => boolean): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs
 	while (Date.now() < deadline) {
+		if (stop?.()) return false
 		try {
 			await fetch(url, { signal: AbortSignal.timeout(2000) })
 			return true

@@ -82,7 +82,7 @@ export const BUILDER_BEHAVIOR = [
   // SHELL command and a braced TOOL call, "TemplateAudit clean" read as a CLI — the model burned three
   // turns on `npx template-audit`, `npx -y @<some-scope>/template-audit`, `grep -i audit package.json`
   // before finding the tool. Every rung now carries its own call syntax, so the kind is unambiguous.
-  '- Done means, in order: `npm run build` green (the declared check) → TemplateAudit {} clean (zero HARD findings — no demo residue, no unreplaced placeholders; it is a TOOL you call, not a shell command) → Browser {op:"open"} loads → Browser {op:"audit"} clean (no invisible content, CSS loaded, no console errors). Then end the turn.',
+  '- Done means, in order: `npm run build` green (the declared check) → TemplateAudit {} clean (zero HARD findings — no demo residue, no unreplaced placeholders; it is a TOOL you call, not a shell command) → Browser {op:"open"} loads → Browser {op:"audit"} clean (no invisible content, CSS loaded, no console errors) → USE the main flow once (Browser {op:"type"}/{op:"click"}: send the message, add the item, submit the form, start the game) → Browser {op:"audit"} again: a console error or a blank page after that interaction means the app is broken, not done. Then end the turn.',
   // Batch-3 (critique): "only end when green" + "never ask" had no legal exit when green is impossible —
   // which contradicted "Report faithfully". The honest red is that exit; the gates bound the loop anyway.
   '- If the build still fails after 3 distinct fix attempts on the SAME error, stop: report the exact final error, what you tried, and what was completed. An honest red build is a valid ending; a loop is not.',
@@ -143,7 +143,7 @@ export const BUILDER_BEHAVIOR_FREE = [
   '- Persistence is the browser (localStorage) unless PLAN.md says otherwise. If the app truly needs a server, build it yourself (ApplyPack and the template\'s backend pack do not exist here) and keep `npm run dev` the single entry point that starts everything.',
   '',
   '## Verifying the running app',
-  '- Done means, in order: `npm run build` green → Browser {op:"open"} loads → Browser {op:"audit"} clean (no console errors, no content stuck invisible) → with vision, Browser {op:"screenshot"} of the main views, and fix what looks off.',
+  '- Done means, in order: `npm run build` green → Browser {op:"open"} loads → Browser {op:"audit"} clean (no console errors, no content stuck invisible) → use the main flow once with Browser {op:"type"}/{op:"click"}, then audit again → with vision, Browser {op:"screenshot"} of the main views, and fix what looks off.',
   sharedRule('- If the build still fails after 3 distinct fix attempts'),
   sharedRule('- When your own checks disagree with reality'),
   sharedRule('- To see the app run, use Browser {op:"open"}'),

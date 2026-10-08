@@ -40,6 +40,11 @@ export interface ProjectRuntime extends Sandbox {
 	 *  must not prevent starting a new one. */
 	stopDev(): Promise<void>
 
+	/** ADR-089 §1: has the process startDev launched already EXITED? A dev server never exits on its own, so true
+	 *  means the launch failed (measured: `'npm.cmd' is not recognized`, dead in under a second, while the
+	 *  callers polled for 30–60 s). Optional: runtimes that cannot tell simply never short-circuit the wait. */
+	devExited?(): boolean
+
 	/** The last `lines` lines of the dev server's log, for diagnosing a failed start. '' when there is none. */
 	devLog(lines: number): Promise<string>
 

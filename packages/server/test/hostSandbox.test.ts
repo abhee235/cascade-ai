@@ -6,11 +6,12 @@
 
 import { describe, expect, it } from 'vitest'
 import { spawn } from 'node:child_process'
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { HostSandbox, hostBashPath, sweepHostDevServers } from '../src/hostSandbox'
+import { HostSandbox, hostBashPath, sweepHostDevServers, systemInstallRefusal } from '../src/hostSandbox'
+import { resetToolchainCache } from '../src/toolchains'
 import { devServerError } from '../src/previewManager'
 
 const project = () => mkdtempSync(join(tmpdir(), 'cascade-host-'))
@@ -350,4 +351,91 @@ describe('sweepHostDevServers — startup reclaim across ALL projects (measured:
 	it('a missing projects root sweeps nothing and does not throw', async () => {
 		expect(await sweepHostDevServers(join(tmpdir(), 'does-not-exist-' + Date.now()))).toBe(0)
 	})
+})
+
+// ADR-088 §3 — measured on the v0.1.0 VM: an unprompted `winget install … --accept-package-agreements`.
+describe('systemInstallRefusal — no machine-wide installs from host mode', () => {
+	it.each([
+		'winget install --id OpenJS.NodeJS.LTS --silent',
+		'winget.exe list',
+		'mkdir x && choco install python',
+		'cd app; sudo apt-get install -y ffmpeg',
+		'brew install go',
+		'msiexec /i node.msi /qn',
+		'powershell -NoProfile -Command "winget install Python.Python.3.12"',
+		'echo a | scoop install nodejs',
+	])('refuses %s', (cmd) => {
+		expect(systemInstallRefusal(cmd)).toMatch(/mise\.toml/)
+	})
+	it.each(['npm install', 'pip install requests', 'npx tsc --noEmit', 'grep -r apt src', 'echo "adapter" && node brewery.js', 'git commit -m "fix sudoku"'])(
+		'allows %s',
+		(cmd) => {
+			expect(systemInstallRefusal(cmd)).toBeUndefined()
+		},
+	)
+	it('exec returns the refusal without running anything', async () => {
+		const dir = project()
+		const res = await new HostSandbox(dir).exec('winget install foo && echo ran > ran.txt')
+		expect(res.exitCode).toBe(1)
+		expect(res.output).toMatch(/^Refused: system package managers/)
+		expect(existsSync(join(dir, 'ran.txt'))).toBe(false)
+	})
+})
+
+// ADR-088 §2 — the product provisions mise.toml, unconfined, once per change. The stand-in "mise" is a copy of
+// node: `mise install` then runs node on a missing script and exits non-zero, so each provision attempt is
+// visible as the failure note, and a skipped one as its absence.
+describe('exec provisions an edited mise.toml before the command', () => {
+	it('runs mise install only when mise.toml changed', async () => {
+		const saved = process.env.CASCADE_MISE_PATH
+		const bin = mkdtempSync(join(tmpdir(), 'cascade-fakemise-'))
+		const fake = join(bin, isWindows ? 'mise.exe' : 'mise')
+		copyFileSync(process.execPath, fake)
+		process.env.CASCADE_MISE_PATH = fake
+		resetToolchainCache()
+		try {
+			const dir = project()
+			const sb = new HostSandbox(dir)
+			expect((await sb.exec('echo one')).output).not.toMatch(/mise install/) // no mise.toml ⇒ nothing to do
+			writeFileSync(join(dir, 'mise.toml'), '[tools]\npython = "3.12"\n')
+			expect((await sb.exec('echo two')).output).toMatch(/could not install the toolchains/)
+			const third = await sb.exec('echo three')
+			expect(third.output).not.toMatch(/could not install/) // unchanged ⇒ one stat, no provision
+			expect(third.output).toMatch(/three/)
+			writeFileSync(join(dir, 'mise.toml'), '[tools]\npython = "3.13"\ngo = "1.23"\n')
+			expect((await sb.exec('echo four')).output).toMatch(/could not install the toolchains/)
+		} finally {
+			if (saved === undefined) delete process.env.CASCADE_MISE_PATH
+			else process.env.CASCADE_MISE_PATH = saved
+			resetToolchainCache()
+		}
+	}, 60_000)
+})
+
+// ADR-088 §5 — what the v0.1.0 VM agent had to discover by trial: the shell, the node it gets, the preview port.
+describe('environmentFacts — stated, not discovered', () => {
+	it('names the shell, the toolchain and (once reserved) the preview port, and stays stable', async () => {
+		const sb = new HostSandbox(project())
+		const before = sb.environmentFacts
+		expect(before[0]).toMatch(/^Shell: Bash runs /)
+		expect(before[1]).toMatch(/^Toolchain: node v\d+.* and npm \d/) // the test runner's own node is on PATH
+		expect(before.some((l) => l.startsWith('Preview:'))).toBe(false)
+		expect(sb.environmentFacts).toBe(before) // cached: same array, no re-probe
+		const port = await sb.previewPort()
+		expect(sb.environmentFacts.at(-1)).toBe(`Preview: the Preview pane serves the dev server at http://localhost:${port} — that is the app's port, whatever package.json says.`)
+	}, 30_000)
+})
+
+// ADR-089 §1 — the v0.1.0 VM: no npm, the launch shell died in under a second, the callers waited 30–60 s.
+describe('devExited — a failed launch is visible at once', () => {
+	it('turns true when npm cannot be found', async () => {
+		const sb = new HostSandbox(project())
+		writeFileSync(join(sb.root, 'package.json'), '{"scripts":{"dev":"vite"}}')
+		await sb.startDev({ PATH: mkdtempSync(join(tmpdir(), 'empty-path-')) })
+		const t0 = Date.now()
+		while (!sb.devExited() && Date.now() - t0 < 10_000) await new Promise((r) => setTimeout(r, 100))
+		expect(sb.devExited()).toBe(true)
+		expect(await sb.devLog(5)).toMatch(/not recognized|not found/i)
+		await sb.stopDev()
+	}, 20_000)
 })

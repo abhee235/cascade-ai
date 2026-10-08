@@ -14,7 +14,7 @@
 // spawn — Git Bash (posix) when it can be found, cmd.exe (win32) as the fallback — so the loop advertises
 // the right syntax either way.
 
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { createReadStream, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, watch, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { connect, createServer } from 'node:net'
@@ -98,12 +98,35 @@ export class HostSandbox implements ProjectRuntime {
 		return localBackendClaims().denialSignatures
 	}
 
+	/** ADR-088 §5: the facts the v0.1.0 VM run had to discover by trial — 9 Bash calls hunting for node, curls to
+	 *  port 5173 while the preview was on 52942. Computed once (the toolchain probe spawns), recomputed only when the
+	 *  preview port first becomes known, so the prompt prefix changes at most once per session. */
+	get environmentFacts(): readonly string[] {
+		if (this.facts && this.facts.port === this.reservedPort) return this.facts.lines
+		this.toolchainLine ??= probeToolchainLine(this.projectDir)
+		const shellLine = !isWindows
+			? 'Shell: Bash runs /bin/sh (POSIX syntax).'
+			: hostBash
+				? 'Shell: Bash runs bash (POSIX syntax, Git Bash on Windows) — not cmd.exe or PowerShell.'
+				: 'Shell: Bash runs Windows cmd.exe — cmd syntax only (no bash/PowerShell syntax; `&&` chains, `2>nul`).'
+		const lines = [shellLine, this.toolchainLine]
+		if (this.reservedPort) lines.push(`Preview: the Preview pane serves the dev server at http://localhost:${this.reservedPort} — that is the app's port, whatever package.json says.`)
+		this.facts = { port: this.reservedPort, lines }
+		return lines
+	}
+	private facts?: { port: number | undefined; lines: string[] }
+	private toolchainLine?: string
+
 	async exec(command: string, opts: ExecOptions = {}): Promise<ExecResult> {
 		// The SAME refusal Docker mode has had all along, and host mode was missing — which is exactly how a
 		// desktop trace ended with the model starting its own dev server via `start /b` and hanging the turn:
 		// the Preview owns the dev server in BOTH runtimes, and a second one binds a port nothing is watching.
-		const refusal = devServerRefusal(command)
+		const refusal = devServerRefusal(command, 'host') ?? systemInstallRefusal(command)
 		if (refusal) return { output: refusal, exitCode: 1 }
+		// ADR-088 §2: a mise.toml the agent just edited is provisioned HERE, by the product and unconfined — mise
+		// installs into Cascade's prefix, outside the workspace, so the same `mise install` run by the agent
+		// inside the fence would be a denied write.
+		const toolchainNote = await this.provisionToolchainsIfChanged(opts.onData)
 		// ADR-070 step 4/6: wrap the MODEL's command in the platform's confinement (Seatbelt/bwrap, or the
 		// Windows write-fence) per the call's policy. Passthrough when no policy / danger-full-access / no
 		// usable backend — so an unconfigured host path is byte-identical, and product-owned commands
@@ -118,8 +141,24 @@ export class HostSandbox implements ProjectRuntime {
 		}
 		// The fence uses argv form: spawn its runner from runnerCwd (where `tsx` resolves), NOT the project
 		// workspace — the runner sets the CHILD's cwd to the workspace itself via its --workspace flag.
-		if (confined.argv) return run(confined.command, confined.runnerCwd ?? this.projectDir, { ...opts, env: confined.env }, confined.argv)
-		return run(confined.command, opts.cwd ?? this.projectDir, opts)
+		const res = confined.argv
+			? await run(confined.command, confined.runnerCwd ?? this.projectDir, { ...opts, env: confined.env }, confined.argv)
+			: await run(confined.command, opts.cwd ?? this.projectDir, opts)
+		return toolchainNote ? { ...res, output: `${toolchainNote}\n${res.output}` } : res
+	}
+
+	/** mise.toml's last provisioned state (`mtime:size`, '' = no file). Undefined until first checked. */
+	private toolchainStamp?: string
+
+	/** Run `mise install` when mise.toml changed since the last provision. Returns a note for the model only when
+	 *  provisioning FAILED — success is silent, so an unchanged file costs one stat per command. */
+	private async provisionToolchainsIfChanged(onData?: (chunk: string) => void): Promise<string | undefined> {
+		const stamp = miseTomlStamp(this.projectDir)
+		if (stamp === this.toolchainStamp) return undefined
+		this.toolchainStamp = stamp
+		if (!stamp) return undefined
+		const ok = await installProjectToolchains(this.projectDir, onData)
+		return ok ? undefined : '! Cascade could not install the toolchains declared in mise.toml (`mise install` failed). Check the tool names and versions there.'
 	}
 
 	/**
@@ -159,6 +198,7 @@ export class HostSandbox implements ProjectRuntime {
 		// are best-effort no-ops without mise — the host path must keep working on a bare machine.
 		ensureProjectToolchainConfig(this.projectDir)
 		await installProjectToolchains(this.projectDir, onData)
+		this.toolchainStamp = miseTomlStamp(this.projectDir) // provisioned just now — the next exec need not repeat it
 		const res = await run('npm install --no-audit --no-fund', this.projectDir, { onData })
 		return res.exitCode === 0
 	}
@@ -196,6 +236,12 @@ export class HostSandbox implements ProjectRuntime {
 			windowsHide: true,
 		})
 		child.unref()
+		// ADR-089 §1: remember an exit of THIS launch (a stopped predecessor's exit must not count — stopDev clears
+		// this.dev first, so the pid check fails for it).
+		this.devDead = false
+		child.once('exit', () => {
+			if (this.dev?.pid === child.pid) this.devDead = true
+		})
 		if (child.pid) {
 			this.dev = { pid: child.pid, port }
 			try {
@@ -204,6 +250,12 @@ export class HostSandbox implements ProjectRuntime {
 				/* an unwritable project loses reclaim-after-restart, not the dev server */
 			}
 		}
+	}
+
+	private devDead = false
+
+	devExited(): boolean {
+		return this.devDead
 	}
 
 	async stopDev(): Promise<void> {
@@ -347,6 +399,51 @@ export async function sweepHostDevServers(root: string): Promise<number> {
 		await new HostSandbox(dir).stopDev().catch(() => {})
 	}
 	return swept
+}
+
+/** ADR-088 §3: machine-wide package managers, at any command position (start, after ; & | && || ( or a quote,
+ *  which catches `powershell -c "winget …"`). They change the user's machine outside the project and accept
+ *  licence agreements on the user's behalf — measured: an unprompted `winget install … --accept-package-agreements`. */
+const SYSTEM_INSTALLER_RE = /(?:^|[;&|("'])\s*(?:sudo|winget|choco|scoop|msiexec|brew|apt|apt-get|dnf|yum|pacman)(?:\.exe)?(?=\s|$|["'])/i
+
+export function systemInstallRefusal(command: string): string | undefined {
+	if (!SYSTEM_INSTALLER_RE.test(command)) return undefined
+	return (
+		'Refused: system package managers (winget, choco, msiexec, brew, apt, sudo…) change the user\'s machine outside ' +
+		'this project. To get a language or tool, declare it in mise.toml at the project root (e.g. `python = "3.12"` ' +
+		'under [tools]) and run your command again — Cascade installs it for this project automatically. npm/pip ' +
+		'packages install normally inside the project.'
+	)
+}
+
+/** One line naming the node/npm the agent's commands will resolve (bundled Node + mise shims first). When there
+ *  is none, the line says so AND what to do — measured: without it the agent spent 9.5 minutes installing Node
+ *  itself, into a place the Preview could not use. */
+function probeToolchainLine(dir: string): string {
+	const probe = spawnSync('node --version && npm --version', {
+		cwd: dir,
+		shell: true,
+		windowsHide: true,
+		encoding: 'utf8',
+		timeout: 15_000,
+		env: { ...process.env, ...toolchainEnv() },
+	})
+	const [node, npm] = (probe.stdout ?? '').trim().split(/\r?\n/)
+	if (probe.status === 0 && node?.startsWith('v') && npm) return `Toolchain: node ${node} and npm ${npm} are on the command PATH. Other languages: declare them in mise.toml (see the Bash refusal text).`
+	return 'Toolchain: node/npm are NOT available on this machine. Do not download or install them yourself — tell the user Cascade\'s bundled toolchain is missing and stop.'
+}
+
+/** `mtime:size` of the project's mise config, '' when there is none — cheap change detection for provisioning. */
+function miseTomlStamp(dir: string): string {
+	for (const name of ['mise.toml', '.mise.toml']) {
+		try {
+			const st = statSync(join(dir, name))
+			return `${st.mtimeMs}:${st.size}`
+		} catch {
+			/* try the next name */
+		}
+	}
+	return ''
 }
 
 /** npm is a .cmd shim on Windows and only resolves through a shell — hence `shell: true` at the call site. */
