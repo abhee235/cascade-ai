@@ -96,31 +96,33 @@ Open **http://localhost:5319** and describe what you want to build.
 
 ## Features
 
+Everything is built in. There is nothing else to install, not even a code editor.
+
 | | |
 |---|---|
-| **Live preview, code and terminal** | Preview the running app at desktop, tablet or phone size, edit the code directly, open a terminal inside the project's container, and restore any earlier version. |
-| **A real agent, not a prompt wrapper** | A full agent loop with tools, permissions, sub-agents, memory and context compaction — tuned to get whole apps out of local models. |
-| **Model manager** | Curate the models in your picker, and set the context window, output length and sampling for each one. Changes apply on the next turn. |
-| **Connectors (MCP)** | Give the agent extra abilities — web search, live library docs, GitHub docs and more — or add any MCP server by URL. |
+| **Code editor** | Read and edit every file in the project right inside Cascade: a file tree, tabs, and the same editor that powers VS Code. No separate IDE needed. |
+| **Live preview, terminal and versions** | Preview the running app at desktop, tablet or phone size, run commands in the project's terminal, and restore any earlier version. |
+| **A real agent, not a prompt wrapper** | A full agent loop with tools, permissions, sub-agents, memory and context compaction, tuned to get whole apps out of local models. |
 | **Observatory** | Every turn is traced to a file on your disk: each model call, tool call and token count, viewable in the app. No extra service to run. |
+| **Connectors (MCP)** | Give the agent extra abilities (web search, live library docs, GitHub docs and more) or add any MCP server by URL. |
+| **Model manager** | Curate the models in your picker, and set the context window, output length and sampling for each one. Changes apply on the next turn. |
 | **VS Code extension** | The same engine inside your editor, working on your own repositories. |
 
+<table>
+  <tr>
+    <td width="50%"><b>Code editor</b>: the Velocarta store's code, editable in place<br><img src="docs/images/readme/code-editor.png" alt="Cascade's built-in code editor showing the Velocarta project's file tree and HomeView.tsx"></td>
+    <td width="50%"><b>Observatory</b>: every model and tool call on the record<br><img src="site/public/assets/observatory.webp" alt="Cascade's Observatory: a timeline of model and tool calls with full input and output"></td>
+  </tr>
+  <tr>
+    <td width="50%"><b>Connectors</b>: add MCP tools in one click<br><img src="docs/guide/images/04-connectors.png" alt="Cascade's connectors page with Tavily, Context7, DeepWiki, GitMCP and Hugging Face"></td>
+    <td width="50%"><b>Model manager</b>: tune each model's context and sampling<br><img src="docs/guide/images/03-model-manager.png" alt="Cascade's model manager: a list of local and hosted models with context window and sampling controls"></td>
+  </tr>
+</table>
+
 <details>
-<summary><b>Screenshots</b></summary>
+<summary><b>VS Code extension</b></summary>
 <br>
-
-**Model manager:** pick models and tune them per project.
-<img src="docs/guide/images/03-model-manager.png" alt="Cascade's model manager: a list of local and hosted models with context window and sampling controls">
-
-**Connectors:** add MCP tools like web search and live documentation.
-<img src="docs/guide/images/04-connectors.png" alt="Cascade's connectors page with Tavily, Context7, DeepWiki, GitMCP and Hugging Face">
-
-**Observatory:** every turn on the record.
-<img src="site/public/assets/observatory.webp" alt="Cascade's Observatory: a timeline of model and tool calls with full input and output">
-
-**VS Code extension:** the same agent in your editor.
 <img src="docs/guide/images/11-extension-chat.png" alt="The Cascade VS Code extension chat panel" width="420">
-
 </details>
 
 ## Models
