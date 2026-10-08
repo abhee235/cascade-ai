@@ -4,11 +4,15 @@
 //
 // Renders the mark procedurally (no design tool, no asset to lose): a dark rounded-square field with
 // three luminous bars stepping down and to the right — water descending a terrace, the literal cascade.
+// The bars STAND (vertical), matching the SVG mark in the app sidebar, the site header and favicon.svg. BARS
+// below is written in a lying-down frame and rendered TRANSPOSED (x↔y): the first version drew them lying down,
+// so the app icon, the README logo and apple-touch-icon read as the mark turned 90°.
 // One 1024px master is rendered with analytic anti-aliasing (signed-distance coverage, ~1px feather),
 // then box-resampled to every size each platform wants. Outputs, all into packages/desktop/build/:
 //   icon.png   512px  (Linux / BrowserWindow / anything that takes a PNG)
 //   icon.ico   16+32+48+64+128+256 as embedded PNGs (Windows: exe + installer)
 //   icon.icns  16..1024 as embedded PNGs (macOS bundle)
+//   install.gif 320px animation — Squirrel's loadingGif, shown while CascadeSetup.exe unpacks (ADR-091 §2)
 //
 // Everything is written by hand — PNG encoder (zlib + CRC32), ICO directory, ICNS chunks — because the
 // formats are trivial containers for PNG data and a devDependency for three small files is not worth it.
@@ -45,7 +49,9 @@ const BAR_H = 132
 const BAR_R = 66
 
 /** Render the master as RGBA (premultiplied nowhere — straight alpha). */
-function renderMaster() {
+/** `fill[i]` (0..1) grows bar i from its top — the install animation; `masked` = the rounded-square field
+ *  (the GIF fills the whole frame instead: Squirrel's loading window has no transparency). */
+function renderMaster(fill = [1, 1, 1], masked = true) {
 	const S = MASTER
 	const img = new Uint8Array(S * S * 4)
 	const margin = 36
@@ -55,18 +61,22 @@ function renderMaster() {
 		for (let x = 0; x < S; x++) {
 			const px = x + 0.5
 			const py = y + 0.5
-			const aBg = cov(sdRoundRect(px, py, S / 2, S / 2, bgHalf, bgHalf, bgR))
+			const aBg = masked ? cov(sdRoundRect(px, py, S / 2, S / 2, bgHalf, bgHalf, bgR)) : 1
 			if (aBg <= 0) continue
 			// Field: vertical gradient, deep indigo into near-black — the water at night.
 			const t = py / S
 			let r = lerp(0x1d, 0x0b, t)
 			let g = lerp(0x2a, 0x11, t)
 			let b = lerp(0x5e, 0x20, t)
-			// Bars, painted over the field with their own soft edges and a left→right lighten.
-			for (const bar of BARS) {
-				const a = cov(sdRoundRect(px, py, bar.x + bar.w / 2, bar.y + BAR_H / 2, bar.w / 2, BAR_H / 2, BAR_R))
+			// Bars, painted over the field with their own soft edges and a top→bottom lighten.
+			for (const [bi, base] of BARS.entries()) {
+				if (fill[bi] <= 0) continue
+				const bar = { ...base, w: base.w * Math.min(1, fill[bi]) } // grows downward: top edge fixed
+				if (bar.w < BAR_R * 2) bar.w = BAR_R * 2 // a pill is never shorter than its own rounded ends
+				// Transposed: sample the lying-down bar at (py, px), so it renders standing; its colour runs top→bottom.
+				const a = cov(sdRoundRect(py, px, bar.x + bar.w / 2, bar.y + BAR_H / 2, bar.w / 2, BAR_H / 2, BAR_R))
 				if (a <= 0) continue
-				const u = Math.min(1, Math.max(0, (px - bar.x) / bar.w))
+				const u = Math.min(1, Math.max(0, (py - bar.x) / bar.w))
 				const br = lerp(bar.c0[0], bar.c1[0], u)
 				const bg2 = lerp(bar.c0[1], bar.c1[1], u)
 				const bb = lerp(bar.c0[2], bar.c1[2], u)
@@ -213,6 +223,121 @@ function encodeIcns(pngBySize) {
 	return Buffer.concat([head, body])
 }
 
+// ── GIF (ADR-091 §2: Squirrel's loadingGif) ────────────────────────────────────────────────────────────
+//
+// GIF89a with ONE global palette for every frame and "uncompressed" LZW: each pixel is emitted as its own 9-bit
+// code with a clear code every 254 codes, so the dictionary never grows past 9 bits. Valid for every decoder,
+// ~10 lines instead of a real LZW, and the file is a one-off ~1–2 MB inside a 400 MB installer.
+
+/** Shared palette: the 256 most common 5-bit-per-channel buckets across all frames, each its bucket's mean. */
+function buildPalette(frames) {
+	const hist = new Map()
+	for (const f of frames) {
+		for (let i = 0; i < f.length; i += 4) {
+			const k = ((f[i] >> 3) << 10) | ((f[i + 1] >> 3) << 5) | (f[i + 2] >> 3)
+			const h = hist.get(k) ?? { n: 0, r: 0, g: 0, b: 0 }
+			h.n++
+			h.r += f[i]
+			h.g += f[i + 1]
+			h.b += f[i + 2]
+			hist.set(k, h)
+		}
+	}
+	const top = [...hist.values()].sort((x, y) => y.n - x.n).slice(0, 256)
+	return top.map((h) => [Math.round(h.r / h.n), Math.round(h.g / h.n), Math.round(h.b / h.n)])
+}
+
+function nearestIndex(palette, r, g, b) {
+	let best = 0
+	let bestD = Infinity
+	for (let i = 0; i < palette.length; i++) {
+		const [pr, pg, pb] = palette[i]
+		const d = (pr - r) ** 2 + (pg - g) ** 2 + (pb - b) ** 2
+		if (d < bestD) {
+			bestD = d
+			best = i
+		}
+	}
+	return best
+}
+
+/** Pack 9-bit codes LSB-first into GIF sub-blocks (≤255 bytes each). */
+function lzwUncompressed(indices) {
+	const CLEAR = 256
+	const EOI = 257
+	const bytes = []
+	let acc = 0
+	let nbits = 0
+	const put = (code) => {
+		acc |= code << nbits
+		nbits += 9
+		while (nbits >= 8) {
+			bytes.push(acc & 0xff)
+			acc >>>= 8
+			nbits -= 8
+		}
+	}
+	put(CLEAR)
+	for (let i = 0; i < indices.length; i++) {
+		if (i > 0 && i % 254 === 0) put(CLEAR) // before the decoder would widen to 10 bits
+		put(indices[i])
+	}
+	put(EOI)
+	if (nbits > 0) bytes.push(acc & 0xff)
+	const out = [8] // LZW minimum code size
+	for (let i = 0; i < bytes.length; i += 255) {
+		const chunk = bytes.slice(i, i + 255)
+		out.push(chunk.length, ...chunk)
+	}
+	out.push(0)
+	return out
+}
+
+/** frames: [{ rgba, delayCs }] at `size`², looping forever. */
+function encodeGif(frames, size) {
+	const palette = buildPalette(frames.map((f) => f.rgba))
+	while (palette.length < 256) palette.push([0, 0, 0])
+	const out = [...Buffer.from('GIF89a'), size & 0xff, size >> 8, size & 0xff, size >> 8, 0xf7, 0, 0]
+	for (const [r, g, b] of palette) out.push(r, g, b)
+	out.push(0x21, 0xff, 0x0b, ...Buffer.from('NETSCAPE2.0'), 3, 1, 0, 0, 0) // loop forever
+	const cache = new Map()
+	for (const { rgba, delayCs } of frames) {
+		out.push(0x21, 0xf9, 4, 0x04, delayCs & 0xff, delayCs >> 8, 0, 0) // disposal: leave in place
+		out.push(0x2c, 0, 0, 0, 0, size & 0xff, size >> 8, size & 0xff, size >> 8, 0)
+		const idx = new Array(size * size)
+		for (let p = 0; p < size * size; p++) {
+			const r = rgba[p * 4]
+			const g = rgba[p * 4 + 1]
+			const b = rgba[p * 4 + 2]
+			const k = (r << 16) | (g << 8) | b
+			let v = cache.get(k)
+			if (v === undefined) {
+				v = nearestIndex(palette, r, g, b)
+				cache.set(k, v)
+			}
+			idx[p] = v
+		}
+		for (const byte of lzwUncompressed(idx)) out.push(byte)
+	}
+	out.push(0x3b)
+	return Buffer.from(out)
+}
+
+/** The install animation: the bars grow in one after another, hold, and start over. */
+function renderInstallGif(size = 320) {
+	const frames = []
+	const STEPS = 6 // frames per bar
+	for (let bar = 0; bar < BARS.length; bar++) {
+		for (let s = 1; s <= STEPS; s++) {
+			const fill = BARS.map((_, i) => (i < bar ? 1 : i === bar ? s / STEPS : 0))
+			frames.push({ rgba: resample(renderMaster(fill, false), MASTER, size), delayCs: 6 })
+		}
+	}
+	frames[frames.length - 1].delayCs = 90 // hold the full mark before looping
+	frames.unshift({ rgba: resample(renderMaster([0, 0, 0], false), MASTER, size), delayCs: 20 })
+	return encodeGif(frames, size)
+}
+
 // ── run ────────────────────────────────────────────────────────────────────────────────────────────────
 
 const master = renderMaster()
@@ -226,4 +351,5 @@ mkdirSync(OUT, { recursive: true })
 writeFileSync(join(OUT, 'icon.png'), pngBySize.get(512))
 writeFileSync(join(OUT, 'icon.ico'), encodeIco([16, 32, 48, 64, 128, 256].map((size) => ({ size, png: pngBySize.get(size) }))))
 writeFileSync(join(OUT, 'icon.icns'), encodeIcns(pngBySize))
-for (const f of ['icon.png', 'icon.ico', 'icon.icns']) console.log(`wrote build/${f}`)
+writeFileSync(join(OUT, 'install.gif'), renderInstallGif())
+for (const f of ['icon.png', 'icon.ico', 'icon.icns', 'install.gif']) console.log(`wrote build/${f}`)
