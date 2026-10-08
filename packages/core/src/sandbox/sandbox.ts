@@ -56,6 +56,10 @@ export interface Sandbox {
    *  layer classifies confined output with these (step 2) so a policy denial is recognized identically
    *  across backends — and never confused with an ordinary command failure. Absent ⇒ no classification. */
   readonly denialSignatures?: readonly string[]
+  /** ADR-088 §5: facts about this runtime the model cannot discover cheaply and must not guess — which shell
+   *  Bash really runs, whether node/npm exist, the preview port. One line each, rendered under # Environment.
+   *  Must be STABLE across turns (cached): it is part of the prompt prefix. Absent ⇒ no lines. */
+  readonly environmentFacts?: readonly string[]
   /** Run a shell command inside the isolated environment, streaming output via opts.onData. */
   exec(command: string, opts?: ExecOptions): Promise<ExecResult>
   /** Tear down the environment (e.g. stop/remove the container). Safe to call more than once. */

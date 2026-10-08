@@ -50,6 +50,8 @@ export interface SystemPromptInput {
    *  the model knows the mode without tool-description bloat. Absent ⇒ no line (frontends that don't opt
    *  in — the extension — keep byte-identical prompts). */
   sandboxPolicy?: import('../sandbox/policy').SandboxPolicy
+  /** ADR-088 §5: runtime facts from the sandbox (see Sandbox.environmentFacts), one line each. */
+  environmentFacts?: readonly string[]
 }
 
 // ── Sections (each returns markdown; some collapse or drop at smaller tiers) ─────────────────────────────────
@@ -144,7 +146,7 @@ function coreRulesDigest(): string {
 Read a file before editing it. Verify changes by running them and report failures honestly — never claim success you didn't confirm. Prefer the dedicated tools (Read/Edit/Write/Glob/Grep) over Bash. Plan 3+-step work with TodoWrite. Be concise; cite code as file_path:line_number. Your older tool results get condensed — note key facts before they're gone.`
 }
 
-function environment(cwd: string, sandboxRoot?: string, sandboxPolicy?: SandboxPolicy): string {
+function environment(cwd: string, sandboxRoot?: string, sandboxPolicy?: SandboxPolicy, facts: readonly string[] = []): string {
   const today = new Date().toISOString().slice(0, 10)
   // Show ONE coherent root: the in-sandbox mount when sandboxed (so Bash + the model + file tools all agree),
   // otherwise the host cwd. Either way, instruct relative paths — they always land in the project (ADR-033).
@@ -157,6 +159,7 @@ function environment(cwd: string, sandboxRoot?: string, sandboxPolicy?: SandboxP
     `- Address files by paths relative to the working directory, ALWAYS with forward slashes (e.g. "src/App.tsx" — never "src\\App.tsx", even on Windows). Paths outside the project are rejected.`,
     // ADR-070: the standing file policy, one stable line (see renderSandboxPolicy). Only when supplied.
     ...(sandboxPolicy ? [renderSandboxPolicy(sandboxPolicy)] : []),
+    ...facts.map((f) => `- ${f}`),
   ].join('\n')
 }
 
@@ -190,15 +193,15 @@ function pinnedContext(cwd: string, files: string[]): string {
   return `# Pinned context (kept current every turn)\n${blocks.join('\n\n')}`
 }
 
-export function buildSystemPrompt({ cwd, sandboxRoot, tier = 'full', subagent = false, recalled, extraInstructions, projectContext, skillsSection, contextFiles, sandboxPolicy }: SystemPromptInput): string {
+export function buildSystemPrompt({ cwd, sandboxRoot, tier = 'full', subagent = false, recalled, extraInstructions, projectContext, skillsSection, contextFiles, sandboxPolicy, environmentFacts }: SystemPromptInput): string {
   const agentNote = subagent ? subagentNote() : null // G8: inserted right after intro at every tier
   let sections: (string | null)[]
   if (tier === 'minimal') {
-    sections = [intro(subagent), agentNote, coreRulesDigest(), environment(cwd, sandboxRoot, sandboxPolicy)]
+    sections = [intro(subagent), agentNote, coreRulesDigest(), environment(cwd, sandboxRoot, sandboxPolicy, environmentFacts)]
   } else if (tier === 'lean') {
-    sections = [intro(subagent), agentNote, doingTasks('lean'), usingTools(), toneStyle(), safety(), resultsGetCleared(), systemReminders(), environment(cwd, sandboxRoot, sandboxPolicy)]
+    sections = [intro(subagent), agentNote, doingTasks('lean'), usingTools(), toneStyle(), safety(), resultsGetCleared(), systemReminders(), environment(cwd, sandboxRoot, sandboxPolicy, environmentFacts)]
   } else {
-    sections = [intro(subagent), agentNote, doingTasks('full'), usingTools(), toneStyle(), actingWithCare(), safety(), resultsGetCleared(), systemReminders(), environment(cwd, sandboxRoot, sandboxPolicy)]
+    sections = [intro(subagent), agentNote, doingTasks('full'), usingTools(), toneStyle(), actingWithCare(), safety(), resultsGetCleared(), systemReminders(), environment(cwd, sandboxRoot, sandboxPolicy, environmentFacts)]
   }
   let prompt = sections.filter((s) => s !== null).join('\n\n')
 

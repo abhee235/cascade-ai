@@ -55,12 +55,18 @@ jobs:
         env:
           PLAYWRIGHT_BROWSERS_PATH: packages/desktop/browsers
 
+      # ADR-088: the zero-install sandbox (portable Node, mise; MinGit's bash on Windows). v0.1.0 shipped
+      # without it and a fresh machine could not run npm at all. Verified against upstream SHASUMS.
+      - name: Fetch sandbox binaries
+        run: npx tsx packages/desktop/scripts/fetch-sandbox.mts
+
       # The web build (Monaco + the builder UI) outgrows Node's default heap on the 7 GB macOS runner and
       # died with "JavaScript heap out of memory". 4 GB fits on every runner (Linux and Windows have 16 GB).
       - name: Build (server + web + main into dist/)
         run: npm run build -w @cascade/desktop
         env:
           NODE_OPTIONS: --max-old-space-size=4096
+          CASCADE_REQUIRE_SANDBOX: '1' # ADR-088: a release without its toolchain fails here, not on a user's PC
 
       - name: Package installers
         run: npm run make -w @cascade/desktop

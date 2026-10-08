@@ -205,12 +205,13 @@ const labeledWorkspaces = new Set<string>()
  * The node that HOSTS the fence runner. The bundled portable node (`CASCADE_NODE_DIR/node.exe`, ADR-070
  * Part D) when shipped, else this process's own executable.
  *
- * Load-bearing, not cosmetic: a child created under the restricted token cannot CREATE a console — it
- * dies during DLL init with STATUS_DLL_INIT_FAILED (0xC0000142) — it can only INHERIT one. `node.exe` is a
- * console-subsystem binary, so spawned with `windowsHide` it owns an invisible console the confined
- * `cmd.exe` shares. Electron is a GUI-subsystem binary: even as `ELECTRON_RUN_AS_NODE` it has no console,
- * and every confined command dies with exactly that code (measured on the first packaged build). So the
- * packaged app must never host the runner in itself — the bundled node is the fix, and it is already shipped.
+ * Why the bundled node is preferred: `node.exe` is a console-subsystem binary, so spawned with `windowsHide` it
+ * owns an invisible console the confined `cmd.exe` shares. Electron is a GUI-subsystem binary with no console;
+ * before ADR-088 every confined command hosted there opened a VISIBLE console window (v0.1.0 VM run). The child's
+ * STARTUPINFO now sets STARTF_USESHOWWINDOW + SW_HIDE (winFence.ts). Measured 2026-10-08 with an Electron host:
+ * the v0.1.0 flags open a visible cmd.exe window, the new ones open none, and cmd, a nested piped node child and
+ * npm all run with outside writes denied. (CREATE_NO_WINDOW was tried first and is wrong: a child that has a
+ * console to inherit then dies with STATUS_DLL_INIT_FAILED, 0xC0000142.)
  */
 function fenceHostNode(): string {
 	const dir = process.env.CASCADE_NODE_DIR

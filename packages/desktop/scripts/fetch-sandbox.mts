@@ -66,7 +66,10 @@ async function verify(file: string, name: string, shasums: string): Promise<stri
 /** Extract any archive (.zip / .tar.gz / .tar.xz) with the system tar — bsdtar on Windows 10+ handles all three. */
 function extract(archive: string, dest: string): void {
 	mkdirSync(dest, { recursive: true })
-	execFileSync('tar', ['-xf', archive, '-C', dest], { stdio: 'inherit' })
+	// Windows: System32's bsdtar BY PATH. A bare `tar` can resolve to Git's GNU tar (on PATH on the GitHub runner
+	// and most dev machines), which reads `C:\…` as a remote host ("Cannot connect to C: resolve failed").
+	const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar'
+	execFileSync(tar, ['-xf', archive, '-C', dest], { stdio: 'inherit' })
 }
 
 // ── mise ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -119,6 +122,33 @@ async function fetchNode(): Promise<void> {
 	manifest.node = { version, file: name, sha256: sum }
 }
 
+// ── MinGit (Windows only, ADR-088 §6) ──────────────────────────────────────────────────────────────
+// A fresh Windows machine has no Git Bash, and host-mode Bash then falls back to cmd.exe, the dialect weak
+// models fail in. MinGit is Git for Windows' minimal redistributable: no bash.exe by that NAME, but its
+// usr/bin/sh.exe IS bash 5 (arrays, [[ ]]) plus coreutils/grep/sed. main.ts points CASCADE_BASH at it.
+// Integrity: GitHub's own per-asset sha256 digest (Git for Windows publishes no SHASUMS file).
+async function fetchMinGit(): Promise<void> {
+	const tag = process.env.MINGIT_TAG ? `tags/${process.env.MINGIT_TAG}` : 'latest'
+	const rel = JSON.parse(await text(`https://api.github.com/repos/git-for-windows/git/releases/${tag}`)) as {
+		tag_name: string
+		assets: { name: string; digest?: string; browser_download_url: string }[]
+	}
+	const want = arch === 'arm64' ? /^MinGit-[\d.]+-arm64\.zip$/ : /^MinGit-[\d.]+-64-bit\.zip$/
+	const asset = rel.assets.find((a) => want.test(a.name))
+	if (!asset) throw new Error(`no MinGit ${arch} asset in git-for-windows ${rel.tag_name}`)
+	const expected = asset.digest?.replace(/^sha256:/, '')
+	if (!expected) throw new Error(`${asset.name} has no published sha256 digest — refusing to trust it`)
+	console.log(`• MinGit ${rel.tag_name} (${asset.name})…`)
+	const archive = join(WORK, asset.name)
+	await download(asset.browser_download_url, archive)
+	const actual = await sha256(archive)
+	if (actual !== expected) throw new Error(`SHA-256 mismatch for ${asset.name}: expected ${expected}, got ${actual}`)
+	rmSync(join(OUT, 'git'), { recursive: true, force: true })
+	extract(archive, join(OUT, 'git'))
+	if (!existsSync(join(OUT, 'git', 'usr', 'bin', 'sh.exe'))) throw new Error(`usr/bin/sh.exe not found inside ${asset.name}`)
+	manifest.mingit = { version: rel.tag_name, file: asset.name, sha256: actual }
+}
+
 function findFile(dir: string, name: string): string | undefined {
 	for (const entry of readdirSync(dir, { withFileTypes: true })) {
 		const p = join(dir, entry.name)
@@ -133,6 +163,7 @@ function findFile(dir: string, name: string): string | undefined {
 try {
 	await fetchMise()
 	await fetchNode()
+	if (platform === 'win32') await fetchMinGit()
 	writeFileSync(join(OUT, 'manifest.json'), JSON.stringify({ platform, arch, fetchedAt: new Date().toISOString(), ...manifest }, null, 2))
 	console.log(`✓ sandbox binaries ready → ${OUT}`)
 	if (platform === 'linux' && !existsSync(join(OUT, 'bwrap'))) {

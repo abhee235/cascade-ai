@@ -150,6 +150,13 @@ const warnMissing = (what: string, fix: string) => {
 }
 
 console.log('• sandbox: fetched binaries (mise, node, bwrap)…')
+// ADR-088: a RELEASE must carry its toolchain. v0.1.0 packaged with only the warning below, and a fresh
+// machine then had no npm at all. CI sets CASCADE_REQUIRE_SANDBOX=1 so the same gap fails the build instead.
+if (process.env.CASCADE_REQUIRE_SANDBOX === '1') {
+	const required = ['node', PLATFORM === 'win32' ? 'mise.exe' : 'mise', ...(PLATFORM === 'win32' ? [join('git', 'usr', 'bin', 'sh.exe')] : [])]
+	const missing = required.filter((f) => !existsSync(join(SANDBOX_BIN, f)))
+	if (missing.length) throw new Error(`sandbox: missing ${missing.join(', ')} in packages/desktop/sandbox-bin/${PLATFORM} — run scripts/fetch-sandbox.mts`)
+}
 if (existsSync(SANDBOX_BIN)) {
 	cpSync(SANDBOX_BIN, SANDBOX_OUT, { recursive: true, dereference: true })
 } else {

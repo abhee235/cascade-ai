@@ -114,3 +114,18 @@ describe('tool descriptions are tier-sized through the registry (ADR-037)', () =
 })
 
 rmSync(cwd, { recursive: true, force: true })
+
+// ADR-088 §5: runtime facts land under # Environment at EVERY tier (minimal included), and nothing when absent.
+describe('environmentFacts', () => {
+  const facts = ['Shell: Bash runs Windows cmd.exe — cmd syntax only.', 'Preview: http://localhost:52942']
+  for (const tier of ['minimal', 'lean', 'full'] as const) {
+    it(`renders under # Environment at tier ${tier}`, () => {
+      const p = buildSystemPrompt({ cwd: tmpdir(), tier, environmentFacts: facts })
+      const env = p.slice(p.indexOf('# Environment'))
+      for (const f of facts) expect(env).toContain(`- ${f}`)
+    })
+  }
+  it('adds nothing when absent (frontends that do not opt in keep identical prompts)', () => {
+    expect(buildSystemPrompt({ cwd: tmpdir() })).toBe(buildSystemPrompt({ cwd: tmpdir(), environmentFacts: [] }))
+  })
+})

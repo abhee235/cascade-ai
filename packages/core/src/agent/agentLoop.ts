@@ -372,7 +372,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     // (measured: inputTokens 8191 of 8192, ONE token of output room). The static chars/4 estimate is the
     // FLOOR; once the backend has reported a real prompt size, the MEASURED overhead (real − estimate,
     // which also captures our estimate's own error) takes over — self-correcting at the margin.
-    const systemNow = buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext, skillsSection: deps.skillsSection, contextFiles: deps.contextFiles, sandboxPolicy })
+    const systemNow = buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext, skillsSection: deps.skillsSection, contextFiles: deps.contextFiles, sandboxPolicy, environmentFacts: deps.sandbox?.environmentFacts })
     const staticOverhead = Math.ceil((systemNow.length + JSON.stringify(advertise()).length) / 4) + 256
     const overheadTokens = Math.max(staticOverhead, wireOverhead ?? 0)
 
@@ -434,7 +434,7 @@ export async function* runAgentLoop(messages: Message[], deps: LoopDeps): AsyncI
     // a (reactive) compaction then retries; abort/fatal surface. `make` re-reads `messages` each attempt, so
     // an overflow-compaction is reflected on the retry. System is rebuilt too (memory may have changed).
     const makeStream = () =>
-      deps.provider.stream({ messages, model: deps.model, ...deps.modelLimits, ...deps.sampling, system: buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext, skillsSection: deps.skillsSection, contextFiles: deps.contextFiles, sandboxPolicy }), tools: advertise() }, deps.signal)
+      deps.provider.stream({ messages, model: deps.model, ...deps.modelLimits, ...deps.sampling, system: buildSystemPrompt({ cwd: deps.cwd, sandboxRoot: deps.sandbox?.root, tier, subagent: depth > 0, recalled: deps.recalled, extraInstructions: deps.extraInstructions, projectContext: deps.projectContext, skillsSection: deps.skillsSection, contextFiles: deps.contextFiles, sandboxPolicy, environmentFacts: deps.sandbox?.environmentFacts }), tools: advertise() }, deps.signal)
     for await (const ev of streamWithRecovery(makeStream, {
       ...deps.recovery,
       signal: deps.signal,

@@ -56,6 +56,7 @@ pointIfShipped('CASCADE_MISE_PATH', process.platform === 'win32' ? 'mise.exe' : 
 pointIfShipped('CASCADE_NODE_DIR', process.platform === 'win32' ? 'node' : join('node', 'bin')) // offline default Node
 pointIfShipped('CASCADE_WSL_ROOTFS', 'cascade-sandbox-rootfs.tar.gz') // the primary Windows rung's image
 pointIfShipped('CASCADE_FENCE_RUNNER', 'winFenceRunner.mjs') // the Windows host-mode fallback rung
+if (process.platform === 'win32') pointIfShipped('CASCADE_BASH', join('git', 'usr', 'bin', 'sh.exe')) // ADR-088 §6: bash 5 from MinGit
 pointIfShipped('CASCADE_BWRAP_PATH', 'bwrap') // Linux host confinement without a distro package
 
 const SERVER_PORT = Number(process.env.CASCADE_PORT ?? 4319)

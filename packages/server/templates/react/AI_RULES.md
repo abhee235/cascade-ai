@@ -16,5 +16,5 @@ You are editing a **Vite + React + TypeScript + Tailwind CSS v4** app. Follow th
   TemplateAudit tool enforces this: the app is not done while any placeholder (or legacy `src/demo/`
   residue) remains.
 - Add dependencies with the package manager (npm) — don't hand-edit `package.json` versions.
-- Keep the app runnable: `npm install` then `npm run dev` (Vite, port 5173). Don't break the build.
+- Keep the app runnable: `npm install` then `npm run build` must stay green. The Preview pane runs the dev server for you.
 - Prefer small, composable components and clear names. Don't scaffold a backend unless asked.

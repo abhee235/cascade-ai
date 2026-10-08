@@ -326,6 +326,12 @@ const STD_INPUT_HANDLE = 0xfffffff6 // -10
 const STD_OUTPUT_HANDLE = 0xfffffff5 // -11
 const STD_ERROR_HANDLE = 0xfffffff4 // -12
 const STARTF_USESTDHANDLES = 0x100
+/** ADR-088 §4: honour wShowWindow (SW_HIDE). A child that INHERITS a console (the bundled node.exe host) is
+ *  unaffected; one that must create its own (an Electron host has none) gets it hidden instead of the visible
+ *  window every confined command opened on the v0.1.0 VM. CREATE_NO_WINDOW is NOT the fix: it forces a new
+ *  console, and a restricted-token child that has a console to inherit then dies with STATUS_DLL_INIT_FAILED
+ *  (measured 2026-10-08, sandboxBackends.test.ts). */
+const STARTF_USESHOWWINDOW = 0x1
 const HANDLE_FLAG_INHERIT = 0x1
 
 export function spawnUnderToken(token: unknown, commandLine: string, cwd: string): number {
@@ -343,7 +349,7 @@ export function spawnUnderToken(token: unknown, commandLine: string, cwd: string
 		cb: koffi.sizeof(STARTUPINFOW),
 		lpReserved: null, lpDesktop: null, lpTitle: null,
 		dwX: 0, dwY: 0, dwXSize: 0, dwYSize: 0, dwXCountChars: 0, dwYCountChars: 0, dwFillAttribute: 0,
-		dwFlags: STARTF_USESTDHANDLES, wShowWindow: 0, cbReserved2: 0, lpReserved2: null,
+		dwFlags: STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW, wShowWindow: 0 /* SW_HIDE */, cbReserved2: 0, lpReserved2: null,
 		hStdInput: hIn, hStdOutput: hOut, hStdError: hErr,
 	}
 	const siBuf = new Uint8Array(koffi.sizeof(STARTUPINFOW))
