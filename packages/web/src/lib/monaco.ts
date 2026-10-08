@@ -20,4 +20,25 @@ self.MonacoEnvironment = {
   },
 }
 
+// ADR-092: the defaults (JSX off, no `@/` alias, no node_modules in the browser) underlined EVERY import and JSX
+// line in red, even in projects whose build is green. Match the templates' options, and check SYNTAX only: the
+// editor cannot load the project's dependency types, so its type errors would be wrong guesses. Real type errors
+// come from `npm run build`, where they are true.
+const compilerOptions = {
+  target: monaco.typescript.ScriptTarget.ESNext,
+  module: monaco.typescript.ModuleKind.ESNext,
+  moduleResolution: monaco.typescript.ModuleResolutionKind.NodeJs,
+  jsx: monaco.typescript.JsxEmit.ReactJSX,
+  allowJs: true,
+  allowNonTsExtensions: true,
+  esModuleInterop: true,
+  isolatedModules: true,
+  baseUrl: '.',
+  paths: { '@/*': ['src/*'] },
+}
+for (const defaults of [monaco.typescript.typescriptDefaults, monaco.typescript.javascriptDefaults]) {
+  defaults.setCompilerOptions(compilerOptions)
+  defaults.setDiagnosticsOptions({ noSemanticValidation: true, noSyntaxValidation: false })
+}
+
 loader.config({ monaco })
