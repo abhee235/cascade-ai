@@ -43,8 +43,13 @@ async function download(url: string, to: string): Promise<void> {
 	await writeFile(to, Buffer.from(await res.arrayBuffer()))
 }
 
+/** GitHub's API allows 60 unauthenticated calls an hour per IP, and CI runners share IPs — the macOS release
+ *  build got 403 on its first call. The workflow passes GITHUB_TOKEN; with it the limit is per-repo. */
+const apiHeaders = (url: string): Record<string, string> =>
+	url.startsWith('https://api.github.com/') && process.env.GITHUB_TOKEN ? { authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}
+
 async function text(url: string): Promise<string> {
-	const res = await fetch(url, { redirect: 'follow' })
+	const res = await fetch(url, { redirect: 'follow', headers: apiHeaders(url) })
 	if (!res.ok) throw new Error(`GET ${url} → ${res.status}`)
 	return res.text()
 }
@@ -118,7 +123,7 @@ async function fetchNode(): Promise<void> {
 	const tree = readdirSync(dest).map((d) => join(dest, d))[0]
 	if (!tree) throw new Error(`empty node archive ${name}`)
 	rmSync(join(OUT, 'node'), { recursive: true, force: true })
-	renameSync(tree, join(OUT, 'node'))
+	moveDir(tree, join(OUT, 'node'))
 	manifest.node = { version, file: name, sha256: sum }
 }
 
@@ -147,6 +152,18 @@ async function fetchMinGit(): Promise<void> {
 	extract(archive, join(OUT, 'git'))
 	if (!existsSync(join(OUT, 'git', 'usr', 'bin', 'sh.exe'))) throw new Error(`usr/bin/sh.exe not found inside ${asset.name}`)
 	manifest.mingit = { version: rel.tag_name, file: asset.name, sha256: actual }
+}
+
+/** rename, or copy + delete when the two paths are on different drives (the Windows runner: temp on C:, the
+ *  checkout on D: — renameSync threw EXDEV there). */
+function moveDir(from: string, to: string): void {
+	try {
+		renameSync(from, to)
+	} catch (e) {
+		if ((e as NodeJS.ErrnoException).code !== 'EXDEV') throw e
+		cpSync(from, to, { recursive: true })
+		rmSync(from, { recursive: true, force: true })
+	}
 }
 
 function findFile(dir: string, name: string): string | undefined {

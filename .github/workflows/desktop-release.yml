@@ -59,6 +59,8 @@ jobs:
       # without it and a fresh machine could not run npm at all. Verified against upstream SHASUMS.
       - name: Fetch sandbox binaries
         run: npx tsx packages/desktop/scripts/fetch-sandbox.mts
+        env:
+          GITHUB_TOKEN: ${{ github.token }} # mise/MinGit version lookups; unauthenticated calls hit 403 on shared runners
 
       # The web build (Monaco + the builder UI) outgrows Node's default heap on the 7 GB macOS runner and
       # died with "JavaScript heap out of memory". 4 GB fits on every runner (Linux and Windows have 16 GB).
