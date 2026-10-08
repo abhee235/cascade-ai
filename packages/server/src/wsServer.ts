@@ -26,6 +26,7 @@ import { localBackendClaims, selectLocalBackend, sweepWorkspaceLabels } from './
 import type { RuntimeInfo } from '@cascade/app-protocol'
 import { ensureVisualEditConfig, listTemplates } from './templates.js'
 import { listModels, modelInfo, providerCatalog, setProviderKey } from './modelCaps.js'
+import { keyStorage } from './secretStore.js'
 import { fetchHfDefaults } from './hfDefaults.js'
 import { activeModel, addEnabledModel, enabledModels, enabledModelsForClient, initModelRegistry, modelContextFor, modelEndpointFor, modelParamsFor, removeEnabledModel, setActiveModel, setModelContext, setModelParams } from './modelRegistry.js'
 import { addMcpServer, enabledMcpServers, initMcpRegistry, mcpServers as mcpServersConfig, removeMcpServer, toggleMcpServer } from './mcpRegistry.js'
@@ -244,7 +245,7 @@ export function handleConnection(
   // Greet the new connection with capabilities + the project list + available templates so the UI can render
   // immediately (serverInfo drives the Terminal's Docker gate and the Settings page). ADR-067: model +
   // provider come from the manager (runtime-mutable), and the provider menu rides along for the picker.
-  if (serverInfo) send({ type: 'serverInfo', sandbox: serverInfo.sandbox, model: manager.currentModel, provider: manager.currentProvider, providers: providerCatalog(), runtime: serverInfo.runtime })
+  if (serverInfo) send({ type: 'serverInfo', sandbox: serverInfo.sandbox, model: manager.currentModel, provider: manager.currentProvider, providers: providerCatalog(), runtime: serverInfo.runtime , keyStorage: keyStorage() })
   send({ type: 'projects', projects: manager.list(), activeId })
   sendTurnActivity() // a build may already be running from an earlier connection — say so up front, not on the next change
   send({ type: 'templates', templates: listTemplates() })
@@ -464,13 +465,13 @@ export function handleConnection(
           serverInfo.runtime = runtime
           serverInfo.sandbox = runtime.mode === 'docker'
           send({ type: 'preview', status: 'stopped' })
-          send({ type: 'serverInfo', sandbox: serverInfo.sandbox, model: manager.currentModel, provider: manager.currentProvider, providers: providerCatalog(), runtime })
+          send({ type: 'serverInfo', sandbox: serverInfo.sandbox, model: manager.currentModel, provider: manager.currentProvider, providers: providerCatalog(), runtime , keyStorage: keyStorage() })
           break
         }
         case 'setApiKey': {
           setProviderKey(msg.provider, msg.key)
           // re-announce providers (configured status may have flipped)
-          send({ type: 'serverInfo', sandbox: serverInfo?.sandbox ?? false, model: manager.currentModel, provider: manager.currentProvider, providers: providerCatalog(), runtime: serverInfo?.runtime })
+          send({ type: 'serverInfo', sandbox: serverInfo?.sandbox ?? false, model: manager.currentModel, provider: manager.currentProvider, providers: providerCatalog(), runtime: serverInfo?.runtime, keyStorage: keyStorage() })
           break
         }
         case 'addModel': {
@@ -576,7 +577,7 @@ export function handleConnection(
             active = manager.open(activeId)
             if (activeChatId) loadChat(activeChatId)
           }
-          send({ type: 'serverInfo', sandbox: serverInfo?.sandbox ?? false, model: manager.currentModel, provider: manager.currentProvider, providers: providerCatalog(), runtime: serverInfo?.runtime })
+          send({ type: 'serverInfo', sandbox: serverInfo?.sandbox ?? false, model: manager.currentModel, provider: manager.currentProvider, providers: providerCatalog(), runtime: serverInfo?.runtime, keyStorage: keyStorage() })
           break
         }
         case 'submit': {

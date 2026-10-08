@@ -332,8 +332,17 @@ function ContextSlider(props: { value: string; detected?: number; max: number; o
 	)
 }
 
+/** ADR-091 §3: the line under the key field states what really happens to the key — the old text promised
+ *  nothing and told app users to edit a .env file, so every restart silently dropped their key. */
+const KEY_STORAGE_NOTE = {
+	encrypted: 'Saved on this computer, encrypted by your operating-system account. It stays set after a restart.',
+	unavailable: 'Can’t be saved: no system keyring was found (on Linux, install GNOME Keyring or KWallet). It works until you close Cascade.',
+	session: 'Applies to the running server this session. For persistence set it in .env.',
+} as const
+
 function ProviderKey(props: { provider: string; configured: boolean }) {
 	const setApiKey = useStore((s) => s.setApiKey)
+	const keyStorage = useStore((s) => s.serverInfo?.keyStorage ?? 'session')
 	const [key, setKey] = useState('')
 	const [reveal, setReveal] = useState(false)
 	return (
@@ -352,7 +361,7 @@ function ProviderKey(props: { provider: string; configured: boolean }) {
 					Save
 				</button>
 			</div>
-			<p className="mt-1.5 text-xs text-muted-foreground">Applies to the running server this session. For persistence set it in <code className="rounded bg-secondary px-1">.env</code>.</p>
+			<p className="mt-1.5 text-xs text-muted-foreground">{KEY_STORAGE_NOTE[keyStorage]}</p>
 		</section>
 	)
 }

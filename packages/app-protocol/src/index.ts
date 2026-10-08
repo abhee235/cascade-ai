@@ -180,7 +180,7 @@ export interface SessionInfo {
 }
 
 export type BuilderEvent =
-  | { type: 'serverInfo'; sandbox: boolean; model: string; provider?: string; providers?: { id: string; configured: boolean }[]; runtime?: RuntimeInfo } // greeting: runtime, active provider/model, and the provider menu (ADR-067)
+  | { type: 'serverInfo'; sandbox: boolean; model: string; provider?: string; providers?: { id: string; configured: boolean }[]; runtime?: RuntimeInfo; keyStorage?: 'encrypted' | 'unavailable' | 'session' } // greeting: runtime, active provider/model, and the provider menu (ADR-067)
   | { type: 'mcpServers'; servers: McpServerInfo[] } // ADR-071: configured MCP servers + live connection status (the MCP panel)
   | { type: 'models'; provider: string; models: string[]; reachable?: boolean } // reachable=false ⇒ nothing listening — the UI shows a launch command, not an empty catalog // ADR-067: models a provider offers (for the picker)
   | { type: 'modelInfo'; provider: string; model: string; capabilities: string[]; contextWindow?: number; limits?: ModelLimits } // ADR-067: one model's capabilities + context + slider limits (manager)

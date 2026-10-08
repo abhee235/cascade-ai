@@ -18,6 +18,7 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { applyStoredSecrets } from './secretStore.js'
 
 /** Set by the desktop shell. Its presence is what tells us we are packaged. */
 const APP_DATA = process.env.CASCADE_RESOURCES ? process.env.CASCADE_APP_DATA : undefined
@@ -45,3 +46,6 @@ for (const file of candidates) {
   console.log(`Loaded environment from ${file}`)
   break // first hit wins — one .env, no layered merging to reason about
 }
+
+// ADR-091 §3: keys the user typed into the desktop app (OS-encrypted store) fill what .env left unset.
+applyStoredSecrets()

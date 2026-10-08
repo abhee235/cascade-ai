@@ -43,7 +43,7 @@ interface UiState {
   slugNotFound: string | null // a /project/<slug> URL that failed to resolve (deleted/mistyped) → not-found view
   // connection + projects
   connected: boolean
-  serverInfo: { sandbox: boolean; model: string; provider?: string; providers?: { id: string; configured: boolean }[]; runtime?: import('@cascade/app-protocol').RuntimeInfo } | null // server greeting: runtime, active provider/model, provider menu (ADR-067)
+  serverInfo: { sandbox: boolean; model: string; provider?: string; providers?: { id: string; configured: boolean }[]; runtime?: import('@cascade/app-protocol').RuntimeInfo; keyStorage?: 'encrypted' | 'unavailable' | 'session' } | null // server greeting: runtime, active provider/model, provider menu (ADR-067)
   models: Record<string, string[]>
   /** Per provider: did the last listing actually reach a server? false ⇒ show the launch command. */
   modelsReachable: Record<string, boolean> // ADR-067: cached model lists per provider (filled by `models` events, for the picker)
@@ -572,7 +572,7 @@ export const useStore = create<UiState>((set, get) => {
           break
         // ── app/builder events (BuilderEvent) ──
         case 'serverInfo':
-          set({ serverInfo: { sandbox: e.sandbox, model: e.model, provider: e.provider, providers: e.providers, runtime: e.runtime } })
+          set({ serverInfo: { sandbox: e.sandbox, model: e.model, provider: e.provider, providers: e.providers, runtime: e.runtime, keyStorage: e.keyStorage } })
           break
         case 'models': // ADR-067: a provider's model list arrived → cache it for the picker
           set((s) => ({ models: { ...s.models, [e.provider]: e.models }, modelsReachable: { ...s.modelsReachable, [e.provider]: e.reachable !== false } }))

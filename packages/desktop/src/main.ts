@@ -15,6 +15,13 @@ import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { updateElectronApp } from 'update-electron-app'
+import { handleSquirrelEvent } from './installEvents'
+import { ensureDesktopEntry, linuxIconPath, offerMoveToApplications } from './platform'
+import { installSecretStore } from './secrets'
+
+/** ADR-091 §1: a Squirrel install/update/uninstall launch only manages shortcuts, then quits — it must not take
+ *  the single-instance lock, start the server or open a window. */
+const squirrelEvent = handleSquirrelEvent()
 
 // This file is bundled to COMMONJS, unlike everything else in the repo.
 //
@@ -62,7 +69,7 @@ pointIfShipped('CASCADE_BWRAP_PATH', 'bwrap') // Linux host confinement without 
 const SERVER_PORT = Number(process.env.CASCADE_PORT ?? 4319)
 
 /** Only ONE instance may own the database and the server port. A second launch focuses the first. */
-if (!app.requestSingleInstanceLock()) app.exit(0)
+if (!squirrelEvent && !app.requestSingleInstanceLock()) app.exit(0)
 
 let win: BrowserWindow | null = null
 /** The server's shutdown hook, captured at boot — see disposeServer below. */
@@ -78,9 +85,8 @@ function createWindow(): void {
 		backgroundColor: '#0b0b0c',
 		title: 'Cascade',
 		// Windows/macOS take the app icon from the executable/bundle (forge packagerConfig.icon); Linux
-		// window managers read it from the WINDOW. Dev runs resolve it from the source tree, packaged runs
-		// would need it as an extraResource — harmless to omit there (the zip carries no desktop entry).
-		...(process.platform === 'linux' ? { icon: join(__dirname, '..', 'build', 'icon.png') } : {}),
+		// window managers read it from the WINDOW.
+		...(process.platform === 'linux' ? { icon: linuxIconPath() } : {}), // ADR-091 §5: shipped as an extraResource
 		webPreferences: {
 			// The renderer is the same web app the browser serves — it talks to the server over the SAME
 			// WebSocket, with no privileged bridge. Keeping Node out of it means a bug in the app (or in a
@@ -130,7 +136,10 @@ function startAutoUpdate(): void {
 	}
 }
 
-app.whenReady().then(async () => {
+if (!squirrelEvent) app.whenReady().then(async () => {
+	if (offerMoveToApplications()) return // macOS: relaunching from /Applications (ADR-091 §4)
+	ensureDesktopEntry() // Linux: the app-menu entry (ADR-091 §5)
+	installSecretStore() // keys typed in the app persist, OS-encrypted — before the server reads them (ADR-091 §3)
 	await startServer()
 	createWindow()
 	startAutoUpdate()

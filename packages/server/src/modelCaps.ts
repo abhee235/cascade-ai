@@ -10,6 +10,8 @@
 
 import { archContextLength, ARCH_FALLBACK_CAP } from '@cascade/core'
 import { limitsFor, type ModelLimits, specCapabilities } from '@cascade/core'
+import { secretStore } from './secretStore.js'
+
 
 const cache = new Map<string, string[]>()
 
@@ -89,13 +91,19 @@ export async function modelInfo(provider: string, model: string, baseUrl?: strin
   return { capabilities, contextWindow, limits: limitsFor(provider, model, Math.max(contextWindow ?? 0, archMax ?? 0) || undefined) }
 }
 
-/** Set a provider's API key for the RUNNING server (process.env). Session-scoped — not written to disk
- *  (keys belong in .env for persistence). Returns whether the provider is now configured. */
+/** Set a provider's API key for the RUNNING server (process.env), and — ADR-091 §3 — keep it in the host's
+ *  OS-encrypted secret store when one is installed (the desktop app), so it survives a restart. Without a store
+ *  (web/dev) it stays session-only; .env is the developer's persistence. Returns whether it is now configured. */
 export function setProviderKey(provider: string, key: string): boolean {
   const env = KEY_ENV[provider]
   if (!env) return false
   if (key.trim()) process.env[env] = key.trim()
   else delete process.env[env]
+  try {
+    secretStore()?.set(env, key.trim() || undefined)
+  } catch {
+    /* a failed write leaves the key working for this session; keyStorage() tells the UI what to promise */
+  }
   return !!process.env[env]
 }
 

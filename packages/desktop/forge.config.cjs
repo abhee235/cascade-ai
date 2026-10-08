@@ -68,6 +68,7 @@ module.exports = {
       join(DIST, 'node_modules'),
       ...(existsSync(join(DIST, 'browsers')) ? [join(DIST, 'browsers')] : []),
       ...(existsSync(join(DIST, 'sandbox')) ? [join(DIST, 'sandbox')] : []),
+      join(__dirname, 'build', 'icon.png'), // ADR-091 §5: the Linux window icon + app-menu entry (resources/icon.png)
     ],
     appBundleId: 'ai.cascade.desktop',
     appCategoryType: 'public.app-category.developer-tools',
@@ -108,6 +109,7 @@ module.exports = {
         name: 'Cascade',
         setupExe: 'CascadeSetup.exe',
         setupIcon: join(__dirname, 'build', 'icon.ico'),
+        loadingGif: join(__dirname, 'build', 'install.gif'), // ADR-091 §2: shown while the installer unpacks
         ...(process.env.WINDOWS_CERT_FILE ? { certificateFile: process.env.WINDOWS_CERT_FILE, certificatePassword: process.env.WINDOWS_CERT_PASSWORD } : {}),
       },
     },
