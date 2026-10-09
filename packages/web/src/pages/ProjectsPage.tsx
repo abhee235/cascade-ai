@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { AppWindow, MoreHorizontal, Plus, Search, Trash2, SquareArrowOutUpRight } from 'lucide-react'
 import { useStore } from '@/lib/store'
 import { relativeTime } from '@/lib/utils'
+import { matchesProjectQuery } from '@/lib/projectSearch'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -12,7 +13,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 export function ProjectsPage() {
   const { projects, openProjectPage, deleteProject, navigate, connected } = useStore()
   const [query, setQuery] = useState('')
-  const shown = projects.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()))
+  // Same matcher as the sidebar's search, so the two boxes can never disagree about a result.
+  const shown = projects.filter((p) => matchesProjectQuery(p.name, query))
 
   return (
     <div className="h-full overflow-y-auto">

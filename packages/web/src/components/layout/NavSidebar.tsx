@@ -1,9 +1,14 @@
 // NavSidebar.tsx — the persistent left rail, built on the shadcn Sidebar. New · Home · Projects ·
-// Chats · Settings, a Recent-projects list, and the user profile + connection + theme toggle at the bottom.
+// Chats · Settings (+ a Search dialog), a Recent-projects list that loads as you scroll, and the user profile + connection + theme toggle at
+// the bottom.
 
-import { Folder, FolderKanban, Home, MessagesSquare, Moon, Plug, Plus, Radar, Settings, Sun, X, type LucideIcon } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { ScrollArea as ScrollAreaPrimitive } from 'radix-ui'
+import { Folder, FolderKanban, Home, MessagesSquare, Moon, Plug, Plus, Radar, Search, Settings, Sun, X, type LucideIcon } from 'lucide-react'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
+import { useIncrementalList } from '@/lib/incrementalList'
+import { SearchProjectsDialog } from '@/components/layout/SearchProjectsDialog'
 import type { Page } from '@/lib/types'
 import {
   Sidebar,
@@ -22,6 +27,10 @@ import {
 } from '@/components/ui/sidebar'
 import { Button } from '@/components/ui/button'
 
+/** Rows mounted per page of the Recent-projects list. Roughly one screenful of rail at 1080p, so the first
+ *  page usually fills the view and the next one mounts only once the user actually scrolls. */
+const PROJECT_PAGE = 24
+
 const NAV: { page: Page; label: string; icon: LucideIcon }[] = [
   { page: 'home', label: 'Home', icon: Home },
   { page: 'projects', label: 'Projects', icon: FolderKanban },
@@ -33,6 +42,26 @@ const NAV: { page: Page; label: string; icon: LucideIcon }[] = [
 
 export function NavSidebar() {
   const { page, navigate, projects, activeId, openProjectPage, deleteProject, connected, theme, toggleTheme, turnActivity } = useStore()
+  const [searchOpen, setSearchOpen] = useState(false)
+  const listRef = useRef<HTMLDivElement>(null)
+
+  const openIdx = page === 'project' ? projects.findIndex((p) => p.id === activeId) : -1
+  const busyIdx = turnActivity ? projects.findIndex((p) => p.id === turnActivity.projectId) : -1
+  const { count, hasMore, sentinelRef } = useIncrementalList({
+    total: projects.length,
+    pageSize: PROJECT_PAGE,
+    resetKey: '',
+    pinnedIndices: [openIdx, busyIdx],
+    rootRef: listRef,
+  })
+
+  // Reveal the open project when it changes. It is always RENDERED (pinned above), but opening an old one
+  // from the Projects page would otherwise leave its highlight somewhere below the fold. `nearest` scrolls
+  // only when the row is actually out of view, so clicking a visible row never jumps the list.
+  useEffect(() => {
+    if (page !== 'project' || !activeId) return
+    listRef.current?.querySelector<HTMLElement>('[data-sidebar="menu-button"][data-active="true"]')?.scrollIntoView({ block: 'nearest' })
+  }, [page, activeId])
 
   return (
     // collapsible="icon" (not the default "offcanvas", which slid the whole rail off-screen leaving NOTHING
@@ -80,6 +109,14 @@ export function NavSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
+              {/* Search is a nav destination (the pattern chat apps use), not an input box in the rail: it
+                  costs one row instead of a permanent field, and works identically in rail mode. */}
+              <SidebarMenuItem>
+                <SidebarMenuButton tooltip="Search projects" onClick={() => setSearchOpen(true)}>
+                  <Search />
+                  <span>Search</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
               {NAV.map((n) => (
                 <SidebarMenuItem key={n.page}>
                   <SidebarMenuButton tooltip={n.label} isActive={page === n.page} onClick={() => navigate(n.page)}>
@@ -92,39 +129,73 @@ export function NavSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        <SidebarGroup>
+        {/* Recent projects is the one group that grows without bound, so it is the one that scrolls. It takes
+            the rest of the rail (flex-1 + min-h-0, which is what lets a flex child shrink below its content),
+            and only its list scrolls — the nav above stays put. Before, the list was simply cut at 12 and
+            projects 13+ were reachable only from the Projects page. */}
+        <SidebarGroup className="min-h-0 flex-1">
           <SidebarGroupLabel>Recent projects</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {/* Distinguish "still connecting" from "truly none" — a slow connect must not read as data loss. */}
-              {projects.length === 0 && <div className="px-2 py-1 text-xs text-muted-foreground/60">{connected ? 'No projects yet.' : 'Connecting…'}</div>}
-              {projects.slice(0, 12).map((p) => {
-                // ADR-068: the single active turn's project gets a dot — amber (needs your approval) or a
-                // pulsing blue (building) — so you can return to it from anywhere. Sits left of the ×.
-                const act = turnActivity?.projectId === p.id ? turnActivity.phase : undefined
-                return (
-                  <SidebarMenuItem key={p.id}>
-                    <SidebarMenuButton tooltip={p.name} isActive={page === 'project' && activeId === p.id} onClick={() => openProjectPage(p.id)}>
-                      <Folder strokeWidth={1.75} />
-                      {/* ADR-084 Phase 5: the rail is narrow and prompt-derived names collide — two
-                          projects both truncate to "Build 'Northline Supply', a …". Until the names
-                          themselves carry a differentiator, the full name must at least be recoverable. */}
-                      <span className="truncate" title={p.name}>{p.name}</span>
-                      {act && (
-                        <span
-                          className={cn('ml-auto mr-1 h-2 w-2 shrink-0 rounded-full', act === 'awaiting' ? 'bg-amber-500' : 'animate-pulse bg-blue-500')}
-                          title={act === 'awaiting' ? 'Waiting for your approval' : 'Building…'}
-                        />
-                      )}
-                    </SidebarMenuButton>
-                    <SidebarMenuAction showOnHover title="Delete project" onClick={() => deleteProject(p.id)}>
-                      <X />
-                    </SidebarMenuAction>
-                  </SidebarMenuItem>
-                )
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
+
+          {/* An overlay scrollbar drawn by the app (Radix ScrollArea), not the native one: Chrome on Windows
+              draws its own arrow buttons and ignores the CSS that should remove them, and a native bar costs
+              width. type="hover" = invisible until the pointer is over the list, then a faint thumb that fades
+              out again (the usual chat-app sidebar behaviour). The Radix primitives are used directly
+              because the shadcn wrapper does not hand a ref to the Viewport — and the Viewport is the scroll
+              container the load-more observer has to watch. min-h-24 keeps ~3 rows visible on short windows. */}
+          <ScrollAreaPrimitive.Root type="hover" scrollHideDelay={500} className="relative min-h-24 flex-1 overflow-hidden">
+            {/* Radix wraps children in a display:table div, which lets rows grow past the rail instead of
+                truncating — [&>div]:!block restores normal block layout so `truncate` works again. */}
+            <ScrollAreaPrimitive.Viewport ref={listRef} className="size-full [&>div]:!block">
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {/* Distinguish "still connecting" from "truly none" — a slow connect must not read as data loss. */}
+                {projects.length === 0 && <div className="px-2 py-1 text-xs text-muted-foreground/60">{connected ? 'No projects yet.' : 'Connecting…'}</div>}
+                {projects.slice(0, count).map((p) => {
+                  // ADR-068: the single active turn's project gets a dot — amber (needs your approval) or a
+                  // pulsing blue (building) — so you can return to it from anywhere. Sits left of the ×.
+                  const act = turnActivity?.projectId === p.id ? turnActivity.phase : undefined
+                  return (
+                    <SidebarMenuItem key={p.id}>
+                      {/* ring-inset: the focus ring is an outset box-shadow, and the scroll Viewport clips it —
+                          the rows touch its edges, so the ring's sides were cut off. Inset paints it inside the
+                          button, which survives the clip in both expanded and rail mode with no layout change. */}
+                      <SidebarMenuButton
+                        tooltip={p.name}
+                        isActive={page === 'project' && activeId === p.id}
+                        onClick={() => openProjectPage(p.id)}
+                        className="focus-visible:ring-inset"
+                      >
+                        <Folder strokeWidth={1.75} />
+                        {/* ADR-084 Phase 5: the rail is narrow and prompt-derived names collide — two
+                            projects both truncate to "Build 'Northline Supply', a …". Until the names
+                            themselves carry a differentiator, the full name must at least be recoverable. */}
+                        <span className="truncate" title={p.name}>{p.name}</span>
+                        {act && (
+                          <span
+                            className={cn('ml-auto mr-1 h-2 w-2 shrink-0 rounded-full', act === 'awaiting' ? 'bg-amber-500' : 'animate-pulse bg-blue-500')}
+                            title={act === 'awaiting' ? 'Waiting for your approval' : 'Building…'}
+                          />
+                        )}
+                      </SidebarMenuButton>
+                      <SidebarMenuAction showOnHover title="Delete project" onClick={() => deleteProject(p.id)}>
+                        <X />
+                      </SidebarMenuAction>
+                    </SidebarMenuItem>
+                  )
+                })}
+                {/* The sentinel: when it scrolls within 160px of view, the next page mounts (incrementalList.ts).
+                    It exists only while there is more to load, so a fully-loaded list carries no observer. */}
+                {hasMore && <li ref={sentinelRef} aria-hidden="true" className="h-px shrink-0" />}
+              </SidebarMenu>
+            </SidebarGroupContent>
+            </ScrollAreaPrimitive.Viewport>
+            <ScrollAreaPrimitive.Scrollbar
+              orientation="vertical"
+              className="flex w-2 touch-none p-0.5 transition-opacity duration-200 select-none data-[state=hidden]:opacity-0 group-data-[collapsible=icon]:hidden"
+            >
+              <ScrollAreaPrimitive.Thumb className="relative flex-1 rounded-full bg-foreground/10 hover:bg-foreground/20" />
+            </ScrollAreaPrimitive.Scrollbar>
+          </ScrollAreaPrimitive.Root>
         </SidebarGroup>
       </SidebarContent>
 
@@ -153,6 +224,7 @@ export function NavSidebar() {
         </div>
       </SidebarFooter>
       <SidebarRail />
+      <SearchProjectsDialog open={searchOpen} onOpenChange={setSearchOpen} />
     </Sidebar>
   )
 }
