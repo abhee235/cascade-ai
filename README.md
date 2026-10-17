@@ -17,11 +17,14 @@
 </p>
 
 <p align="center">
+  <a href="https://appbuilder.sh/#download"><b>Download</b></a> ·
   <a href="https://appbuilder.sh"><b>Website</b></a> ·
   <a href="#quick-start"><b>Quick start</b></a> ·
   <a href="docs/guide/README.md"><b>User guide</b></a> ·
   <a href="CONTRIBUTING.md"><b>Contributing</b></a>
 </p>
+
+https://github.com/user-attachments/assets/39c8e6d0-1311-40a4-9354-3dbae67787c0
 
 <p align="center">
   <img src="docs/images/readme/hero.png" alt="Cascade, the local AI app builder: the chat on the left holds the prompt, and the live preview on the right runs Velocarta, the bike accessories store Cascade built from it" width="100%">
