@@ -67,7 +67,8 @@
    "applicationSubCategory": "AI app builder",
    "operatingSystem": "Windows, macOS, Linux",
    "url": "https://appbuilder.sh/",
-   "downloadUrl": "https://github.com/abhee235/cascade-ai",
+   "downloadUrl": "https://github.com/abhee235/cascade-ai/releases/tag/v0.1.3",
+   "softwareVersion": "0.1.3",
    "image": "https://appbuilder.sh/assets/og-cover.png",
    "screenshot": "https://appbuilder.sh/assets/observatory.webp",
    "license": "https://opensource.org/licenses/MIT",
@@ -165,7 +166,7 @@
      "name": "How do I get started?",
      "acceptedAnswer": {
       "@type": "Answer",
-      "text": "Install Node.js 20+, Ollama and Docker Desktop, then clone the repository from GitHub, run npm install and start the app. On Windows, start-cascade.cmd starts everything for you. The README on GitHub has the exact commands."
+      "text": "Download the desktop app for Windows, macOS (Apple Silicon) or Linux from appbuilder.sh and open it. It ships its own Node.js and toolchains, so there is nothing else to install first: add your Ollama models or an API key and describe the app you want. You can also run it from source; the README on GitHub has the commands."
      }
     }
    ]
@@ -1329,19 +1330,21 @@ footer .wrap:last-of-type { padding-bottom: 60px; }
 			<a href="#features">Features</a>
 			<a href="#how">How it works</a>
 			<a href="#opensource">Open source</a>
+			<a href="/blog/">Blog</a>
 		</div>
 		<div class="nav-cta">
 			<a class="btn btn-ghost" href="https://github.com/abhee235/cascade-ai" target="_blank" rel="noopener">
 				<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
 				GitHub
 			</a>
-			<a class="btn btn-primary" href="https://github.com/abhee235/cascade-ai#quick-start" target="_blank" rel="noopener">Get started</a>
+			<a class="btn btn-primary" href="#download">Download</a>
 			<details class="nav-menu">
 				<summary aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></summary>
 				<div class="nav-menu-panel">
 					<a href="#features">Features</a>
 					<a href="#how">How it works</a>
 					<a href="#opensource">Open source</a>
+					<a href="/blog/">Blog</a>
 					<a href="https://github.com/abhee235/cascade-ai" target="_blank" rel="noopener">GitHub</a>
 				</div>
 			</details>
@@ -1372,9 +1375,9 @@ footer .wrap:last-of-type { padding-bottom: 60px; }
 			preview — no cloud, no API keys, no lock-in.
 		</p>
 		<div class="hero-ctas">
-			<a class="btn btn-primary btn-lg" href="https://github.com/abhee235/cascade-ai#quick-start" target="_blank" rel="noopener">
-				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>
-				Get started
+			<a class="btn btn-primary btn-lg" href="#download">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+				Download — free
 			</a>
 			<a class="btn btn-ghost btn-lg" href="https://github.com/abhee235/cascade-ai" target="_blank" rel="noopener">
 				<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></svg>
@@ -1975,11 +1978,11 @@ footer .wrap:last-of-type { padding-bottom: 60px; }
 			<div class="card c-6 rv">
 				<div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg></div>
 				<h3>One engine, everywhere you work</h3>
-				<p>The same headless core drives every frontend over one protocol — use the app builder in your browser, the agent inside VS Code, or the native Windows app.</p>
+				<p>The same headless core drives every frontend over one protocol — use the app builder in your browser, the agent inside VS Code, or the desktop app for Windows, macOS and Linux.</p>
 				<div class="art plats">
 					<div class="plat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3.5 9h17M3.5 15h17M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>Web builder</div>
 					<div class="plat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 6-6 6 6 6M16 6l6 6-6 6"/></svg>VS Code extension</div>
-					<div class="plat"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Windows app<span class="soon">Soon</span></div>
+					<div class="plat"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Desktop app · Windows, macOS, Linux</div>
 				</div>
 			</div>
 		</div>
@@ -2013,7 +2016,7 @@ footer .wrap:last-of-type { padding-bottom: 60px; }
 			<div class="step step-cta rv">
 				<h3>Ready when you are.</h3>
 				<p>Your models. Your machine. Your apps.</p>
-				<a class="btn btn-primary" href="https://github.com/abhee235/cascade-ai#quick-start" target="_blank" rel="noopener">Get started</a>
+				<a class="btn btn-primary" href="#download">Download Cascade</a>
 			</div>
 		</div>
 	</div>
@@ -2031,7 +2034,7 @@ footer .wrap:last-of-type { padding-bottom: 60px; }
 			<details class="faq-item"><summary>Which AI models can I use?</summary><p>Any model that supports tool calling. Locally that means the Ollama library — Qwen 3, Llama 3.3, gpt-oss, DeepSeek R1, Gemma 3, Devstral and more. You can also bring your own key for OpenAI, Groq, OpenRouter or NVIDIA, or point Cascade at any OpenAI-compatible server such as vLLM or LM Studio.</p></details>
 			<details class="faq-item"><summary>Do I need a GPU?</summary><p>You need whatever your chosen model needs. Smaller models run on ordinary laptops; larger ones need more memory but build more complete apps. A context window of 32k works, and 64k or more is better for whole-app builds.</p></details>
 			<details class="faq-item"><summary>What can I build with it?</summary><p>Web apps: online stores, landing pages, dashboards, games and more. Each one is a real React, Vite and Tailwind project in a folder on your disk, with a version saved for every change, so the code is yours to keep.</p></details>
-			<details class="faq-item"><summary>How do I get started?</summary><p>Install Node.js 20+, Ollama and Docker Desktop, then clone the repository from GitHub, run npm install and start the app. On Windows, start-cascade.cmd starts everything for you. <a href="https://github.com/abhee235/cascade-ai#quick-start" target="_blank" rel="noopener">The README on GitHub</a> has the exact commands.</p></details>
+			<details class="faq-item"><summary>How do I get started?</summary><p><a href="#download">Download the desktop app</a> for Windows, macOS (Apple Silicon) or Linux and open it. It ships its own Node.js and toolchains, so there is nothing else to install first: add your Ollama models or an API key and describe the app you want. You can also run it from source — <a href="https://github.com/abhee235/cascade-ai#quick-start" target="_blank" rel="noopener">the README on GitHub</a> has the commands.</p></details>
 		</div>
 	</div>
 </section>
@@ -2086,21 +2089,28 @@ footer .wrap:last-of-type { padding-bottom: 60px; }
 	<div>
 	<div class="eyebrow rv">Get Cascade</div>
 	<h2 class="rv">Your machine is enough.</h2>
-	<p class="section-sub rv">Run the web builder today from source — the native Windows app is on its way. No sign-up, no keys.</p>
+	<p class="section-sub rv">Download the desktop app. It ships its own Node.js and toolchains, so a fresh computer builds an app on the first try. Free, open source, no sign-up.</p>
+	<!-- Direct links to the v0.1.3 assets: `releases/latest` skips pre-releases, so it would 404 today. The visitor's
+	     OS is promoted to primary by the script at the end of the page; without JS, Windows stays primary. -->
 	<div class="hero-ctas rv">
-		<a class="btn btn-primary btn-lg" href="https://github.com/abhee235/cascade-ai" target="_blank" rel="noopener">
-			<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
-			Run from source
+		<a class="btn btn-primary btn-lg" data-os="win" href="https://github.com/abhee235/cascade-ai/releases/download/v0.1.3/CascadeSetup.exe">
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+			Windows
 		</a>
-		<span class="btn btn-ghost btn-lg is-soon" role="note">
-			<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-			Native Windows app — coming soon
-		</span>
+		<a class="btn btn-ghost btn-lg" data-os="mac" href="https://github.com/abhee235/cascade-ai/releases/download/v0.1.3/Cascade-darwin-arm64-0.1.3.zip">
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+			macOS
+		</a>
+		<a class="btn btn-ghost btn-lg" data-os="linux" href="https://github.com/abhee235/cascade-ai/releases/download/v0.1.3/Cascade-linux-x64-0.1.3.zip">
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+			Linux
+		</a>
 	</div>
-	<p class="hero-note rv">Works with Ollama + Docker Desktop &middot; Windows, macOS &amp; Linux from source</p>
+	<p class="hero-note rv">Version 0.1.3, pre-release &middot; Windows 10/11 (64-bit) &middot; macOS on Apple Silicon &middot; Linux x64 &middot; <a href="https://github.com/abhee235/cascade-ai/releases" target="_blank" rel="noopener">all releases</a></p>
+	<p class="hero-note rv">Not code-signed yet, so the first launch shows a warning. Windows: <b>More info → Run anyway</b>. Mac: right-click Cascade.app → <b>Open</b>.</p>
 	</div>
 	<div class="dl-quick rv">
-		<div class="qlabel">Up and running from source</div>
+		<div class="qlabel">Or run it from source</div>
 		<div class="qline"><span class="p">$</span> git clone <span class="dim">https://github.com/abhee235/cascade-ai</span></div>
 		<div class="qline"><span class="p">$</span> cd cascade-ai &amp;&amp; npm install</div>
 		<div class="qline"><span class="p">$</span> ollama pull qwen3:8b</div>
@@ -2134,7 +2144,8 @@ footer .wrap:last-of-type { padding-bottom: 60px; }
 					<b>Product</b>
 					<a href="#features">Features</a>
 					<a href="#how">How it works</a>
-					<a href="#download">Get started</a>
+					<a href="/blog/">Blog</a>
+					<a href="#download">Download</a>
 				</div>
 				<div class="foot-col">
 					<b>Open source</b>
@@ -2413,6 +2424,20 @@ if (navMenu) {
 	document.addEventListener('click', (e) => { if (navMenu.open && !navMenu.contains(e.target)) navMenu.open = false })
 	document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && navMenu.open) { navMenu.open = false; navMenu.querySelector('summary').focus() } })
 }
+</script>
+<script>
+// Promote the visitor's own OS to the primary download button. Without JS (or an unknown OS), Windows stays primary.
+// iPhone/iPad and Android are left alone: there is no mobile build, so the default is as good as any.
+(() => {
+	const p = ((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent || '').toLowerCase()
+	const os = /iphone|ipad|android/.test(navigator.userAgent.toLowerCase()) ? '' : p.includes('mac') ? 'mac' : p.includes('linux') || p.includes('x11') ? 'linux' : p.includes('win') ? 'win' : ''
+	if (!os) return
+	for (const a of document.querySelectorAll('[data-os]')) {
+		const mine = a.dataset.os === os
+		a.classList.toggle('btn-primary', mine)
+		a.classList.toggle('btn-ghost', !mine)
+	}
+})()
 </script>
 </body>
 </html>

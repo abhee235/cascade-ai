@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Running a coding agent on a small local model: what fails, and how Cascade recovers · appbuilder.sh</title>
+<meta name="description" content="We ran the same 9B Ollama model through Cascade and a widely used commercial coding agent on the same app-building task. The model's failures were identical; only one harness recovered on its own. Here is what we measured." />
+<link rel="canonical" href="https://appbuilder.sh/blog/small-local-models-coding-agent/" />
+<meta name="robots" content="index, follow, max-image-preview:large" />
+<meta property="og:type" content="article" />
+<meta property="og:title" content="Small local models fail the same way in every harness" />
+<meta property="og:description" content="Same 9B model, two agent harnesses, identical failures. One stopped and waited; the other recovered unattended. The measurements, and what they mean for running coding agents locally." />
+<meta property="og:url" content="https://appbuilder.sh/blog/small-local-models-coding-agent/" />
+<meta property="og:image" content="https://appbuilder.sh/assets/og-cover.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/blog/blog.css" />
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "BlogPosting",
+ "headline": "Small local models fail the same way in every harness. Cascade is built to carry what they drop.",
+ "description": "The same 9B Ollama model through Cascade and a commercial coding agent on one app-building task: identical failures, different recovery.",
+ "datePublished": "2026-10-17", "dateModified": "2026-10-17",
+ "author": {"@type": "Organization", "name": "The Cascade team", "url": "https://appbuilder.sh/"},
+ "publisher": {"@type": "Organization", "name": "Cascade", "url": "https://appbuilder.sh/"},
+ "mainEntityOfPage": "https://appbuilder.sh/blog/small-local-models-coding-agent/",
+ "image": "https://appbuilder.sh/assets/og-cover.png",
+ "about": {"@id": "https://appbuilder.sh/#app"}}
+</script>
+</head>
+<body>
+<header class="top"><div class="in">
+	<a class="brand" href="/"><svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#2dd4bf"/></linearGradient></defs><rect x="3" y="3" width="7" height="19" rx="3.5" fill="url(#g)"/><rect x="12.5" y="8" width="7" height="19" rx="3.5" fill="url(#g)" opacity="0.75"/><rect x="22" y="13" width="7" height="16" rx="3.5" fill="url(#g)" opacity="0.5"/></svg>Cascade</a>
+	<nav><a href="/blog/" aria-current="page">Blog</a><a href="https://github.com/abhee235/cascade-ai">GitHub</a><a class="dl" href="/#download">Download</a></nav>
+</div></header>
+
+<main class="post">
+<div class="eyebrow">Engineering · Local models</div>
+<h1>Small local models fail the same way in every harness. Cascade is built to carry what they drop.</h1>
+<p class="lede">We gave the same 9-billion-parameter model the same job in two coding-agent harnesses. It made the same mistakes in both. One harness stopped at every mistake and waited for us. The other noticed, corrected course, and finished on its own.</p>
+<p class="meta">17 October 2026 · The Cascade team · 7 min read</p>
+
+<p>Cascade is an open-source AI app builder that runs on your machine: you describe an app, an agent plans it, writes the code, builds it in a sandbox and checks it in a browser. It works with frontier models through your own API key, but the reason it exists is local models — the ones you run yourself with <a href="https://ollama.com">Ollama</a>, for free, with nothing leaving your machine.</p>
+<p>Local models in the 7–35B range are good enough to write real code. They are not good enough to <em>finish</em> real work reliably, and that gap is mostly not about intelligence. This post is about where it comes from, measured.</p>
+
+<h2>The experiment</h2>
+<p>One model, one task, two harnesses:</p>
+<ul>
+	<li><strong>Model:</strong> <code>qwen3.5:9b</code> through Ollama, with a 32K context window baked into the model tag. (Worth knowing: Ollama's OpenAI-compatible endpoint otherwise reloads the model at a 4,096-token default, silently.)</li>
+	<li><strong>Task:</strong> build a small web app from a prompt — the same app-building prompts Cascade's own evaluation suite uses.</li>
+	<li><strong>Harnesses:</strong> Cascade, and a widely used commercial coding agent built for frontier models, pointed at the same Ollama model through a small translation proxy.</li>
+</ul>
+<p>That other agent is excellent. It is also designed around frontier models, and that design choice turns out to be the whole story here.</p>
+
+<h2>Same model, same failures</h2>
+<p>In both harnesses the model dropped the ball in the same three ways:</p>
+<ol>
+	<li><strong>Wrong-shell commands.</strong> Windows <code>cmd</code> syntax — <code>cd /d C:\…</code> — sent to a bash shell, which fails.</li>
+	<li><strong>Stale writes.</strong> Editing a file from memory after it had changed on disk, so the edit is rejected.</li>
+	<li><strong>Turns that end on a thought.</strong> The model reasons about what to do next, then ends its turn without doing it.</li>
+</ol>
+<p>Because the failures were identical across two very different harnesses, they are properties of the model, not of either tool. That matters: you cannot prompt them away for good, and a better model will not show up next week to fix them for you. The harness has to handle them.</p>
+<h2>Where the harnesses differed</h2>
+<p>The other agent's contract assumes the model finishes its own work, so when the 9B model ended a turn with the job half done, the turn simply ended. We typed "continue" four or five times. It still did not converge. That is not a bug in that agent; it is a reasonable design for the models it was built for.</p>
+<p>Cascade ran the same kind of task unattended:</p>
+<div class="table"><table>
+	<thead><tr><th>Task (qwen3.5:9b, 32K context)</th><th>Result in Cascade</th><th>Time</th></tr></thead>
+	<tbody>
+		<tr><td>Todo app</td><td class="ok">Built and verified, unattended</td><td>212 s</td></tr>
+		<tr><td>Landing page with a hero section</td><td class="ok">Built and verified, unattended</td><td>164 s</td></tr>
+		<tr><td>Multi-page online store</td><td class="meh">Honest timeout — zero failed shell commands, no false "done"</td><td>—</td></tr>
+	</tbody>
+</table></div>
+<p>The store result is the ceiling of a 9B model on work that spans many files, and we would rather report it than hide it. The point is the difference in kind: the first two finished with nobody at the keyboard, and the third failed honestly instead of claiming success.</p>
+
+<h2>How Cascade carries what the model drops</h2>
+<p>Every recovery in Cascade is a small, specific check that fires only when there is evidence the model dropped something:</p>
+<ul>
+	<li><strong>A plan it has to keep.</strong> The agent writes a task list; a turn cannot quietly end with tasks still open.</li>
+	<li><strong>A verify step it cannot skip.</strong> "Done" requires the project to build and the app to load, not the model's word for it.</li>
+	<li><strong>Thought-only turns get a nudge to act.</strong> A turn that ends on reasoning is asked to carry out what it just decided.</li>
+	<li><strong>Loop breakers.</strong> Re-editing the same file over and over, or repeating the same browser call, is noticed and redirected.</li>
+	<li><strong>Freshness checks.</strong> An edit to a file that changed since the model read it is refused with a reason, so the model re-reads instead of guessing.</li>
+</ul>
+<figure class="narrow"><img src="checks.webp" width="900" height="720" alt="Cascade's activity log: a passing npm run build, the agent opening its own product and checkout pages in a browser, auditing them, and starting a smoke-test subagent" loading="lazy" /><figcaption>The verify half in practice (from a real build): build, open the pages in a browser, audit them, and hand the store to a smoke-test subagent.</figcaption></figure>
+<p>The design rule that keeps this honest: <strong>every check is triggered by evidence, never by model size.</strong> A frontier model that does its own verification never trips them, so they cost it nothing. A small model that drops a ball gets caught at the exact place it dropped it.</p>
+
+<h2>Two more things we measured the hard way</h2>
+<h3>The prompt matters more than you think</h3>
+<p>Same 9B model, same store task, four prompt revisions, one change at a time. The failure moved from pathological (a 30-minute timeout with zero builds attempted) to structural (a red build) to cosmetic (a green build that failed one brand-name check) — and the last run was the fastest, at 13.5 minutes. The model never changed. For local models, prompt architecture is a first-order variable, not polish.</p>
+<h3>Check your sampling before you blame the model</h3>
+<p>A 35B mixture-of-experts model failed every scenario in one batch while the 9B passed the same tests. Its signature was strange: it announced its next step ("Now wire the button:") and ended the turn. The cause was not capability. The test ran at temperature 0 while the model's Modelfile pinned a presence penalty of 1.5 — greedy decoding plus a strong penalty on repeated tokens steers a model away from writing code, which is mostly repeated tokens. With temperature 0.6 and a presence penalty of 0.5, the same family worked. Run <code>ollama show &lt;model&gt; --modelfile</code> and work out the effective settings before you conclude anything.</p>
+
+<h2>If you want to run a coding agent locally</h2>
+<ul>
+	<li>Give it at least <strong>32K of context</strong>, and 64K if you can. Bake <code>num_ctx</code> into the model tag so a client cannot silently reset it.</li>
+	<li>Use a model with <strong>tool calling</strong>. Don't run mixture-of-experts models greedily; use the sampling their model card recommends.</li>
+	<li>Treat <strong>9B as the floor</strong> for building whole apps, and expect a small multi-page app to be its ceiling today.</li>
+	<li>Pick a harness that <strong>checks the work</strong> rather than trusting the model's "done".</li>
+</ul>
+
+<section class="cta">
+	<h2>Try it on your own models</h2>
+	<p>Cascade is free and MIT licensed. Download the desktop app for Windows, macOS or Linux, point it at Ollama or your own key, and describe an app.</p>
+	<div class="row"><a class="btn primary" href="/#download">Download Cascade</a><a class="btn ghost" href="https://github.com/abhee235/cascade-ai">Read the source on GitHub</a></div>
+</section>
+<p style="margin-top:32px;color:var(--text-3);font-size:15px">Also on the blog: <a href="/blog/one-prompt-working-store/">One prompt, one turn, a working store: inside a real Cascade build</a>.</p>
+</main>
+<footer class="foot"><div class="in"><span>© 2026 Cascade · MIT licensed</span><a href="/">appbuilder.sh</a><a href="/blog/">Blog</a><a href="https://github.com/abhee235/cascade-ai">GitHub</a></div></footer>
+</body>
+</html>

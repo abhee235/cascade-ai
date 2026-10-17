@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Blog — building Cascade, the open-source local AI app builder · appbuilder.sh</title>
+<meta name="description" content="Engineering notes from building Cascade, an open-source AI app builder that runs on your machine: local models, coding agents, real builds and what we measured." />
+<link rel="canonical" href="https://appbuilder.sh/blog/" />
+<meta name="robots" content="index, follow, max-image-preview:large" />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="The Cascade blog" />
+<meta property="og:description" content="Engineering notes from building an open-source AI app builder that runs on your machine." />
+<meta property="og:url" content="https://appbuilder.sh/blog/" />
+<meta property="og:image" content="https://appbuilder.sh/assets/og-cover.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/blog/blog.css" />
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "Blog", "name": "The Cascade blog", "url": "https://appbuilder.sh/blog/",
+ "publisher": {"@type": "Organization", "name": "Cascade", "url": "https://appbuilder.sh/"},
+ "blogPost": [
+  {"@type": "BlogPosting", "headline": "One prompt, one turn, a working store: inside a real Cascade build", "url": "https://appbuilder.sh/blog/one-prompt-working-store/", "datePublished": "2026-10-17"},
+  {"@type": "BlogPosting", "headline": "Small local models fail the same way in every harness. Cascade is built to carry what they drop.", "url": "https://appbuilder.sh/blog/small-local-models-coding-agent/", "datePublished": "2026-10-17"}
+ ]}
+</script>
+</head>
+<body>
+<header class="top"><div class="in">
+	<a class="brand" href="/"><svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#2dd4bf"/></linearGradient></defs><rect x="3" y="3" width="7" height="19" rx="3.5" fill="url(#g)"/><rect x="12.5" y="8" width="7" height="19" rx="3.5" fill="url(#g)" opacity="0.75"/><rect x="22" y="13" width="7" height="16" rx="3.5" fill="url(#g)" opacity="0.5"/></svg>Cascade</a>
+	<nav><a href="/blog/" aria-current="page">Blog</a><a href="https://github.com/abhee235/cascade-ai">GitHub</a><a class="dl" href="/#download">Download</a></nav>
+</div></header>
+
+<main class="list">
+	<div class="eyebrow">Blog</div>
+	<h1>Building Cascade in the open</h1>
+	<p class="lede" style="margin:16px 0 40px">Engineering notes from building an open-source AI app builder that runs on your machine: what local models get wrong, what a real build looks like, and what we measured along the way.</p>
+
+	<a class="card" href="/blog/one-prompt-working-store/">
+		<img src="/blog/cover-store.webp" width="1200" height="750" alt="Night Shift Supply, the store Cascade built from one prompt" loading="lazy" />
+		<div><div class="eyebrow">Build log · 6 min read</div><h2>One prompt, one turn, a working store: inside a real Cascade build</h2><p>Plan, code, build, browser checks — every step of a twelve-minute run, from its own trace, and the bugs the earlier runs exposed.</p></div>
+	</a>
+	<a class="card" href="/blog/small-local-models-coding-agent/">
+		<img src="/blog/small-local-models-coding-agent/checks.webp" width="900" height="720" alt="Cascade's activity log checking its own work in a browser" loading="lazy" />
+		<div><div class="eyebrow">Engineering · 7 min read</div><h2>Small local models fail the same way in every harness. Cascade is built to carry what they drop.</h2><p>The same 9B Ollama model through two coding-agent harnesses: identical failures, very different recovery. The measurements, and how to run agents locally.</p></div>
+	</a>
+</main>
+<footer class="foot"><div class="in"><span>© 2026 Cascade · MIT licensed</span><a href="/">appbuilder.sh</a><a href="/blog/">Blog</a><a href="https://github.com/abhee235/cascade-ai">GitHub</a></div></footer>
+</body>
+</html>

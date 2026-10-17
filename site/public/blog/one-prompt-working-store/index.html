@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>One prompt, one turn, a working online store: inside a real AI app builder run · appbuilder.sh</title>
+<meta name="description" content="We typed one prompt into Cascade, an open-source AI app builder, and it built a working merch store in about twelve minutes: plan, code, build, browser checks. Every step, from its own trace." />
+<link rel="canonical" href="https://appbuilder.sh/blog/one-prompt-working-store/" />
+<meta name="robots" content="index, follow, max-image-preview:large" />
+<meta property="og:type" content="article" />
+<meta property="og:title" content="One prompt, one turn, a working store" />
+<meta property="og:description" content="A real Cascade build, step by step: the prompt, the plan, the code, the browser checks, and the store it produced." />
+<meta property="og:url" content="https://appbuilder.sh/blog/one-prompt-working-store/" />
+<meta property="og:image" content="https://appbuilder.sh/blog/one-prompt-working-store/store-hero.webp" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/blog/blog.css" />
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "BlogPosting",
+ "headline": "One prompt, one turn, a working store: inside a real Cascade build",
+ "description": "A real build in Cascade, the open-source AI app builder: the prompt, the plan, the code, the browser checks and the store it produced.",
+ "datePublished": "2026-10-17", "dateModified": "2026-10-17",
+ "author": {"@type": "Organization", "name": "The Cascade team", "url": "https://appbuilder.sh/"},
+ "publisher": {"@type": "Organization", "name": "Cascade", "url": "https://appbuilder.sh/"},
+ "mainEntityOfPage": "https://appbuilder.sh/blog/one-prompt-working-store/",
+ "image": "https://appbuilder.sh/blog/one-prompt-working-store/store-hero.webp",
+ "about": {"@id": "https://appbuilder.sh/#app"}}
+</script>
+</head>
+<body>
+<header class="top"><div class="in">
+	<a class="brand" href="/"><svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#2dd4bf"/></linearGradient></defs><rect x="3" y="3" width="7" height="19" rx="3.5" fill="url(#g)"/><rect x="12.5" y="8" width="7" height="19" rx="3.5" fill="url(#g)" opacity="0.75"/><rect x="22" y="13" width="7" height="16" rx="3.5" fill="url(#g)" opacity="0.5"/></svg>Cascade</a>
+	<nav><a href="/blog/" aria-current="page">Blog</a><a href="https://github.com/abhee235/cascade-ai">GitHub</a><a class="dl" href="/#download">Download</a></nav>
+</div></header>
+
+<main class="post">
+<div class="eyebrow">Build log · One prompt</div>
+<h1>One prompt, one turn, a working store: inside a real Cascade build</h1>
+<p class="lede">We typed one prompt into Cascade and let it run. About twelve minutes later there was a working merch store — product pages, a cart, a checkout, light and dark mode — and a full record of how it got there. Here is that record.</p>
+<p class="meta">17 October 2026 · The Cascade team · 6 min read</p>
+
+<figure><video src="cascade-15s.mp4" poster="store-hero.webp" controls muted playsinline preload="none" width="1280" height="720"></video><figcaption>Fifteen seconds of the build: the prompt goes in, the agent checks its own work, the store comes out.</figcaption></figure>
+
+<h2>The prompt</h2>
+<p>Cascade is an open-source AI app builder that runs on your machine. For this build we started from a blank project ("None — design from scratch", no template) and used GPT-6 Sol through our own API key, to show what the harness does with a strong model. The prompt opened like this:</p>
+<blockquote>Build Night Shift Supply — a merch store for developers who ship after midnight. It should feel like a premium independent apparel brand, not a template: confident type, generous space, real product photography, and one clear accent colour.</blockquote>
+<p>The rest of it — about 600 words — pinned what a designer would: a type system and palette for both themes, the page layout section by section, eight named products with prices, how the cart and checkout behave, rules for imagery, and a quality bar ("look right at 390px and 1440px, no console errors, finish by checking it in the browser"). A longer prompt is not a trick. It is the same brief you would give a person.</p>
+
+<h2>What the agent did</h2>
+<p>Cascade records every step of a turn, so this is not a reconstruction. In order:</p>
+<ol>
+	<li><strong>Planned.</strong> A planner wrote <code>PLAN.md</code>: the goal, the four views (home, product, checkout, confirmation), the design decisions and the data model.</li>
+	<li><strong>Loaded its playbooks</strong> for design, commerce, landing pages and app architecture.</li>
+	<li><strong>Wrote the app in batches</strong> — theme and global styles, then the product data and the logo, then the header, cards and catalog, then the product gallery, cart drawer, checkout and confirmation.</li>
+	<li><strong>Built it.</strong> The first <code>npm run build</code> failed; it read the error, fixed it, and built again. Later builds passed.</li>
+	<li><strong>Checked its own work in a browser.</strong> It opened its own product and checkout pages, audited them, and handed the running store to a smoke-test subagent.</li>
+	<li><strong>Closed its plan</strong> — all three tasks done.</li>
+</ol>
+<figure><img src="builder-preview.webp" width="1600" height="900" alt="The Cascade builder: the agent's transcript on the left, the finished store running in the live preview on the right" loading="lazy" /><figcaption>The builder at the end of the turn: the transcript on the left, the store running in the live preview on the right.</figcaption></figure>
+<div class="table"><table>
+	<thead><tr><th>The run, by the numbers (from the trace)</th><th></th></tr></thead>
+	<tbody>
+		<tr><td>Prompts from us</td><td>1 — one agent turn, start to finish</td></tr>
+		<tr><td>Recorded steps (model calls and tool calls)</td><td>254</td></tr>
+		<tr><td>Wall-clock time</td><td>12 min 12 s</td></tr>
+		<tr><td>Tokens the model wrote</td><td>34.8k</td></tr>
+		<tr><td>Plan tasks closed</td><td>3 of 3</td></tr>
+	</tbody>
+</table></div>
+<figure class="narrow"><img src="checks.webp" width="900" height="720" alt="Activity rows: npm run build passing, Browser open /product/midnight-commit-hoodie, Browser audit, a smoke-test subagent, Browser open /checkout" loading="lazy" /><figcaption>The verify half of the turn: build, open its own pages, audit them, run a smoke test.</figcaption></figure>
+<figure><img src="observatory.webp" width="1600" height="1039" alt="Cascade's Observatory: the span tree of the run, with the planner sub-agent, every model turn with its token counts, and every tool call" loading="lazy" /><figcaption>The same run in the Observatory, built into Cascade: every model turn with its tokens, every tool, and where the time went.</figcaption></figure>
+
+<h2>What it built</h2>
+<p>A store you can actually use: eight products with filters and sorting, product pages with a gallery, colour swatches and sizes (some out of stock), a cart drawer that remembers what you added and shows how far you are from free shipping, and a one-page checkout with validation and an order confirmation. It has a light and a dark theme, and it holds up on a phone.</p>
+<figure><img src="store-hero.webp" width="1600" height="1000" alt="Night Shift Supply's hero: the headline 'Goods for people who ship after midnight.' beside a photo of a developer at a desk at night" loading="lazy" /><figcaption>The hero, in the dark theme.</figcaption></figure>
+<figure><img src="store-grid.webp" width="1600" height="1000" alt="The 'Just dropped' product grid in the light theme: hoodie, tee, cap and mug, each with a price and Add to cart" loading="lazy" /><figcaption>The product grid in the light theme. Where no clean product photo existed, the prompt asked for drawn, on-brand mockups instead of a wrong photo.</figcaption></figure>
+<figure><img src="store-cart.webp" width="1600" height="1000" alt="The cart drawer: line items with quantity steppers and a free-shipping progress message" loading="lazy" /><figcaption>The cart drawer and its free-shipping meter.</figcaption></figure>
+<p>Its own final report was candid: it said the build passed and the main flows worked in the browser, and that it had not run the 390-pixel phone check itself. We ran that afterwards — no sideways scrolling at phone width, in either theme.</p>
+
+<h2>What it took to get here</h2>
+<p>This was the fourth run of this prompt, and each earlier run taught us something about Cascade, not about the model:</p>
+<ul>
+	<li><strong>Run 1</strong> hit a Cascade bug: the model was given an 8K context window instead of its real one, so it spent the turn compacting its own memory. Fixed in the model registry.</li>
+	<li><strong>Run 2</strong> looked good but could not check itself — the live preview lost a race with the sandbox starting up — and it packed whole components onto single lines. Both fixed: the preview now waits for the server properly, and Cascade formats the code the agent wrote when each turn ends.</li>
+	<li><strong>Run 3</strong> was nearly there, but some product photos showed other companies' logos. The fix was in the prompt: a stricter imagery section, with drawn mockups as the fallback.</li>
+</ul>
+<figure><img src="code-home.webp" width="1600" height="863" alt="The Code tab in Cascade showing the generated Home.tsx, formatted, with the headline text on its own line" loading="lazy" /><figcaption>The generated code, after turn-end formatting. The headline you see on the site is line 35.</figcaption></figure>
+<p>That is the part we care about most. A build that fails is a bug report. Each of these is now a regression test, and the next person's first run gets the fixed version.</p>
+
+<section class="cta">
+	<h2>Build something with it</h2>
+	<p>Cascade is free and MIT licensed. It runs on your own machine with local models through Ollama, or with your own API key.</p>
+	<div class="row"><a class="btn primary" href="/#download">Download Cascade</a><a class="btn ghost" href="https://github.com/abhee235/cascade-ai">Read the source on GitHub</a></div>
+</section>
+<p style="margin-top:32px;color:var(--text-3);font-size:15px">Also on the blog: <a href="/blog/small-local-models-coding-agent/">Small local models fail the same way in every harness</a>.</p>
+</main>
+<footer class="foot"><div class="in"><span>© 2026 Cascade · MIT licensed</span><a href="/">appbuilder.sh</a><a href="/blog/">Blog</a><a href="https://github.com/abhee235/cascade-ai">GitHub</a></div></footer>
+</body>
+</html>
